@@ -13,6 +13,6 @@ func ReceiveMsgLoop(conn *websocket.Conn) {
 			fmt.Println("Read error:", err)
 			break
 		}
-		fmt.Printf("%s: %s \n", conn.RemoteAddr(), string(msg))
+		fmt.Printf("%s: %s", conn.RemoteAddr(), string(msg))
 	}
 }

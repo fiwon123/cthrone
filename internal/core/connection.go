@@ -10,4 +10,6 @@ import (
 func Connect(connectIP string, app *app.Data) {
 	url := fmt.Sprintf("ws://%s:%d/ws", connectIP, app.Port)
 	go chat.Connect(url)
+
+	select {}
 }
