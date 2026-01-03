@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/fiwon123/cthrone/internal/handlers/chat"
 	"github.com/gorilla/websocket"
 )
 
@@ -18,14 +19,10 @@ func StartServer(port int) {
 			return
 		}
 		defer conn.Close()
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				log.Println("Read error:", err)
-				break
-			}
-			fmt.Println("Received:", string(msg))
-		}
+
+		go chat.ReceiveMsgLoop(conn)
+
+		select {}
 	})
 
 	log.Println("WebSocket server listening on port", port)

@@ -5,11 +5,13 @@ import (
 	"os"
 
 	"github.com/fiwon123/cthrone/internal/core"
+	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/spf13/cobra"
 )
 
-var destIP string
-var name string
+var connectIP string
+var port int
+var host bool
 
 var checkVersion bool
 
@@ -29,7 +31,16 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		core.Init(name)
+		app := app.New(port)
+
+		if host {
+			core.Host(app)
+		} else if connectIP != "" {
+			core.Connect(connectIP, app)
+		} else {
+			core.Scan()
+		}
+
 	},
 }
 
@@ -43,7 +54,8 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&destIP, "dest", "d", "", "Help message for toggle")
-	rootCmd.Flags().StringVarP(&name, "name", "n", "", "name device")
+	rootCmd.Flags().StringVarP(&connectIP, "connect", "c", "", "connect to a host cthrone ip")
+	rootCmd.Flags().BoolVarP(&host, "host", "n", false, "host cthrone to receive connection")
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
+	rootCmd.Flags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
 }
