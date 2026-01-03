@@ -8,6 +8,7 @@ import (
 )
 
 var destIP string
+var name string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -16,7 +17,7 @@ var rootCmd = &cobra.Command{
 	Long:  `CThrone is a tool to manage how two or more internal devices communicate. You can configure protocol, encryption, output...`,
 
 	Run: func(cmd *cobra.Command, args []string) {
-		core.Init(destIP)
+		core.Init(name)
 	},
 }
 
@@ -31,4 +32,5 @@ func Execute() {
 
 func init() {
 	rootCmd.Flags().StringVarP(&destIP, "dest", "d", "", "Help message for toggle")
+	rootCmd.Flags().StringVarP(&name, "name", "n", "", "name device")
 }
