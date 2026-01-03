@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/fiwon123/cthrone/internal/core"
@@ -10,6 +11,11 @@ import (
 var destIP string
 var name string
 
+var checkVersion bool
+
+// Version is popualated when building with Makefile
+var Version = "vx.x.x"
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "cthrone",
@@ -17,6 +23,12 @@ var rootCmd = &cobra.Command{
 	Long:  `CThrone is a tool to manage how two or more internal devices communicate. You can configure protocol, encryption, output...`,
 
 	Run: func(cmd *cobra.Command, args []string) {
+
+		if checkVersion {
+			fmt.Println(Version)
+			return
+		}
+
 		core.Init(name)
 	},
 }
@@ -33,4 +45,5 @@ func Execute() {
 func init() {
 	rootCmd.Flags().StringVarP(&destIP, "dest", "d", "", "Help message for toggle")
 	rootCmd.Flags().StringVarP(&name, "name", "n", "", "name device")
+	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 }
