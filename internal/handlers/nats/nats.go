@@ -1,6 +1,7 @@
 package natshandler
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/nats-io/nats.go"
@@ -15,30 +16,26 @@ func Connect(ch chan *nats.Conn) {
 	}
 	defer nc.Close()
 
-	log.Println("Connected to NATS server")
-
 	ch <- nc
 
 	select {}
 }
 
-func PublishMessages(nc *nats.Conn) {
+func PublishMessages(nc *nats.Conn, message string, subject string) error {
 
-	err := nc.Publish("greeting", []byte("Hello NATS!"))
+	err := nc.Publish(subject, []byte(message))
 	if err != nil {
-		log.Printf("Error publishing: %v", err)
-		return
+		return fmt.Errorf("Error publishing: %v", err)
 	}
 
 	nc.Flush()
 
-	log.Println("Messages published successfully")
-
+	return nil
 }
 
-func SubscribeToMessages(nc *nats.Conn) {
+func SubscribeToMessages(nc *nats.Conn, subject string) {
 
-	sub, err := nc.Subscribe("greeting", func(m *nats.Msg) {
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
 		log.Printf("Received message: %s", string(m.Data))
 	})
 

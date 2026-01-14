@@ -6,11 +6,13 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-func Host(app *app.Data) {
+func Host(subject string, app *app.Data) {
 	ch := make(chan *nats.Conn)
 	go natshandler.Connect(ch)
 
-	natshandler.SubscribeToMessages(<-ch)
+	conn := <-ch
+
+	natshandler.SubscribeToMessages(conn, subject)
 
 	select {}
 }

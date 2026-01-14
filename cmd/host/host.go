@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var natsFlag bool
+var natsFlag string
 
 // Cmd represents the host command
 var Cmd = &cobra.Command{
@@ -16,12 +16,12 @@ var Cmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		app := app.New(8080)
 
-		if natsFlag {
-			natscore.Host(app)
+		if natsFlag != "" {
+			natscore.Host(natsFlag, app)
 		}
 	},
 }
 
 func init() {
-	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "host a nats server")
+	Cmd.Flags().StringVar(&natsFlag, "nats", "", "host a nats server")
 }
