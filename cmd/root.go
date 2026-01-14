@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fiwon123/cthrone/internal/core"
-	"github.com/fiwon123/cthrone/internal/data/app"
+	connectcmd "github.com/fiwon123/cthrone/cmd/connect"
+	hostcmd "github.com/fiwon123/cthrone/cmd/host"
+	scancmd "github.com/fiwon123/cthrone/cmd/scan"
 	"github.com/spf13/cobra"
 )
 
-var connectIP string
 var port int
-var host bool
 
 var checkVersion bool
 
@@ -31,16 +30,6 @@ var rootCmd = &cobra.Command{
 			return
 		}
 
-		app := app.New(port)
-
-		if host {
-			core.Host(app)
-		} else if connectIP != "" {
-			core.Connect(connectIP, app)
-		} else {
-			core.Scan()
-		}
-
 	},
 }
 
@@ -54,8 +43,10 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().StringVarP(&connectIP, "connect", "c", "", "connect to a host cthrone ip")
-	rootCmd.Flags().BoolVarP(&host, "host", "n", false, "host cthrone to receive connection")
+	rootCmd.AddCommand(connectcmd.Cmd)
+	rootCmd.AddCommand(hostcmd.Cmd)
+	rootCmd.AddCommand(scancmd.Cmd)
+
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 	rootCmd.Flags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
 }
