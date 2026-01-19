@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Check PR source branch
         run: |
-          if [[ "${{ github.head_ref }}" != "dev" ]]; then
-            echo "Only PRs from 'dev' to 'main' are allowed."
+          if [[ ! "${{ github.head_ref }}" =~ ^(release)/ ]]; then
+            echo "Only PRs from 'release/*' to 'main' are allowed."
             exit 1
           fi
