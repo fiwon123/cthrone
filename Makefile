@@ -8,18 +8,23 @@ INJECT_VERSION:= github.com/fiwon123/cthrone/cmd.Version
 # Detect last tag and increment patch
 VERSION := $(shell git describe --tags --always)
 
-WINDOWS_BIN := $(BUILD_DIR)/$(APP_NAME).exe
-SHORT_WINDOWS_BIN := $(BUILD_DIR)/$(APP_NAME_SHORT).exe
-WINDOWS_ZIP := $(BUILD_DIR)/$(APP_NAME)_$(VERSION)_windows.zip
+WINDOWS_BUILD:= $(BUILD_DIR)/Windows
+WINDOWS_BIN := $(WINDOWS_BUILD)/$(APP_NAME).exe
+SHORT_WINDOWS_BIN := $(WINDOWS_BUILD)/$(APP_NAME_SHORT).exe
+WINDOWS_ZIP := $(WINDOWS_BUILD)/$(APP_NAME)_$(VERSION)_windows.zip
 WINDOWS_SCRIPT :=  $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat
 
-LINUX_BIN := $(BUILD_DIR)/$(APP_NAME)
-SHORT_LINUX_BIN := $(BUILD_DIR)/$(APP_NAME_SHORT)
-LINUX_TAR := $(BUILD_DIR)/$(APP_NAME)_$(VERSION)_linux.tar.gz
+LINUX_BUILD:= $(BUILD_DIR)/Linux
+LINUX_BIN := $(LINUX_BUILD)/$(APP_NAME)
+SHORT_LINUX_BIN := $(LINUX_BUILD)/$(APP_NAME_SHORT)
+LINUX_TAR := $(LINUX_BUILD)/$(APP_NAME)_$(VERSION)_linux.tar.gz
 LINUX_SCRIPT :=  $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh
 
-ANDROID_BIN := $(BUILD_DIR)/$(APP_NAME)
-SHORT_ANDROID_BIN := $(BUILD_DIR)/$(APP_NAME_SHORT)
+ANDROID_BUILD:= $(BUILD_DIR)/Android
+ANDROID_BIN := $(ANDROID_BUILD)/$(APP_NAME)
+SHORT_ANDROID_BIN := $(ANDROID_BUILD)/$(APP_NAME_SHORT)
+ANDROID_ZIP := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.zip
+ANDROID_TAR := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.tar.gz
 
 
 .PHONY: all windows linux android zip_linux zip_windows clean release
@@ -52,13 +57,20 @@ zip_windows: windows
 # Compress Linux binary
 zip_linux: linux
 	tar -czvf $(LINUX_TAR) \
-	          -C $(BUILD_DIR) $(notdir $(LINUX_BIN)) $(notdir $(SHORT_LINUX_BIN)) \
-	          -C ../$(SCRIPTS_DIR) $(notdir $(LINUX_SCRIPT)) ../README.md ../LICENSE ../LICENSE-APACHE ../NOTICE
+	          -C $(LINUX_BUILD) $(notdir $(LINUX_BIN)) $(notdir $(SHORT_LINUX_BIN)) \
+	          -C ../../$(SCRIPTS_DIR) $(notdir $(LINUX_SCRIPT)) ../README.md ../LICENSE ../LICENSE-APACHE ../NOTICE
+
+# Compress Android binary
+zip_android: android
+	zip -j $(ANDROID_ZIP) $(ANDROID_BIN) $(SHORT_ANDROID_BIN) README.md LICENSE LICENSE-APACHE NOTICE
+	tar -czvf $(ANDROID_TAR) \
+	          -C $(ANDROID_BUILD) $(notdir $(ANDROID_BIN)) $(notdir $(SHORT_ANDROID_BIN)) \
+	          -C ../../ README.md LICENSE LICENSE-APACHE NOTICE
 
 # Clean build folder
 clean:
 	rm -rf $(BUILD_DIR)
 
 # Build & compress everything
-release: zip_windows zip_linux android
+release: zip_windows zip_linux zip_android
 	@echo "Release ready: $(VERSION)"
