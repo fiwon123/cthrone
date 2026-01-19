@@ -1,0 +1,17 @@
+name: Restrict PR to dev
+
+on:
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  restrict-pr-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR source branch
+        run: |
+          if [[ ! "${{ github.head_ref }}" =~ ^(feature|fix|hotfix)/ ]]; then
+            echo "Only PRs from 'feature|fix|hotfix/*' to 'dev' are allowed."
+            exit 1
+          fi
