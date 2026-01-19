@@ -1,7 +1,8 @@
 package scancmd
 
 import (
-	"github.com/fiwon123/cthrone/internal/core"
+	core "github.com/fiwon123/cthrone/internal/core/websocket"
+	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/spf13/cobra"
 )
 
@@ -11,7 +12,11 @@ var Cmd = &cobra.Command{
 	Short: "scan available IPs",
 	Long:  `scan available IPs`,
 	Run: func(cmd *cobra.Command, args []string) {
-		core.Scan()
+		port, _ := cmd.Flags().GetInt("port")
+
+		app := app.New(port)
+
+		core.Scan(app)
 	},
 }
 

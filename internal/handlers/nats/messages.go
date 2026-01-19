@@ -7,20 +7,6 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-func Connect(ch chan *nats.Conn) {
-
-	// Connect to NATS server
-	nc, err := nats.Connect(nats.DefaultURL)
-	if err != nil {
-		log.Fatal("Failed to connect to NATS:", err)
-	}
-	defer nc.Close()
-
-	ch <- nc
-
-	select {}
-}
-
 func PublishMessages(nc *nats.Conn, message string, subject string) error {
 
 	err := nc.Publish(subject, []byte(message))
@@ -33,7 +19,7 @@ func PublishMessages(nc *nats.Conn, message string, subject string) error {
 	return nil
 }
 
-func SubscribeToMessages(nc *nats.Conn, subject string) {
+func SubscribeMessages(nc *nats.Conn, subject string) {
 
 	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
 		log.Printf("Received message: %s", string(m.Data))

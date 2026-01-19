@@ -3,6 +3,7 @@ package natscore
 import (
 	"github.com/fiwon123/cthrone/internal/data/app"
 	natshandler "github.com/fiwon123/cthrone/internal/handlers/nats"
+
 	"github.com/nats-io/nats.go"
 )
 
@@ -12,7 +13,7 @@ func Host(subject string, app *app.Data) {
 
 	conn := <-ch
 
-	natshandler.SubscribeToMessages(conn, subject)
+	natshandler.SubscribeMessages(conn, subject)
 
 	select {}
 }
