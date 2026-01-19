@@ -15,7 +15,9 @@ var Cmd = &cobra.Command{
 	Short: "host server",
 	Long:  `host server`,
 	Run: func(cmd *cobra.Command, args []string) {
-		app := app.New(8080)
+		port, _ := cmd.Flags().GetInt("port")
+
+		app := app.New(port)
 
 		if natsFlag != "" {
 			natscore.Host(natsFlag, app)

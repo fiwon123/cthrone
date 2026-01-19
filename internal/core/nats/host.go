@@ -13,7 +13,7 @@ func Host(subject string, app *app.Data) {
 
 	conn := <-ch
 
-	natshandler.SubscribeToMessages(conn, subject)
+	natshandler.SubscribeMessages(conn, subject)
 
 	select {}
 }

@@ -6,5 +6,5 @@ import (
 )
 
 func Host(app *app.Data) {
-	websockethandler.StartServer(app.Port)
+	websockethandler.Host(app.Port)
 }

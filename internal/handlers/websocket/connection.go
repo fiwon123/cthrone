@@ -7,7 +7,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func Connect(url string) {
+func Connect(ip string, port int) {
+	url := fmt.Sprintf("ws://%s:%d/ws", ip, port)
+
 	time.Sleep(1 * time.Second)
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
@@ -17,7 +19,9 @@ func Connect(url string) {
 
 	fmt.Println("Connected to", url)
 
-	go SendMsgLoop(conn)
+	currentInput := []rune{}
+	go sendMsgLoop(conn, &currentInput)
+	go receiveMsgLoop(conn, &currentInput)
 
 	select {}
 }

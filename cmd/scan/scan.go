@@ -12,7 +12,9 @@ var Cmd = &cobra.Command{
 	Short: "scan available IPs",
 	Long:  `scan available IPs`,
 	Run: func(cmd *cobra.Command, args []string) {
-		app := app.New(8080)
+		port, _ := cmd.Flags().GetInt("port")
+
+		app := app.New(port)
 
 		core.Scan(app)
 	},

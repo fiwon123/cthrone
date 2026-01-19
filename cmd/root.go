@@ -48,5 +48,5 @@ func init() {
 	rootCmd.AddCommand(scancmd.Cmd)
 
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
-	rootCmd.Flags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
+	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
 }

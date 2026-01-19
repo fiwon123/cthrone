@@ -15,7 +15,9 @@ var Cmd = &cobra.Command{
 	Short: "connect to a device",
 	Long:  `connect to a device"`,
 	Run: func(cmd *cobra.Command, args []string) {
-		app := app.New(8080)
+		port, _ := cmd.Flags().GetInt("port")
+
+		app := app.New(port)
 
 		if natsFlag != "" {
 			natscore.Connect(natsFlag, app)
