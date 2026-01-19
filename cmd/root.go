@@ -21,7 +21,7 @@ var Version = "vx.x.x"
 var rootCmd = &cobra.Command{
 	Use:   "cthrone",
 	Short: "CThrone is a tool to use as an internal chat to send message from a device to another one.",
-	Long:  `CThrone is a tool to manage how two or more internal devices communicate. You can configure protocol, encryption, output...`,
+	Long:  `CThrone is a tool to manage how two or more internal devices communicate.`,
 
 	Run: func(cmd *cobra.Command, args []string) {
 

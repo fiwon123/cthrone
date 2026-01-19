@@ -13,7 +13,10 @@ var natsFlag bool
 var Cmd = &cobra.Command{
 	Use:   "connect",
 	Short: "connect to a device",
-	Long:  `connect to a device"`,
+	Long: `connect to a device to send and receive messages.
+
+On websocket connection devices can send and receive message from host or connect device
+On nats connection only host receive message and only connect device send message`,
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetInt("port")
 

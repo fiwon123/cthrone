@@ -12,8 +12,11 @@ var natsFlag bool
 // Cmd represents the host command
 var Cmd = &cobra.Command{
 	Use:   "host",
-	Short: "host server",
-	Long:  `host server`,
+	Short: "host device",
+	Long: `host device is the main device to receive message.
+
+On websocket connection devices can send and receive message from host or connect device
+On nats connection only host receive message and only connect device send message`,
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetInt("port")
 

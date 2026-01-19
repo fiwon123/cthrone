@@ -10,7 +10,11 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "scan",
 	Short: "scan available IPs",
-	Long:  `scan available IPs`,
+	Long: `scan available local IPs starting with '192.168.'
+
+Usage:
+	cthrone scan
+`,
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetInt("port")
 

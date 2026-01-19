@@ -6,7 +6,7 @@ SCRIPT_NAME := add_to_path
 INJECT_VERSION:= github.com/fiwon123/cthrone/cmd.Version
 
 # Detect last tag and increment patch
-VERSION := $(shell git describe --tags --dirty --always)
+VERSION := $(shell git describe --tags --always)
 
 WINDOWS_BIN := $(BUILD_DIR)/$(APP_NAME).exe
 SHORT_WINDOWS_BIN := $(BUILD_DIR)/$(APP_NAME_SHORT).exe
