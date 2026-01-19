@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Connect to websocket host
 func Connect(ip string, port int) {
 	url := fmt.Sprintf("ws://%s:%d/ws", ip, port)
 

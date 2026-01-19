@@ -7,6 +7,7 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// Publish Message using a string subject
 func PublishMessages(nc *nats.Conn, message string, subject string) error {
 
 	err := nc.Publish(subject, []byte(message))
@@ -19,6 +20,7 @@ func PublishMessages(nc *nats.Conn, message string, subject string) error {
 	return nil
 }
 
+// Subscribe Message using a string subject
 func SubscribeMessages(nc *nats.Conn, subject string) {
 
 	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {

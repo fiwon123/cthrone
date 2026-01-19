@@ -6,9 +6,9 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// Connect to NATS server
 func Connect(ch chan *nats.Conn) {
 
-	// Connect to NATS server
 	nc, err := nats.Connect(nats.DefaultURL)
 	if err != nil {
 		log.Fatal("Failed to connect to NATS:", err)

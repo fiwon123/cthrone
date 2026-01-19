@@ -7,6 +7,7 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// Host using subject string
 func Host(subject string, app *app.Data) {
 	ch := make(chan *nats.Conn)
 	go natshandler.Connect(ch)

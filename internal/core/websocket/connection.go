@@ -5,6 +5,7 @@ import (
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
 )
 
+// Connect receive a args with ip for establish connection
 func Connect(args []string, app *app.Data) {
 	connectIP := ""
 	if len(args) > 0 {

@@ -10,6 +10,7 @@ import (
 
 var upgrader = websocket.Upgrader{}
 
+// host to websocket connection
 func Host(port int) {
 	http.HandleFunc("/ws", openConnection)
 

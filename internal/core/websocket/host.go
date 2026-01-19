@@ -5,6 +5,7 @@ import (
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
 )
 
+// Host open connection
 func Host(app *app.Data) {
 	websockethandler.Host(app.Port)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/data/app"
 )
 
+// Scan all available local ips
 func Scan(app *app.Data) {
 	myIP, err := getLocalIP()
 	if err != nil {
@@ -17,9 +18,11 @@ func Scan(app *app.Data) {
 		return
 	}
 
+	fmt.Println("MyLocalIP: ", myIP)
 	mySubnet := subnetFromIP(myIP)
 	timeout := 300 * time.Millisecond
 
+	fmt.Println("Scanning...")
 	for i := 1; i <= 254; i++ {
 		ip := fmt.Sprintf("%s%d", mySubnet, i)
 		go func(ip string) {
@@ -30,6 +33,8 @@ func Scan(app *app.Data) {
 			}
 		}(ip)
 	}
+
+	fmt.Println("Done")
 
 	time.Sleep(1 * time.Second)
 }
@@ -44,7 +49,10 @@ func getLocalIP() (string, error) {
 		if ipnet, ok := addr.(*net.IPNet); ok {
 			ip := ipnet.IP
 			if ip.To4() != nil && !ip.IsLoopback() {
-				return ip.String(), nil
+
+				if strings.Contains(ip.String(), "192.168.") {
+					return ip.String(), nil
+				}
 			}
 		}
 	}
