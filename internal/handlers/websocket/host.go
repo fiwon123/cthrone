@@ -1,11 +1,10 @@
-package ws
+package websockethandler
 
 import (
 	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/fiwon123/cthrone/internal/handlers/chat"
 	"github.com/gorilla/websocket"
 )
 
@@ -20,7 +19,7 @@ func StartServer(port int) {
 		}
 		defer conn.Close()
 
-		go chat.ReceiveMsgLoop(conn)
+		go receiveMsgLoop(conn)
 
 		select {}
 	})

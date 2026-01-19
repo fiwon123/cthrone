@@ -1,4 +1,4 @@
-package chat
+package websockethandler
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func ReceiveMsgLoop(conn *websocket.Conn) {
+func receiveMsgLoop(conn *websocket.Conn) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {

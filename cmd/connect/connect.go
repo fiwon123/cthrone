@@ -1,8 +1,8 @@
 package connectcmd
 
 import (
-	"github.com/fiwon123/cthrone/internal/core"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
+	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +20,7 @@ var Cmd = &cobra.Command{
 		if natsFlag != "" {
 			natscore.Connect(natsFlag, app)
 		} else {
-			core.Connect("192.168.0.1", app)
+			websocketcore.Connect(args, app)
 		}
 	},
 }

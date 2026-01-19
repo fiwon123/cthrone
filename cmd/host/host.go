@@ -2,6 +2,7 @@ package hostcmd
 
 import (
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
+	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,8 @@ var Cmd = &cobra.Command{
 
 		if natsFlag != "" {
 			natscore.Host(natsFlag, app)
+		} else {
+			websocketcore.Host(app)
 		}
 	},
 }
