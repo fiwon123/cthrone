@@ -8,7 +8,12 @@ import (
 )
 
 // Host using subject string
-func Host(subject string, app *app.Data) {
+func Host(args []string, app *app.Data) {
+	subject := "chat"
+	if len(args) > 0 {
+		subject = args[0]
+	}
+
 	ch := make(chan *nats.Conn)
 	go natshandler.Connect(ch)
 

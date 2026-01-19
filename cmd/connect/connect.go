@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var natsFlag string
+var natsFlag bool
 
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
@@ -19,8 +19,8 @@ var Cmd = &cobra.Command{
 
 		app := app.New(port)
 
-		if natsFlag != "" {
-			natscore.Connect(natsFlag, app)
+		if natsFlag {
+			natscore.Connect(args, app)
 		} else {
 			websocketcore.Connect(args, app)
 		}
@@ -28,5 +28,5 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.Flags().StringVar(&natsFlag, "nats", "", "host a nats server")
+	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "host a nats server")
 }

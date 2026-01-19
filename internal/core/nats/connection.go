@@ -9,7 +9,13 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-func Connect(subject string, app *app.Data) {
+// Connect using subject string
+func Connect(args []string, app *app.Data) {
+	subject := "chat"
+	if len(args) > 0 {
+		subject = args[0]
+	}
+
 	ch := make(chan *nats.Conn)
 	go natshandler.Connect(ch)
 
