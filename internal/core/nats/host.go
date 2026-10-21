@@ -1,25 +1,21 @@
 package natscore
 
 import (
+	"log"
+
 	"github.com/fiwon123/cthrone/internal/data/app"
 	natshandler "github.com/fiwon123/cthrone/internal/handlers/nats"
-
-	"github.com/nats-io/nats.go"
 )
 
-// Host using subject string
-func Host(args []string, app *app.Data) {
-	subject := "chat"
-	if len(args) > 0 {
-		subject = args[0]
+// Host using subject string and the broker to connect to
+func Host(args []string, app *app.Data, broker string) {
+	subject := subjectFrom(args)
+
+	conn, err := natshandler.Connect(brokerURL(broker))
+	if err != nil {
+		log.Fatal("Failed to connect to NATS:", err)
 	}
-
-	ch := make(chan *nats.Conn)
-	go natshandler.Connect(ch)
-
-	conn := <-ch
+	defer conn.Close()
 
 	natshandler.SubscribeMessages(conn, subject)
-
-	select {}
 }
