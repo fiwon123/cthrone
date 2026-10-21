@@ -15,7 +15,9 @@ var upgrader = websocket.Upgrader{}
 // which means every interface: the tool is a chat between two devices on
 // the same network, and a host that only listens on the loopback cannot be
 // reached by the other device.
-func Host(port int, bindAddress, token string, allowAnonymous bool) error {
+//
+// With TLS the server serves https, and the websocket runs over it.
+func Host(port int, bindAddress, token string, allowAnonymous bool, certFile, keyFile string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		openConnection(w, r, token, allowAnonymous)
@@ -27,6 +29,10 @@ func Host(port int, bindAddress, token string, allowAnonymous bool) error {
 
 	if allowAnonymous {
 		log.Println("WARNING: anonymous connections are allowed, anyone who can reach this port can join the chat")
+	}
+
+	if certFile != "" {
+		return http.ListenAndServeTLS(address, certFile, keyFile, mux)
 	}
 
 	return http.ListenAndServe(address, mux)
