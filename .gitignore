@@ -26,6 +26,13 @@ go.work.sum
 
 # env file
 .env
+.env.*
+!.env.example
+.envrc
+
+# Agent session memory — local to this machine, never committed
+.opencode/memory/
+.opencode/progress.md
 
 # Editor/IDE
 # .idea/

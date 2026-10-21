@@ -1,0 +1,9 @@
+# Generated and agent-local under .opencode/ — never commit these.
+#
+# NOTE: this file must not list `.gitignore`. A .gitignore that ignores itself
+# cannot be committed, so it would never ship to a project that copies
+# templates/ — which is the only thing this library exists to do.
+node_modules
+package.json
+package-lock.json
+bun.lock

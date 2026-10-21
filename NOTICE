@@ -1,4 +1,29 @@
-This product includes software developed by
-The Cobra Authors (https://github.com/spf13/cobra).
+cthrone
+Copyright 2025 Felipe Inoue
 
-Cobra is licensed under the Apache License, Version 2.0.
+This product includes software developed by:
+
+cobra (https://github.com/spf13/cobra)
+cobra is licensed under the Apache License, Version 2.0.
+
+nats.go (https://github.com/nats-io/nats.go)
+nats.go is licensed under the Apache License, Version 2.0.
+
+nkeys (https://github.com/nats-io/nkeys)
+nkeys is licensed under the Apache License, Version 2.0.
+
+compress (https://github.com/klauspost/compress)
+compress is licensed under the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------------
+Keep the LICENSE-APACHE file next to this one.
+
+Apache-2.0 section 4 requires that the attribution notices of the licenses it
+governs are reproduced in your distribution. A NOTICE file that names an
+Apache-licensed dependency without shipping the Apache-2.0 text beside it is
+the half of that obligation, and it is the half that gets forgotten: the
+NOTICE is small, so it is the file nobody copies into the release archive.
+
+The same applies to the archives this project publishes. A binary built from
+code under the Apache-2.0 license carries that obligation with it -- the
+licenses have to be inside the archive, not only in the repository.

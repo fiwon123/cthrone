@@ -1,0 +1,204 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md", "PROJECT_CONTEXT.md", ".opencode/instructions/*.md"],
+  "permission": {
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.envrc": "deny",
+      "*.env.example": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "printenv*": "deny",
+      "env": "deny",
+      "env *": "deny",
+      "docker compose config*": "deny",
+      "docker-compose config*": "deny",
+      "docker * config*": "deny",
+      "docker * env": "deny",
+      "docker * env *": "deny",
+      "docker inspect*": "deny",
+      "*.env": "deny",
+      "*.envrc": "deny",
+      "* .env": "deny",
+      "* .envrc": "deny",
+      "*/.env": "deny",
+      "*/.envrc": "deny",
+      "* .env*": "deny",
+      "*/.env*": "deny",
+      "*/.envrc*": "deny",
+      "*.env.*": "deny",
+      "* .env.*": "deny",
+      "*/.env.*": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.envrc": "deny",
+      "*.env.example": "allow"
+    }
+  },
+  "agent": {
+    "build": {
+      "description": "Primary agent for feature development, bug fixes, and refactoring",
+      "mode": "primary",
+      "model": "opencode/big-pickle",
+      "permission": {
+        "edit": {
+          "*": "allow",
+          "*.env": "deny",
+          "*.env.*": "deny",
+          "*.envrc": "deny",
+          "*.env.example": "allow"
+        },
+        "bash": {
+          "*": "ask",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git branch*": "allow",
+          "git checkout*": "allow",
+          "git pull*": "allow",
+          "git push*": "allow",
+          "git add*": "allow",
+          "git commit*": "allow",
+          "gh issue*": "allow",
+          "gh pr create*": "allow",
+          "gh pr comment*": "allow",
+          "gh pr edit*": "allow",
+          "gh pr list*": "allow",
+          "gh pr view*": "allow",
+          "gh pr checks*": "allow",
+          "gh label*": "allow",
+          "gh pr merge*": "allow",
+          "go build*": "allow",
+          "go test*": "allow",
+          "go vet*": "allow",
+          "go list*": "allow",
+          "go mod*": "allow",
+          "go env*": "allow",
+          "go run*": "allow",
+          "gofmt*": "allow",
+          "make check*": "allow",
+          "make clean*": "allow",
+          "make release*": "allow",
+          "printenv*": "deny",
+          "env": "deny",
+          "env *": "deny",
+          "docker compose config*": "deny",
+          "docker-compose config*": "deny",
+          "docker * config*": "deny",
+          "docker * env": "deny",
+          "docker * env *": "deny",
+          "docker inspect*": "deny",
+          "*.env": "deny",
+          "*.envrc": "deny",
+          "* .env": "deny",
+          "* .envrc": "deny",
+          "*/.env": "deny",
+          "*/.envrc": "deny",
+          "* .env*": "deny",
+          "*/.env*": "deny",
+          "*/.envrc*": "deny",
+          "*.env.*": "deny",
+          "* .env.*": "deny",
+          "*/.env.*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "reviewer": "allow"
+        },
+        "skill": {
+          "*": "allow"
+        }
+      }
+    },
+    "plan": {
+      "description": "Primary agent for analysis, planning, and architecture decisions",
+      "mode": "primary",
+      "model": "opencode/mimo-v2.6-flash-free",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny",
+          "git log*": "allow",
+          "git diff*": "allow",
+          "ls*": "allow",
+          "printenv*": "deny",
+          "env": "deny",
+          "env *": "deny",
+          "docker compose config*": "deny",
+          "docker-compose config*": "deny",
+          "docker * config*": "deny",
+          "docker * env": "deny",
+          "docker * env *": "deny",
+          "docker inspect*": "deny",
+          "*.env": "deny",
+          "*.envrc": "deny",
+          "* .env": "deny",
+          "* .envrc": "deny",
+          "*/.env": "deny",
+          "*/.envrc": "deny",
+          "* .env*": "deny",
+          "*/.env*": "deny",
+          "*/.envrc*": "deny",
+          "*.env.*": "deny",
+          "* .env.*": "deny",
+          "*/.env.*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "reviewer": "allow"
+        },
+        "skill": {
+          "*": "allow"
+        }
+      }
+    },
+    "reviewer": {
+      "description": "Reviews code for bugs, security issues, and regressions without editing",
+      "mode": "subagent",
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "grep *": "allow",
+          "grep *.env": "deny",
+          "grep *.env.*": "deny",
+          "grep *.envrc": "deny",
+          "printenv*": "deny",
+          "env": "deny",
+          "env *": "deny",
+          "docker compose config*": "deny",
+          "docker-compose config*": "deny",
+          "docker * config*": "deny",
+          "docker * env": "deny",
+          "docker * env *": "deny",
+          "docker inspect*": "deny",
+          "*.env": "deny",
+          "*.envrc": "deny",
+          "* .env": "deny",
+          "* .envrc": "deny",
+          "*/.env": "deny",
+          "*/.envrc": "deny",
+          "* .env*": "deny",
+          "*/.env*": "deny",
+          "*/.envrc*": "deny",
+          "*.env.*": "deny",
+          "* .env.*": "deny",
+          "*/.env.*": "deny"
+        },
+        "skill": {
+          "*": "allow"
+        }
+      }
+    }
+  }
+}
