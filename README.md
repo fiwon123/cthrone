@@ -91,6 +91,11 @@ because a name you type many times a day should be short.
    cthrone host --nats
    ```
 
+   The broker is published on `nats://127.0.0.1:4222` on the host, so a
+   client running on the host reaches it. If the dev sandbox is already
+   running, the broker is up with it — the sandbox declares the broker as
+   a dependency, so `make dev-up` starts both.
+
    On the other side, `cthrone connect --nats` publishes to the broker.
 
    Note that on the NATS path the roles are inverted: `host` **subscribes** to
@@ -193,9 +198,14 @@ box, a Mac, a WSL2 shell and a Windows machine. Docker is the only
 prerequisite — no Make, no Python, no host setup:
 
 ```bash
-docker compose up           # the sandbox
+docker compose up           # the sandbox, with the broker it talks to
 docker compose up -d nats   # just the broker, on nats://127.0.0.1:4222
 ```
+
+The sandbox declares the broker as a dependency, so every way of starting
+it — `docker compose up`, `make dev-up`, `scripts/dev-up.py dev-up` —
+brings the broker up with it. The second command is for running only the
+broker, e.g. against a host-side client.
 
 With `make` (Linux, macOS, WSL2):
 

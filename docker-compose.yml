@@ -27,6 +27,13 @@ services:
       args:
         HOST_UID: ${HOST_UID:-1000}
         HOST_GID: ${HOST_GID:-1000}
+    # The sandbox talks to the broker, so the broker starts with it. Compose
+    # starts a service's dependencies along with it, and without this every
+    # service-scoped start — `make dev-up`, `scripts/dev-up.py dev-up`,
+    # `docker compose up dev` — would bring up the client alone and leave
+    # the developer with a connection error instead of a running stack.
+    depends_on:
+      - nats
     # Host identity defaults to UID/GID 1000, which is correct for Docker
     # Desktop (macOS/Windows virtualise bind-mount ownership). A Linux user
     # whose uid differs overrides it: `HOST_UID="$(id -u)" docker compose up`.
