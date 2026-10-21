@@ -52,16 +52,57 @@ func TestConnectReturnsTheDialError(t *testing.T) {
 	original := dial
 	defer func() { dial = original }()
 
-	dial = func(url string) (*websocket.Conn, *http.Response, error) {
+	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
 		return nil, nil, errors.New("no host in this test")
 	}
 
-	err := Connect("192.168.1.5", 8080)
+	err := Connect("192.168.1.5", 8080, "")
 	if err == nil {
 		t.Fatal("expected the dial to fail")
 	}
 
 	if err.Error() != "no host in this test" {
 		t.Errorf("expected the dial error, got %q", err.Error())
+	}
+}
+
+// The client sends the shared secret. Without it a host that requires one
+// refuses the connection.
+func TestConnectSendsTheSharedSecret(t *testing.T) {
+	original := dial
+	defer func() { dial = original }()
+
+	var got string
+
+	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+		got = header.Get("X-Cthrone-Token")
+
+		return nil, nil, errors.New("stop here")
+	}
+
+	_ = Connect("192.168.1.5", 8080, "s3cret")
+
+	if got != "s3cret" {
+		t.Errorf("expected the secret to be sent, got %q", got)
+	}
+}
+
+// A host that refuses the connection says what is wrong, so the user knows
+// the host needs a secret rather than guessing.
+func TestConnectExplainsARefusedConnection(t *testing.T) {
+	original := dial
+	defer func() { dial = original }()
+
+	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+		return nil, &http.Response{StatusCode: http.StatusUnauthorized}, errors.New("bad handshake")
+	}
+
+	err := Connect("192.168.1.5", 8080, "")
+	if err == nil {
+		t.Fatal("expected the connection to be refused")
+	}
+
+	if err.Error() != "the host refused the connection: it needs the shared secret" {
+		t.Errorf("expected the refusal to name the missing secret, got %q", err.Error())
 	}
 }

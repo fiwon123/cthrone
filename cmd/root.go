@@ -12,6 +12,10 @@ import (
 
 var port int
 
+var token string
+
+var tokenFile string
+
 var checkVersion bool
 
 // Version is popualated when building with Makefile
@@ -48,5 +52,7 @@ func init() {
 	rootCmd.AddCommand(scancmd.Cmd)
 
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
-	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
+	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")
+	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
+	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
 }

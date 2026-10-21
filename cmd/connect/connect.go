@@ -23,15 +23,19 @@ On websocket connection devices can send and receive message from host or connec
 On nats connection only host receive message and only connect device send message`,
 	Run: func(cmd *cobra.Command, args []string) {
 		port, _ := cmd.Flags().GetInt("port")
+		secret, _ := cmd.Flags().GetString("token")
+		secretFile, _ := cmd.Flags().GetString("token-file")
 
 		app := app.New(port)
 
 		if natsFlag {
 			natscore.Connect(args, app, natsURLFlag)
-		} else {
-			if err := websocketcore.Connect(args, app); err != nil {
-				log.Fatal(err)
-			}
+
+			return
+		}
+
+		if err := websocketcore.Connect(args, app, secret, secretFile); err != nil {
+			log.Fatal(err)
 		}
 	},
 }

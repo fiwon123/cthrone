@@ -15,6 +15,7 @@
 ## Table of contents
 
 - [About](#about)
+- [Security](#security)
 - [How to use](#how-to-use)
 - [Install](#install)
 - [Commands](#commands)
@@ -44,14 +45,46 @@ because a name you type many times a day should be short.
 
 **Supported platforms**: Windows, Linux, and Android (arm64).
 
-> **Security**: the transports are currently **open and unencrypted**. The
-> websocket server accepts any client that can reach the port, and messages
-> travel in plaintext. Use it on a network you trust, and see
-> [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the work that
-> would change that.
+> **Security**: the websocket transport requires a **shared secret** — a
+> client that does not know it is refused. The secret is not encrypted on
+> the wire yet, so the messages travel in plaintext: use it on a network you
+> trust. The NATS transport inherits the security of the broker it talks to.
+> See [Security](#security) for how the secret is set up, and
+> [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the rest of
+> the work.
 
 > **Status**: actively used, pre-1.0, and not yet covered by tests — see
 > [How to develop](#how-to-develop).
+
+## Security
+
+The websocket transport needs a **shared secret**: a client that does not
+present it is refused with a `401` before any session starts. The secret is
+read from the first of these that has a value:
+
+| Source | How |
+|---|---|
+| `--token` | the flag — **visible in the process list** to every other process on the machine, so it is for a quick manual run, not for daily use |
+| `CTHRONE_TOKEN` | the environment — the one to use in a container or a script |
+| the token file | `--token-file <path>`, or `~/.config/cthrone/token` by default |
+
+The host **generates** a secret the first time it runs and writes it to the
+token file with `0600` — a secret every process on the machine can read is
+not a secret. It is never replaced afterwards, so two devices that share the
+file keep agreeing.
+
+Two flags change the shape of it:
+
+- `--host <address>` binds the server to one interface instead of every
+  interface. The default is every interface, because the tool is a chat
+  between two devices on the same network.
+- `--allow-anonymous` on the host lets clients in without the secret. It is
+  opt-in, it prints a warning, and it is how the tool behaved before the
+  secret existed.
+
+**The messages themselves travel in plaintext.** The secret decides who may
+join; it does not hide what is said. Encryption is the next step — see
+[issue #11](https://github.com/fiwon123/cthrone/issues/11).
 
 ## How to use
 
@@ -64,7 +97,10 @@ because a name you type many times a day should be short.
    cthrone host
    ```
 
-   It listens on port 8080 and prints a line when a client connects.
+   It listens on port 8080 and prints a line when a client connects. The
+   first time it runs, it also **generates a shared secret** and writes it to
+   `~/.config/cthrone/token` (0600) — the path is printed. Keep it: the
+   other device needs the same secret.
 
 3. On the other device, connect to it:
 
@@ -74,6 +110,13 @@ because a name you type many times a day should be short.
 
    The IP is the address of the machine running `host`. Everything you type is
    sent; everything the other side types is printed.
+
+   The client needs the same secret. Copy the file from the host device, or
+   put the value in the environment:
+
+   ```bash
+   CTHRONE_TOKEN="$(cat ~/.config/cthrone/token)" cthrone connect 192.168.0.42
+   ```
 
 4. Do not know the address? Scan the local subnet for a chat server:
 
@@ -142,6 +185,10 @@ works the moment the folder is on your PATH.
 | `-p`, `--port` | the port to use (default `8080`) |
 | `--nats` | use the NATS transport instead of the websocket one |
 | `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`) |
+| `--token` | the shared secret — **visible in the process list**, so prefer the environment or the file |
+| `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
+| `--host` | the interface `cthrone host` binds to (default: every interface) |
+| `--allow-anonymous` | let clients join without the shared secret |
 | `-v`, `--version` | print the version |
 
 `cthrone connect` needs the address of the machine running `cthrone host`; it
@@ -152,6 +199,10 @@ for the full flag list.
 
 The transport is chosen at the command level, and both transports meet at the
 same chat loop, so they are interchangeable from your side.
+
+The shared secret lives in `internal/auth` — it is not part of either
+transport, because the credential is a property of the tool rather than of
+the wire it uses.
 
 ```mermaid
 flowchart LR
