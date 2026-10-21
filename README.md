@@ -99,10 +99,20 @@ because a name you type many times a day should be short.
    On the other side, `cthrone connect --nats` publishes to the broker.
 
    Note that on the NATS path the roles are inverted: `host` **subscribes** to
-   the subject and `connect` **publishes** to it. The subject defaults to
-   `chat`, and the value of `--nats` is currently used as the subject rather
-   than as a broker URL — see
-   [issue #12](https://github.com/fiwon123/cthrone/issues/12).
+   the subject and `connect` **publishes** to it. The subject is the
+   positional argument and defaults to `chat`:
+
+   ```bash
+   cthrone host --nats room-42
+   cthrone connect --nats room-42
+   ```
+
+   The broker is the one the `--nats-url` flag names, and it defaults to
+   `nats://127.0.0.1:4222` — so a remote broker is reachable:
+
+   ```bash
+   cthrone host --nats --nats-url nats://broker.internal:4222
+   ```
 
 ## Install
 
@@ -131,6 +141,7 @@ works the moment the folder is on your PATH.
 |---|---|
 | `-p`, `--port` | the port to use (default `8080`) |
 | `--nats` | use the NATS transport instead of the websocket one |
+| `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`) |
 | `-v`, `--version` | print the version |
 
 `cthrone connect` needs the address of the machine running `cthrone host`; it
@@ -274,9 +285,9 @@ port, or when the server is on the other side of a NAT.
 
 ### The NATS path cannot reach a remote broker
 
-The broker URL is currently hardcoded to the default
-(`nats://127.0.0.1:4222`), and the value of `--nats` is used as the subject
-instead. See [issue #12](https://github.com/fiwon123/cthrone/issues/12).
+The broker is the one `--nats-url` names, and it defaults to
+`nats://127.0.0.1:4222`. If a remote broker is not reachable, check the URL
+first: the flag takes the whole address, including the scheme and the port.
 
 ### The sandbox dies with `set: pipefail: invalid option name`
 

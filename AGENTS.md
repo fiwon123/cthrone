@@ -96,20 +96,25 @@ still works, and `make check` does not require Docker.
 
 ### The current state of this suite — read this before claiming coverage
 
-**This repository has no test files at all.** `go test ./...` prints
-`? package [no test files]` for every package, and exits 0. That is not a
-pass: it means nothing was executed.
+**The coverage is partial.** The NATS transport, its two commands and the
+`host`/`connect` command flags have tests; the websocket transport, the
+scanner and the `scan` command do not. `go test ./...` prints
+`? package [no test files]` for those, and exits 0. That is not a pass: it
+means nothing was executed for them.
 
-So a green `make check` currently proves exactly three things:
+So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
-- the code compiles.
+- the code compiles,
+- the tested packages passed — currently the NATS transport and the two
+  commands that use it.
 
-It does **not** prove the behaviour works. A chat tool's behaviour — a message
-that arrives, a host that binds the right port, a scan that finds the server —
-is exactly what is untested here. Report honestly: "gofmt, vet, and build are
-clean; this package has no test coverage", not "tests pass".
+It does **not** prove the behaviour of the websocket transport works. A chat
+tool's behaviour — a message that arrives, a host that binds the right port,
+a scan that finds the server — is mostly untested here. Report honestly:
+"gofmt, vet, and build are clean; the NATS path is covered, the websocket
+path is not", not "tests pass".
 
 `make check` prints the list of packages with no test file after the run, so
 the gap is visible in the output rather than only in this document.

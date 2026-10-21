@@ -9,6 +9,8 @@ import (
 
 var natsFlag bool
 
+var natsURLFlag string
+
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
 	Use:   "connect",
@@ -23,7 +25,7 @@ On nats connection only host receive message and only connect device send messag
 		app := app.New(port)
 
 		if natsFlag {
-			natscore.Connect(args, app)
+			natscore.Connect(args, app, natsURLFlag)
 		} else {
 			websocketcore.Connect(args, app)
 		}
@@ -31,5 +33,6 @@ On nats connection only host receive message and only connect device send messag
 }
 
 func init() {
-	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "host a nats server")
+	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
+	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 }
