@@ -3,6 +3,7 @@ package connectcmd
 import (
 	"log"
 
+	"github.com/fiwon123/cthrone/internal/auth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -12,10 +13,6 @@ import (
 var natsFlag bool
 
 var natsURLFlag string
-
-var certFingerprintFlag string
-
-var insecureFlag bool
 
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
@@ -31,20 +28,20 @@ On nats connection only host receive message and only connect device send messag
 		secretFile, _ := cmd.Flags().GetString("token-file")
 		tlsEnabled, _ := cmd.Flags().GetBool("tls")
 		fingerprint, _ := cmd.Flags().GetString("cert-fingerprint")
-		insecure, _ := cmd.Flags().GetBool("insecure")
+		acceptAny, _ := cmd.Flags().GetBool("insecure")
 
 		app := app.New(port)
 
-		if natsFlag {
-			natscore.Connect(args, app, natsURLFlag)
-
-			return
-		}
-
-		tlsConf := websocketcore.TLS{
+		tlsConf := auth.TLS{
 			Enabled:     tlsEnabled,
 			Fingerprint: fingerprint,
-			Insecure:    insecure,
+			Insecure:    acceptAny,
+		}
+
+		if natsFlag {
+			natscore.Connect(args, app, natsURLFlag, tlsConf)
+
+			return
 		}
 
 		if err := websocketcore.Connect(args, app, secret, secretFile, tlsConf); err != nil {
@@ -56,6 +53,4 @@ On nats connection only host receive message and only connect device send messag
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
-	Cmd.Flags().StringVar(&certFingerprintFlag, "cert-fingerprint", "", "the fingerprint of the certificate to pin, with --tls")
-	Cmd.Flags().BoolVar(&insecureFlag, "insecure", false, "accept any certificate, with --tls; the traffic is still encrypted, but the host is not checked")
 }

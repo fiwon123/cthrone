@@ -2,7 +2,6 @@ package websocketcore
 
 import (
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -17,29 +16,8 @@ import (
 // do that.
 var host = websockethandler.Host
 
-// TLS says how the websocket transport is encrypted.
-type TLS struct {
-	// Enabled makes the host serve https and the client expect it.
-	Enabled bool
-
-	// CertFile and KeyFile are where the host keeps its certificate. They
-	// are empty by default, which means the files in the user's
-	// configuration directory.
-	CertFile string
-	KeyFile  string
-
-	// Fingerprint is the certificate the client pins. It is checked
-	// instead of a certificate authority: the host's certificate is
-	// self-signed, so there is no authority to check it against.
-	Fingerprint string
-
-	// Insecure makes the client accept any certificate. It is what the
-	// flag says, and it is why it has to be asked for.
-	Insecure bool
-}
-
 // Host open connection
-func Host(app *app.Data, flagToken, tokenFile string, tlsConf TLS) error {
+func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 	token := ""
 	if !app.AllowAnonymous {
 		var err error
@@ -141,14 +119,6 @@ func fileExists(path string) bool {
 
 // clientTLSConfig returns the configuration the client uses to check the
 // certificate of the host.
-func clientTLSConfig(tlsConf TLS) (*tls.Config, error) {
-	if !tlsConf.Enabled {
-		return nil, nil
-	}
-
-	if tlsConf.Fingerprint == "" && !tlsConf.Insecure {
-		return nil, errors.New("--tls needs --cert-fingerprint to check the certificate, or --insecure to skip the check")
-	}
-
-	return auth.ClientTLSConfig(tlsConf.Fingerprint, tlsConf.Insecure)
+func clientTLSConfig(tlsConf auth.TLS) (*tls.Config, error) {
+	return auth.TLSConfig(tlsConf)
 }

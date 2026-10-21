@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -190,6 +191,53 @@ func TestClientTLSConfigAcceptsTheFingerprintInAnotherForm(t *testing.T) {
 	}
 
 	config, err := ClientTLSConfig(spaced, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := config.VerifyPeerCertificate([][]byte{cert.DER}, nil); err != nil {
+		t.Errorf("expected the fingerprint to be matched, got %v", err)
+	}
+}
+
+// A client that is told to expect TLS and names neither a fingerprint nor
+// --insecure is refused: connecting to whatever answers is not what was
+// asked for.
+func TestTLSConfigNeedsAFingerprintOrInsecure(t *testing.T) {
+	_, err := TLSConfig(TLS{Enabled: true})
+	if err == nil {
+		t.Fatal("expected the connection to be refused")
+	}
+
+	if !strings.Contains(err.Error(), "--cert-fingerprint") {
+		t.Errorf("expected the error to name the flag, got %q", err.Error())
+	}
+
+	if !strings.Contains(err.Error(), "--insecure") {
+		t.Errorf("expected the error to name the other flag, got %q", err.Error())
+	}
+}
+
+// A transport that is not encrypted needs no configuration at all.
+func TestTLSConfigIsNilWithoutTLS(t *testing.T) {
+	config, err := TLSConfig(TLS{})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if config != nil {
+		t.Error("expected no TLS configuration when TLS is off")
+	}
+}
+
+// The pinned certificate is the one the transport asks for.
+func TestTLSConfigPinsTheCertificate(t *testing.T) {
+	cert, err := GenerateCertificate([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := TLSConfig(TLS{Enabled: true, Fingerprint: cert.Fingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}

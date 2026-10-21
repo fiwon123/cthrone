@@ -43,3 +43,34 @@ func TestTLSFlagIsPersistent(t *testing.T) {
 		t.Errorf("expected the transport to be unencrypted by default, got %q", flag.DefValue)
 	}
 }
+
+// The certificate is pinned by its fingerprint. The host's certificate is
+// self-signed, so there is no authority to check it against. The flag is
+// persistent: the host command needs it for the broker, the connect
+// command for the peer it talks to.
+func TestCertFingerprintFlagIsRegistered(t *testing.T) {
+	flag := rootCmd.PersistentFlags().Lookup("cert-fingerprint")
+	if flag == nil {
+		t.Fatal("expected the --cert-fingerprint flag to be registered")
+	}
+
+	if flag.DefValue != "" {
+		t.Errorf("expected no fingerprint by default, got %q", flag.DefValue)
+	}
+}
+
+// Accepting any certificate is a switch, and it is off by default.
+func TestInsecureFlagIsASwitch(t *testing.T) {
+	flag := rootCmd.PersistentFlags().Lookup("insecure")
+	if flag == nil {
+		t.Fatal("expected the --insecure flag to be registered")
+	}
+
+	if flag.Value.Type() != "bool" {
+		t.Errorf("expected --insecure to be a switch, got %q", flag.Value.Type())
+	}
+
+	if flag.DefValue != "false" {
+		t.Errorf("expected the certificate to be checked by default, got %q", flag.DefValue)
+	}
+}

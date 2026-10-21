@@ -3,6 +3,7 @@ package websocketcore
 import (
 	"errors"
 
+	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
 )
@@ -13,7 +14,7 @@ import (
 var connect = websockethandler.Connect
 
 // Connect receive a args with ip for establish connection
-func Connect(args []string, app *app.Data, flagToken, tokenFile string, tlsConf TLS) error {
+func Connect(args []string, app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 	address := connectAddress(args)
 	if address == "" {
 		return errors.New("the address of the host to connect to is required")

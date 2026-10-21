@@ -53,6 +53,10 @@ services:
       - GH_TOKEN=${GH_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - HOME=/home/devuser
+      # The broker asks for credentials, so the sandbox needs the same
+      # ones. They default to the dev values the broker also uses.
+      - NATS_USER=${NATS_USER:-cthrone}
+      - NATS_PASSWORD=${NATS_PASSWORD:-cthrone-dev}
       # Forwarded so the entrypoint can probe ownership and the compose
       # interpolation above has something to fall back to.
       - HOST_UID=${HOST_UID:-1000}
@@ -70,11 +74,14 @@ services:
     stdin_open: true
 
   # The NATS broker. This service replaces the repository's old
-  # docker-compose.yaml — same broker, same JetStream flag, one file.
+  # docker-compose.yaml — one file.
   nats:
     # Pinned, not `latest`: an unpinned tag means the broker can change
     # behaviour under a running client without anything in the repository
     # changing. 2.15.1 is the current stable release.
+    #
+    # The broker no longer runs with `-js`: chat traffic is not
+    # persisted, so a conversation does not outlive the session.
     image: nats:2.15.1
     ports:
       # Host ports are overridable so two sandboxes can run at once: two
@@ -84,7 +91,14 @@ services:
       # nats://127.0.0.1:4222 for the client, 8222 for the monitoring endpoint.
       - "${NATS_PORT:-4222}:4222"
       - "${NATS_MONITOR_PORT:-8222}:8222"
-    command: ["-js"]
+    # The broker's configuration: it asks for credentials, and JetStream
+    # is off. The credentials come from the environment, so the password
+    # is never in a committed file — the defaults below are dev values.
+    environment:
+      - NATS_USER=${NATS_USER:-cthrone}
+      - NATS_PASSWORD=${NATS_PASSWORD:-cthrone-dev}
+    volumes:
+      - ./nats.conf:/etc/nats/nats-server.conf:ro
 
 volumes:
   gomodcache:

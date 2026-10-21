@@ -72,7 +72,7 @@ func TestLocalHosts(t *testing.T) {
 // it pins a fingerprint, or it asks to be insecure. A client that says
 // neither would have no way to tell a host from anyone else.
 func TestClientTLSConfigNeedsAFingerprintOrInsecure(t *testing.T) {
-	_, err := clientTLSConfig(TLS{Enabled: true})
+	_, err := clientTLSConfig(auth.TLS{Enabled: true})
 	if err == nil {
 		t.Fatal("expected an error when neither a fingerprint nor --insecure is given")
 	}
@@ -84,7 +84,7 @@ func TestClientTLSConfigNeedsAFingerprintOrInsecure(t *testing.T) {
 
 // A client that pins a fingerprint gets a configuration that checks it.
 func TestClientTLSConfigWithAFingerprint(t *testing.T) {
-	config, err := clientTLSConfig(TLS{Enabled: true, Fingerprint: "ab12"})
+	config, err := clientTLSConfig(auth.TLS{Enabled: true, Fingerprint: "ab12"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestClientTLSConfigWithAFingerprint(t *testing.T) {
 // A client that asks to be insecure gets a configuration that checks
 // nothing.
 func TestClientTLSConfigInsecure(t *testing.T) {
-	config, err := clientTLSConfig(TLS{Enabled: true, Insecure: true})
+	config, err := clientTLSConfig(auth.TLS{Enabled: true, Insecure: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestClientTLSConfigInsecure(t *testing.T) {
 // A client that does not use TLS gets no TLS configuration: the transport
 // is not encrypted and nothing pretends otherwise.
 func TestClientTLSConfigWithoutTLS(t *testing.T) {
-	config, err := clientTLSConfig(TLS{})
+	config, err := clientTLSConfig(auth.TLS{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -179,27 +179,41 @@ Linux.
 
 ### Security — read this before changing the transport
 
-Neither transport authenticates its peers, and neither encrypts the traffic.
-The websocket server binds `:8080` on **every** interface, the client dials
-plain `ws://`, and the NATS connection carries no credentials. The
-`docker-compose.yml` broker starts with `-js`, so it also **persists** the
-messages.
+Both transports authenticate their peers, and both can encrypt the traffic.
+The model is the one issue #11 decided:
 
-This is tracked in issue #11. Until that issue is resolved:
+- the **websocket** transport requires a **shared secret** — a client that
+  does not know it is refused — and `--tls` encrypts the connection, with
+  the host's certificate pinned by its fingerprint;
+- the **NATS** transport sends the broker's credentials from the environment
+  (`NATS_USER`, `NATS_PASSWORD`), and a `tls://` broker URL asks for an
+  encrypted connection with the same pinning;
+- the `docker-compose.yml` broker asks for credentials and **persists
+  nothing**: JetStream is off, so a conversation does not outlive the
+  session it happened in.
 
-- do not describe this tool as encrypted, private, or authenticated — the
-  README says plainly that it is none of those;
+The rules that come with it:
+
+- do not describe this tool as encrypted or authenticated **by default**:
+  the websocket transport needs a shared secret, and `--tls` on top of it;
+  the NATS path needs a broker that asks for credentials;
 - do not add a credential to a **command-line flag** — a flag value is visible
   in the process list. Use an environment variable or a file;
+- the broker reads its password through its own configuration parser, so a
+  password with a `#` or a quote in it does not survive the trip;
 - if you touch the transport, read issue #11 first: the security model is a
   design decision, not an implementation detail, and it changes the CLI
   surface.
 
 ## Environment and Secret-File Rules
 
-- The application holds no configuration file on disk — the port is the only
-  setting, and it comes from the command line. There is nothing in the
-  user's home directory to protect.
+- The application holds no configuration file in the repository — the port is
+  the only setting, and it comes from the command line.
+- The user's configuration directory **does** hold two files: the shared
+  secret (`~/.config/cthrone/token`, `0600`) and the TLS material
+  (`~/.config/cthrone/cert.pem` and `key.pem`, the key `0600`). They are
+  generated on first use, they are never committed, and the secret is the
+  one thing that must not be shared.
 - Never access `.env`, `.env.*`, `.envrc`, or any other environment/secret file without explicit permission.
 - Never open, read, print, summarize, quote, or send the contents of those files. `.env.example` is the one exception: it holds placeholders and is safe to read.
 - Read `.env.example` with the **Read tool**, not with `cat`. Bash denies cover every `.env*` path on purpose.
