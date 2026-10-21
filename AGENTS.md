@@ -28,9 +28,7 @@ through a NATS broker.
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term
-- **Development**: a local Go toolchain and `make`. `docker-compose.yaml` starts
-  a NATS server for local experiments, but nothing in the build or the test
-  gate needs a container.
+- **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.25.5 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
 ### Core Architecture
 
@@ -55,8 +53,8 @@ cmd/                 cobra commands: connect, host, scan
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
-scripts/             add_to_path installers (sh, bat)
-docker-compose.yaml  a local NATS server, for experiments
+scripts/             add_to_path installers + the dev sandbox runtime
+docker-compose.yml   the dev sandbox and a local NATS server
 ```
 
 ## Development Commands
@@ -72,6 +70,29 @@ go test ./...        # tests only
 `make check` is the gate every agent runs before committing. It fails when the
 toolchain is missing — a gate that cannot run reports nothing, and reporting
 nothing must not look like reporting success.
+
+### Dev sandbox — the same toolchain on every machine
+
+```bash
+make dev-up          # start the sandbox (foreground; Ctrl+C stops it)
+make dev-shell       # a shell inside the sandbox
+make dev-opencode    # run the agent inside the sandbox (Linux/WSL2 only)
+make dev-down        # stop the sandbox
+make help            # every target, with a one-line description
+```
+
+Without `make`, on any OS with Docker:
+
+```bash
+docker compose up         # the sandbox
+docker compose up -d nats # just the broker, on nats://127.0.0.1:4222
+```
+
+On native Windows, where `make` does not exist: `python scripts/dev-up.py dev-up`.
+
+The container pins Go 1.25.5 — the version in `go.mod` — so a build inside the
+sandbox is the build CI runs. The sandbox is **optional**: a host toolchain
+still works, and `make check` does not require Docker.
 
 ### The current state of this suite — read this before claiming coverage
 
@@ -95,8 +116,29 @@ the gap is visible in the output rather than only in this document.
 
 ## Runtime Environment
 
-The AI agent (opencode) runs at the repository root, directly on the host. There
-is no container and no sandbox: the tools are the ones installed on the machine.
+The AI agent (opencode) runs at the repository root. There are two modes, and
+they are not equivalent — say which one a claim was made in.
+
+### Host mode (the default)
+
+The agent runs directly on the host, against the tools installed on the
+machine. This is what `make check` and `git` operate on.
+
+### Sandbox mode (optional)
+
+`make dev-opencode` runs the agent inside the dev container, where the
+toolchain is pinned to Go 1.25.5 — the version in `go.mod`, the same one CI
+uses. The workspace is bind-mounted at `/workspace`; edits made inside are the
+same files on the host.
+
+The container has **no Docker socket**: the agent inside it cannot manage
+containers, and that is deliberate. `docker` commands fail there, and a claim
+about the sandbox made from inside it cannot be about the host's Docker.
+
+The in-container agent needs a **Linux** opencode binary (the container is
+Linux). On macOS and native Windows, `make dev-opencode` refuses with a clear
+message and the agent stays on the host; use WSL2, where the host binary *is*
+Linux.
 
 ### What the agent CAN do
 
@@ -104,11 +146,13 @@ is no container and no sandbox: the tools are the ones installed on the machine.
 - Run `make` targets
 - Run git and GitHub CLI commands
 - Read and edit any file in the repository except the secret files listed below
+- Start and use the dev sandbox (`make dev-up`, `make dev-shell`) from the host
 
 ### What the agent CANNOT do
 
 - Access `.env`, `.env.*`, `.envrc`, or any other secret file without explicit permission
 - Run commands that dump environment values (`printenv`, `env`)
+- Run `docker` from **inside** the sandbox (no socket is mounted)
 - Push directly to `dev` or `main`
 - Merge a pull request without explicit instruction
 
@@ -131,7 +175,7 @@ is no container and no sandbox: the tools are the ones installed on the machine.
 Neither transport authenticates its peers, and neither encrypts the traffic.
 The websocket server binds `:8080` on **every** interface, the client dials
 plain `ws://`, and the NATS connection carries no credentials. The
-`docker-compose.yaml` broker starts with `-js`, so it also **persists** the
+`docker-compose.yml` broker starts with `-js`, so it also **persists** the
 messages.
 
 This is tracked in issue #11. Until that issue is resolved:
