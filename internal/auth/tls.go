@@ -20,6 +20,53 @@ import (
 	"time"
 )
 
+// TLS says how a transport is encrypted.
+//
+// It is shared by the transports: the websocket one and the NATS one are
+// both connections to a peer, and both are checked the same way — against
+// the fingerprint of the peer's certificate, because a peer on a LAN has
+// no certificate authority.
+type TLS struct {
+	// Enabled makes the transport encrypted. The websocket host serves
+	// https and the websocket client expects it. The NATS transport
+	// decides from the scheme of the broker URL instead, the way a URL
+	// does.
+	Enabled bool
+
+	// CertFile and KeyFile are where the host keeps its certificate. They
+	// are empty by default, which means the files in the user's
+	// configuration directory.
+	CertFile string
+	KeyFile  string
+
+	// Fingerprint is the certificate the client pins. It is checked
+	// instead of a certificate authority: the host's certificate is
+	// self-signed, so there is no authority to check it against.
+	Fingerprint string
+
+	// Insecure makes the client accept any certificate. It is what the
+	// flag says, and it is why it has to be asked for.
+	Insecure bool
+}
+
+// TLSConfig returns the configuration a client uses to check the
+// certificate of its peer, or nil when the transport is not encrypted.
+//
+// A client that is told to expect TLS and names neither a fingerprint nor
+// --insecure is refused: connecting to whatever answers is not what was
+// asked for.
+func TLSConfig(tlsConf TLS) (*tls.Config, error) {
+	if !tlsConf.Enabled {
+		return nil, nil
+	}
+
+	if tlsConf.Fingerprint == "" && !tlsConf.Insecure {
+		return nil, errors.New("--tls needs --cert-fingerprint to check the certificate, or --insecure to skip the check")
+	}
+
+	return ClientTLSConfig(tlsConf.Fingerprint, tlsConf.Insecure)
+}
+
 // Certificate is a key pair and the fingerprint of its certificate.
 //
 // The fingerprint is what the client pins: the certificate is self-signed, so

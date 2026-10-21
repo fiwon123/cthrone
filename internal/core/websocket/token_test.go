@@ -111,7 +111,7 @@ func TestHostAllowsAnonymousWithoutASecret(t *testing.T) {
 	data := app.New(8080)
 	data.AllowAnonymous = true
 
-	if err := Host(data, "", filepath.Join(t.TempDir(), "token"), TLS{}); err != nil {
+	if err := Host(data, "", filepath.Join(t.TempDir(), "token"), auth.TLS{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,7 +141,7 @@ func TestHostPassesTheSecretToTheServer(t *testing.T) {
 
 	data := app.New(8080)
 
-	if err := Host(data, "", "", TLS{}); err != nil {
+	if err := Host(data, "", "", auth.TLS{}); err != nil {
 		t.Fatal(err)
 	}
 

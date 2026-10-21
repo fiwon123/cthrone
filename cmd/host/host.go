@@ -3,6 +3,7 @@ package hostcmd
 import (
 	"log"
 
+	"github.com/fiwon123/cthrone/internal/auth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -30,18 +31,26 @@ On nats connection only host receive message and only connect device send messag
 		secret, _ := cmd.Flags().GetString("token")
 		secretFile, _ := cmd.Flags().GetString("token-file")
 		tlsEnabled, _ := cmd.Flags().GetBool("tls")
+		fingerprint, _ := cmd.Flags().GetString("cert-fingerprint")
+		acceptAny, _ := cmd.Flags().GetBool("insecure")
 
 		app := app.New(port)
 		app.Host = bindAddressFlag
 		app.AllowAnonymous = allowAnonymousFlag
 
+		tlsConf := auth.TLS{
+			Enabled:     tlsEnabled,
+			Fingerprint: fingerprint,
+			Insecure:    acceptAny,
+		}
+
 		if natsFlag {
-			natscore.Host(args, app, natsURLFlag)
+			natscore.Host(args, app, natsURLFlag, tlsConf)
 
 			return
 		}
 
-		if err := websocketcore.Host(app, secret, secretFile, websocketcore.TLS{Enabled: tlsEnabled}); err != nil {
+		if err := websocketcore.Host(app, secret, secretFile, tlsConf); err != nil {
 			log.Fatal(err)
 		}
 	},

@@ -49,7 +49,8 @@ because a name you type many times a day should be short.
 > client that does not know it is refused — and it can be **encrypted** with
 > `--tls`, which pins the host's certificate. Without `--tls` the messages
 > travel in plaintext: use it on a network you trust. The NATS transport
-> inherits the security of the broker it talks to. See
+> sends the broker's credentials and can encrypt the connection the same
+> way. See
 > [Security](#security) for how it is set up, and
 > [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the rest of
 > the work.
@@ -193,6 +194,39 @@ join, it does not hide what is said.
    cthrone host --nats --nats-url nats://broker.internal:4222
    ```
 
+   **The broker asks for credentials.** They come from the environment —
+   `NATS_USER` and `NATS_PASSWORD` — and not from a flag, because a flag is
+   visible in the process list:
+
+   ```bash
+   export NATS_USER=cthrone NATS_PASSWORD=cthrone-dev
+   cthrone connect --nats
+   ```
+
+   The broker that ships with the dev sandbox uses the same names, with
+   `cthrone` and `cthrone-dev` as the defaults. Override them for both
+   sides when you want a different password:
+
+   ```bash
+   NATS_USER=cthrone NATS_PASSWORD=another-one docker compose up -d nats
+   ```
+
+   A broker that asks for no credentials is still reachable: without
+   `NATS_USER` the client offers none.
+
+   **The broker keeps nothing.** JetStream is off, so a conversation does
+   not outlive the session it happened in, and the broker has no messages
+   to clean up.
+
+   **The connection to the broker can be encrypted** the same way the
+   websocket one is: give the URL the `tls://` scheme and pin the
+   broker's certificate.
+
+   ```bash
+   cthrone connect --nats --nats-url tls://broker.internal:4222 \
+     --cert-fingerprint 1f2e3d...
+   ```
+
 ## Install
 
 Download the archive for your platform from the
@@ -220,7 +254,7 @@ works the moment the folder is on your PATH.
 |---|---|
 | `-p`, `--port` | the port to use (default `8080`) |
 | `--nats` | use the NATS transport instead of the websocket one |
-| `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`) |
+| `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`); a `tls://` URL asks for an encrypted connection |
 | `--token` | the shared secret — **visible in the process list**, so prefer the environment or the file |
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
@@ -389,6 +423,21 @@ An address that already carries a port is used as it is:
 `scan` walks your own /24 and dials the chat port on every address. It finds
 nothing when the server is on a different subnet, when a firewall blocks the
 port, or when the server is on the other side of a NAT.
+
+### The broker says "Authorization Violation"
+
+The broker asks for credentials and the client offered none, or the wrong
+ones. Set them on both sides — the client reads `NATS_USER` and
+`NATS_PASSWORD` from the environment:
+
+```bash
+export NATS_USER=cthrone NATS_PASSWORD=cthrone-dev
+```
+
+The dev broker uses the same names, with `cthrone` and `cthrone-dev` as
+the defaults, so the two sides agree without anyone exporting anything —
+as long as the password has no `#` or quote in it, which the broker's
+configuration parser does not carry through.
 
 ### The NATS path cannot reach a remote broker
 

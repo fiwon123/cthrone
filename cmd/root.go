@@ -18,6 +18,10 @@ var tokenFile string
 
 var useTLS bool
 
+var certFingerprint string
+
+var insecure bool
+
 var checkVersion bool
 
 // Version is popualated when building with Makefile
@@ -58,4 +62,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
 	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport: the host serves https, the client expects it")
 	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
+	rootCmd.PersistentFlags().StringVar(&certFingerprint, "cert-fingerprint", "", "the fingerprint of the certificate to pin, with --tls")
+	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "accept any certificate, with --tls; the traffic is still encrypted, but the peer is not checked")
 }
