@@ -1,0 +1,13 @@
+# mise.toml — the pinned toolchain for the HOST side of the dev sandbox.
+#
+# The container carries its own pins (the base image is golang:1.25.5-bookworm,
+# matching go.mod, and gh is baked in by the Dockerfile), so this file exists
+# for the developer who works outside the sandbox: it puts the host on the same
+# versions the sandbox and CI use, so "works on my machine" stops being a
+# variable.
+#
+# Install: https://mise.jdx.dev — then `mise install`.
+
+[tools]
+go = "1.25.5"
+gh = "2.102.0"

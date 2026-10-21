@@ -39,3 +39,7 @@ go.work.sum
 # .vscode/
 
 /build
+
+# Dev sandbox markers — the opt-in "start something in the container" signal.
+# Local to each machine; never committed.
+.dev/

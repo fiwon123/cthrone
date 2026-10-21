@@ -84,10 +84,10 @@ because a name you type many times a day should be short.
    It walks your /24 and prints the addresses that answer on the chat port.
 
 5. Prefer a broker? Add `--nats` to either side, and run a NATS server
-   locally — the repository ships a `docker-compose.yaml` for that:
+   locally — the repository ships one in `docker-compose.yml` for that:
 
    ```bash
-   docker compose up -d
+   docker compose up -d nats
    cthrone host --nats
    ```
 
@@ -158,9 +158,14 @@ decide *how* the transport does it.
 
 ### Prerequisites
 
-- Go 1.25.5 or newer (the version is pinned in `go.mod`)
-- `make`
-- OpenCode — see `AGENTS.md` for how the agent layer is configured
+Either of these works:
+
+- **Host toolchain** — Go 1.25.5 or newer (the version is pinned in `go.mod`)
+  and `make`. Fastest for a quick edit.
+- **Dev sandbox** — Docker, and nothing else. The container pins Go 1.25.5, so
+  your build is the build CI runs.
+
+OpenCode is optional — see `AGENTS.md` for how the agent layer is configured.
 
 ### Quick start
 
@@ -179,6 +184,46 @@ go run ./ --help
 | `make clean` | remove `build/` |
 | `go test ./...` | tests only |
 | `gofmt -l .` | list files that are not formatted |
+| `make help` | every target, with a one-line description |
+
+### Dev sandbox
+
+A container with the pinned toolchain, so the build is the same on a Linux
+box, a Mac, a WSL2 shell and a Windows machine. Docker is the only
+prerequisite — no Make, no Python, no host setup:
+
+```bash
+docker compose up           # the sandbox
+docker compose up -d nats   # just the broker, on nats://127.0.0.1:4222
+```
+
+With `make` (Linux, macOS, WSL2):
+
+| Command | What it does |
+|---|---|
+| `make dev-up` | start the sandbox in the foreground |
+| `make dev-shell` | open a shell inside it |
+| `make dev-opencode` | run the AI agent inside it (Linux/WSL2 only) |
+| `make dev-down` | stop it |
+| `make dev-build` | rebuild the image after a `Dockerfile` change |
+| `make reset` | stop everything and wipe the volumes |
+
+On native Windows, where `make` does not exist:
+
+```powershell
+python scripts\dev-up.py dev-up
+```
+
+From inside the sandbox the broker is at `nats://nats:4222` (the compose
+service name); from the host it is `nats://127.0.0.1:4222`. The broker's host
+ports are overridable — `NATS_PORT=4223 docker compose up -d nats` — so two
+sandboxes can run at once.
+
+The agent overlay (`docker-compose.agent.yml`) is merged automatically when the
+host has a **Linux** opencode binary — the container is Linux, so a macOS or
+Windows binary cannot execute inside it. The overlay mounts the gh config, the
+opencode binary and `~/.gitconfig` read-only. No Docker socket is mounted: the
+agent inside the sandbox cannot manage containers.
 
 ### A note on what `make check` proves
 
@@ -222,6 +267,41 @@ port, or when the server is on the other side of a NAT.
 The broker URL is currently hardcoded to the default
 (`nats://127.0.0.1:4222`), and the value of `--nats` is used as the subject
 instead. See [issue #12](https://github.com/fiwon123/cthrone/issues/12).
+
+### The sandbox dies with `set: pipefail: invalid option name`
+
+The bind mount serves your working tree as-is, and a checkout that predates the
+`.gitattributes` rule keeps CRLF line endings — which `git status` does not
+show, because git compares normalized content. Re-check the tree out with LF
+endings:
+
+```bash
+git rm --cached -r . >/dev/null && git reset --hard
+```
+
+### The sandbox refuses to start as UID 0
+
+`make` refuses to run the container as root, because a root-owned bind mount
+makes every file in the repository unwritable by your own user. Repair the
+ownership of the checkout, or point the sandbox at your own identity:
+
+```bash
+HOST_UID="$(id -u)" HOST_GID="$(id -g)" make dev-up
+```
+
+### `make dev-opencode` says the agent needs a Linux binary
+
+The container is Linux, so a macOS or Windows opencode install cannot execute
+inside it. Use WSL2 — where the host binary is Linux — or run opencode on the
+host against the running stack.
+
+### The broker port is already taken
+
+Another NATS server (or another sandbox) already owns port 4222. Move this one:
+
+```bash
+NATS_PORT=4223 NATS_MONITOR_PORT=8223 docker compose up -d nats
+```
 
 ## Tech stack
 

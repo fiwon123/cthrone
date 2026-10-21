@@ -1,0 +1,33 @@
+# Optional overlay: host-only mounts for the in-container AI agent.
+#
+# NOT part of the default stack, and deliberately not referenced by
+# `docker-compose.yml`. Merge it explicitly:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.agent.yml up -d dev
+#
+# The POSIX Makefile and `scripts/dev-up.py` do this for you — but only when the
+# host can actually satisfy every mount below.
+#
+# Why these mounts live here instead of the base file :
+#
+#   1. Every path is a HOST path that a demo user does not have. Compose treats
+#      a missing bind-mount source as a hard failure on Windows and creates a
+#      root-owned directory for it on Linux, so shipping them in the base file
+#      means a single absent `~/.config/gh` breaks `docker compose up` for a
+#      reader who only wanted to see the project run.
+#   2. The mounted agent binary must be a LINUX executable, because the dev
+#      container is Linux. A macOS (Mach-O) or Windows (PE) install would fail
+#      with "exec format error" *after* a confusing mount, so the entry points
+#      check the binary's magic bytes and omit this file when it is not ELF.
+#
+# Deliberate divergence from the source pattern this was harvested from: no
+# Docker socket mount. The socket is RW-by-definition and grants the agent
+# container-management rights over the host.
+
+services:
+  dev:
+    volumes:
+      - ${HOST_HOME:-${HOME}}/.config/gh:/home/devuser/.config/gh:ro
+      - ${HOST_HOME:-${HOME}}/.opencode/bin/opencode:/usr/local/bin/opencode:ro
+      - ${HOST_HOME:-${HOME}}/.config/opencode:/home/devuser/.config/opencode:ro
+      - ${HOST_HOME:-${HOME}}/.gitconfig:/home/devuser/.gitconfig:ro

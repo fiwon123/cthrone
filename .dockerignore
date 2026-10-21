@@ -1,0 +1,11 @@
+.git
+.opencode/memory
+node_modules
+__pycache__
+*.log
+*.pyc
+*.db
+dist
+build
+tmp
+*.egg-info
