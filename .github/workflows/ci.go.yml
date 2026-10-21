@@ -26,6 +26,11 @@ permissions:
 
 jobs:
   go:
+    # The job name is the status check's name. Without an explicit one
+    # it defaults to the job id, 'go' -- and a required status check that
+    # names 'CI (Go)' would never match it, leaving every release pull
+    # request blocked forever with no failing check to show for it.
+    name: CI (Go)
     runs-on: ubuntu-latest
     defaults:
       run:
