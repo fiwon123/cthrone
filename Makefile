@@ -27,7 +27,7 @@ ANDROID_ZIP := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.zip
 ANDROID_TAR := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.tar.gz
 
 
-.PHONY: all windows linux android zip_linux zip_windows clean release
+.PHONY: all windows linux android zip_linux zip_windows zip_android clean release check
 
 all: release
 
@@ -74,3 +74,37 @@ clean:
 # Build & compress everything
 release: zip_windows zip_linux zip_android
 	@echo "Release ready: $(VERSION)"
+
+# ---------------------------------------------------------------------------
+# Local verification gate
+#
+# gofmt, vet, test, build — in that order, because a formatting failure hides
+# everything after it.
+#
+# Two properties this target deliberately has:
+#
+#   - A missing toolchain FAILS the target. It does not skip. A gate that
+#     cannot fail is worse than no gate: it reads green and proves nothing.
+#   - After the run it names the packages that have no test files. `go test`
+#     prints "[no test files]" for those and still exits 0, so a green run
+#     would otherwise look like coverage that does not exist.
+#
+# This repository has no test file at all yet, so every package shows up in
+# that list. That is the state of the suite, not a pass.
+# ---------------------------------------------------------------------------
+check: ## gofmt, vet, test, build — the local verification gate
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo "ERROR: go is not installed — the check cannot run, so nothing is verified" >&2; \
+		exit 1; \
+	fi; \
+	out="$$(gofmt -l .)"; \
+	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi; \
+	go vet ./...; \
+	go test ./...; \
+	go build ./...; \
+	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')"; \
+	if [ -n "$$notested" ]; then \
+		echo ""; \
+		echo "NOTE: these packages have no test files — this run does not cover them:"; \
+		echo "$$notested" | sed 's/^/  /'; \
+	fi

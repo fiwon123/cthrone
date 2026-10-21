@@ -1,0 +1,76 @@
+name: CI (Go)
+
+# Go CI for this repository. Standard toolchain only: gofmt, go vet, go test,
+# go build -- no third-party linters, so it runs on any Go project unchanged.
+# `go.sum` is the lockfile; `go` downloads exactly what it pins, so there is no
+# separate locked-install step to get wrong.
+#
+# It runs on release pull requests (`dev` -> `main`) and on manual dispatch --
+# never on a feature-branch pull request. Feature branches are gated locally by
+# `make check`.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  go:
+    # The job name is the status check's name. Without an explicit one
+    # it defaults to the job id, 'go' -- and a required status check that
+    # names 'CI (Go)' would never match it, leaving every release pull
+    # request blocked forever with no failing check to show for it.
+    name: CI (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # `go-version-file` keeps CI and local development on the same
+          # toolchain. Pin the version in go.mod, not in two places.
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Check formatting
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        run: go build ./...
+
+# A `paths:` filter that the change does not touch means this workflow does not
+# trigger at all, and a triggered run whose jobs are all gated out reports
+# `skipped`, not `passed`. Skipped is not passed: run `make check` locally
+# before relying on CI.
+#
+# THIS REPOSITORY HAS NO TESTS YET. `go test ./...` prints "[no test files]" for
+# every package and still exits 0, so a green `Test` step here means "the
+# packages compiled and nothing was executed". `make check` prints the list of
+# uncovered packages for the same reason. Read the run's log before treating a
+# green build as coverage.
