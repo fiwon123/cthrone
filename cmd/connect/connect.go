@@ -1,6 +1,8 @@
 package connectcmd
 
 import (
+	"log"
+
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -27,7 +29,9 @@ On nats connection only host receive message and only connect device send messag
 		if natsFlag {
 			natscore.Connect(args, app, natsURLFlag)
 		} else {
-			websocketcore.Connect(args, app)
+			if err := websocketcore.Connect(args, app); err != nil {
+				log.Fatal(err)
+			}
 		}
 	},
 }

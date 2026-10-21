@@ -272,10 +272,14 @@ source ~/.bashrc
 
 ### `connect` says nothing and returns immediately
 
-The websocket client gives up if the server does not answer. Check that
-`cthrone host` is running on the other device, that the address is right, and
-that the port matches — `cthrone scan` on the same network lists the servers
-it can find.
+The websocket client reports what went wrong when it cannot reach the server.
+Check that `cthrone host` is running on the other device, that the address is
+right, and that the port matches — `cthrone scan` on the same network lists
+the servers it can find.
+
+An address that already carries a port is used as it is:
+`cthrone connect 192.168.0.42:9000` talks to port 9000 and not to the
+`--port` flag.
 
 ### `scan` finds nothing
 
