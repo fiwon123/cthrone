@@ -26,3 +26,20 @@ func TestTokenFlagSaysWhereTheSecretShouldComeFrom(t *testing.T) {
 		t.Error("expected the --token help text to say something")
 	}
 }
+
+// The transport can be encrypted. The flag is shared by the host and the
+// client: the host serves https when it is on, the client expects it.
+func TestTLSFlagIsPersistent(t *testing.T) {
+	flag := rootCmd.PersistentFlags().Lookup("tls")
+	if flag == nil {
+		t.Fatal("expected the --tls flag to be registered")
+	}
+
+	if flag.Value.Type() != "bool" {
+		t.Errorf("expected --tls to be a switch, got %q", flag.Value.Type())
+	}
+
+	if flag.DefValue != "false" {
+		t.Errorf("expected the transport to be unencrypted by default, got %q", flag.DefValue)
+	}
+}

@@ -46,10 +46,11 @@ because a name you type many times a day should be short.
 **Supported platforms**: Windows, Linux, and Android (arm64).
 
 > **Security**: the websocket transport requires a **shared secret** — a
-> client that does not know it is refused. The secret is not encrypted on
-> the wire yet, so the messages travel in plaintext: use it on a network you
-> trust. The NATS transport inherits the security of the broker it talks to.
-> See [Security](#security) for how the secret is set up, and
+> client that does not know it is refused — and it can be **encrypted** with
+> `--tls`, which pins the host's certificate. Without `--tls` the messages
+> travel in plaintext: use it on a network you trust. The NATS transport
+> inherits the security of the broker it talks to. See
+> [Security](#security) for how it is set up, and
 > [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the rest of
 > the work.
 
@@ -82,9 +83,41 @@ Two flags change the shape of it:
   opt-in, it prints a warning, and it is how the tool behaved before the
   secret existed.
 
-**The messages themselves travel in plaintext.** The secret decides who may
-join; it does not hide what is said. Encryption is the next step — see
-[issue #11](https://github.com/fiwon123/cthrone/issues/11).
+### Encryption
+
+`--tls` encrypts the transport: the host serves `https`, and the client
+connects over `wss://`.
+
+The host's certificate is **self-signed** — there is no certificate
+authority for a chat between two devices on a LAN. So the client does not
+check it against an authority; it checks it against the **fingerprint** the
+host prints:
+
+```bash
+cthrone host --tls
+# Its fingerprint is c56e6a600a2398c7f13f14501e85508b9fe42ba050d5f0282c3653ed411821d9
+```
+
+Give that fingerprint to the other device:
+
+```bash
+cthrone connect 192.168.0.42 --tls --cert-fingerprint c56e6a600a2398c7f13f14501e85508b9fe42ba050d5f0282c3653ed411821d9
+```
+
+A certificate that does not match is refused, and the client says what it
+got. The fingerprint is accepted with or without colons in it.
+
+The host generates the certificate the first time it runs and keeps it —
+`~/.config/cthrone/cert.pem` and `~/.config/cthrone/key.pem` (the key is
+`0600`) — so the fingerprint does not change under a client that pinned it.
+
+`--insecure` makes the client accept **any** certificate. The traffic is
+still encrypted; the host is simply not checked, which means anyone who can
+intercept the connection can present their own. It is for a trusted network,
+and it has to be asked for.
+
+Without `--tls` the messages travel in plaintext: the secret decides who may
+join, it does not hide what is said.
 
 ## How to use
 
@@ -117,6 +150,9 @@ join; it does not hide what is said. Encryption is the next step — see
    ```bash
    CTHRONE_TOKEN="$(cat ~/.config/cthrone/token)" cthrone connect 192.168.0.42
    ```
+
+   On a network you do not trust, add `--tls` on both sides and give the
+   client the fingerprint the host printed — see [Security](#security).
 
 4. Do not know the address? Scan the local subnet for a chat server:
 
@@ -189,6 +225,9 @@ works the moment the folder is on your PATH.
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
 | `--allow-anonymous` | let clients join without the shared secret |
+| `--tls` | encrypt the transport: the host serves https, the client expects it |
+| `--cert-fingerprint` | the fingerprint of the certificate to pin, with `--tls` |
+| `--insecure` | accept any certificate, with `--tls` |
 | `-v`, `--version` | print the version |
 
 `cthrone connect` needs the address of the machine running `cthrone host`; it
@@ -331,6 +370,19 @@ the servers it can find.
 An address that already carries a port is used as it is:
 `cthrone connect 192.168.0.42:9000` talks to port 9000 and not to the
 `--port` flag.
+
+### The client says the host refused the connection
+
+- **"it needs the shared secret"** — the two devices do not have the same
+  secret. Copy `~/.config/cthrone/token` from the host, or set
+  `CTHRONE_TOKEN` to the same value on both sides.
+- **"it is serving TLS, add --tls"** — the host was started with `--tls` and
+  the client was not. Add `--tls` to the client, and give it the
+  `--cert-fingerprint` the host printed.
+- **"the certificate of the host does not match the fingerprint"** — the
+  client pinned a different certificate. The host generates one the first
+  time it runs and keeps it, so this means the client has an old
+  fingerprint, or it is talking to a different host.
 
 ### `scan` finds nothing
 

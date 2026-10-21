@@ -29,6 +29,7 @@ On nats connection only host receive message and only connect device send messag
 		port, _ := cmd.Flags().GetInt("port")
 		secret, _ := cmd.Flags().GetString("token")
 		secretFile, _ := cmd.Flags().GetString("token-file")
+		tlsEnabled, _ := cmd.Flags().GetBool("tls")
 
 		app := app.New(port)
 		app.Host = bindAddressFlag
@@ -40,7 +41,7 @@ On nats connection only host receive message and only connect device send messag
 			return
 		}
 
-		if err := websocketcore.Host(app, secret, secretFile); err != nil {
+		if err := websocketcore.Host(app, secret, secretFile, websocketcore.TLS{Enabled: tlsEnabled}); err != nil {
 			log.Fatal(err)
 		}
 	},

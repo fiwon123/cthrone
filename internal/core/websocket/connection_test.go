@@ -1,6 +1,7 @@
 package websocketcore
 
 import (
+	"crypto/tls"
 	"errors"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestConnectAddress(t *testing.T) {
 
 // A missing address is an error the command can report, not a panic.
 func TestConnectWithoutAnAddressFails(t *testing.T) {
-	err := Connect(nil, app.New(8080), "", "")
+	err := Connect(nil, app.New(8080), "", "", TLS{})
 	if err == nil {
 		t.Fatal("expected the missing address to be an error")
 	}
@@ -60,11 +61,11 @@ func TestConnectReturnsTheConnectionError(t *testing.T) {
 	original := connect
 	defer func() { connect = original }()
 
-	connect = func(address string, port int, token string) error {
+	connect = func(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) error {
 		return errors.New("no host in this test")
 	}
 
-	err := Connect([]string{"192.168.1.5"}, app.New(8080), "", "")
+	err := Connect([]string{"192.168.1.5"}, app.New(8080), "", "", TLS{})
 	if err == nil {
 		t.Fatal("expected the connection to fail")
 	}

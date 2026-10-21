@@ -1,6 +1,7 @@
 package websockethandler
 
 import (
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"testing"
@@ -15,6 +16,7 @@ func TestBuildURL(t *testing.T) {
 		name    string
 		address string
 		port    int
+		useTLS  bool
 		want    string
 	}{
 		{
@@ -35,11 +37,18 @@ func TestBuildURL(t *testing.T) {
 			port:    8080,
 			want:    "ws://localhost:8080/ws",
 		},
+		{
+			name:    "the encrypted transport says so in the URL",
+			address: "192.168.1.5",
+			port:    8080,
+			useTLS:  true,
+			want:    "wss://192.168.1.5:8080/ws",
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := buildURL(tc.address, tc.port); got != tc.want {
+			if got := buildURL(tc.address, tc.port, tc.useTLS); got != tc.want {
 				t.Errorf("expected %q, got %q", tc.want, got)
 			}
 		})
@@ -52,11 +61,11 @@ func TestConnectReturnsTheDialError(t *testing.T) {
 	original := dial
 	defer func() { dial = original }()
 
-	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
 		return nil, nil, errors.New("no host in this test")
 	}
 
-	err := Connect("192.168.1.5", 8080, "")
+	err := Connect("192.168.1.5", 8080, "", false, nil)
 	if err == nil {
 		t.Fatal("expected the dial to fail")
 	}
@@ -74,13 +83,13 @@ func TestConnectSendsTheSharedSecret(t *testing.T) {
 
 	var got string
 
-	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
 		got = header.Get("X-Cthrone-Token")
 
 		return nil, nil, errors.New("stop here")
 	}
 
-	_ = Connect("192.168.1.5", 8080, "s3cret")
+	_ = Connect("192.168.1.5", 8080, "s3cret", false, nil)
 
 	if got != "s3cret" {
 		t.Errorf("expected the secret to be sent, got %q", got)
@@ -93,16 +102,76 @@ func TestConnectExplainsARefusedConnection(t *testing.T) {
 	original := dial
 	defer func() { dial = original }()
 
-	dial = func(url string, header http.Header) (*websocket.Conn, *http.Response, error) {
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
 		return nil, &http.Response{StatusCode: http.StatusUnauthorized}, errors.New("bad handshake")
 	}
 
-	err := Connect("192.168.1.5", 8080, "")
+	err := Connect("192.168.1.5", 8080, "", false, nil)
 	if err == nil {
 		t.Fatal("expected the connection to be refused")
 	}
 
 	if err.Error() != "the host refused the connection: it needs the shared secret" {
 		t.Errorf("expected the refusal to name the missing secret, got %q", err.Error())
+	}
+}
+
+// The client hands the TLS configuration to the dialer: the certificate is
+// checked against the fingerprint, and the dialer is the one that does it.
+func TestConnectPassesTheTLSConfiguration(t *testing.T) {
+	original := dial
+	defer func() { dial = original }()
+
+	var got *tls.Config
+
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
+		got = tlsConfig
+
+		return nil, nil, errors.New("stop here")
+	}
+
+	config := &tls.Config{ServerName: "cthrone"}
+
+	_ = Connect("192.168.1.5", 8080, "", true, config)
+
+	if got != config {
+		t.Error("expected the TLS configuration to reach the dialer")
+	}
+}
+
+// The TLS configuration reaches the dialer. A dialer without it would use
+// the system roots, and a self-signed certificate is in none of them.
+func TestDialerUsesTheTLSConfiguration(t *testing.T) {
+	config := &tls.Config{ServerName: "cthrone"}
+
+	dialer := dialerFor(config)
+	if dialer.TLSClientConfig != config {
+		t.Error("expected the TLS configuration to reach the dialer")
+	}
+
+	plain := dialerFor(nil)
+	if plain.TLSClientConfig != nil {
+		t.Error("expected no TLS configuration without TLS")
+	}
+}
+
+// A client that talks plain websocket to a host that serves TLS is told
+// what is wrong: "bad handshake" on its own sends the user looking in the
+// wrong place.
+func TestConnectExplainsAPlainClientAgainstATLSHost(t *testing.T) {
+	original := dial
+	defer func() { dial = original }()
+
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
+		return nil, &http.Response{StatusCode: http.StatusBadRequest}, errors.New("bad handshake")
+	}
+
+	err := Connect("192.168.1.5", 8080, "", false, nil)
+	if err == nil {
+		t.Fatal("expected the connection to be refused")
+	}
+
+	if err.Error() != "the host refused the connection: it is serving TLS, add --tls" {
+		t.Errorf("expected the error to name the missing --tls, got %q", err.Error())
 	}
 }

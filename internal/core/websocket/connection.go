@@ -13,7 +13,7 @@ import (
 var connect = websockethandler.Connect
 
 // Connect receive a args with ip for establish connection
-func Connect(args []string, app *app.Data, flagToken, tokenFile string) error {
+func Connect(args []string, app *app.Data, flagToken, tokenFile string, tlsConf TLS) error {
 	address := connectAddress(args)
 	if address == "" {
 		return errors.New("the address of the host to connect to is required")
@@ -24,7 +24,12 @@ func Connect(args []string, app *app.Data, flagToken, tokenFile string) error {
 		return err
 	}
 
-	return connect(address, app.Port, token)
+	tlsConfig, err := clientTLSConfig(tlsConf)
+	if err != nil {
+		return err
+	}
+
+	return connect(address, app.Port, token, tlsConf.Enabled, tlsConfig)
 }
 
 // connectAddress returns the address of the host from the argument, or an

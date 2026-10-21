@@ -16,6 +16,8 @@ var token string
 
 var tokenFile string
 
+var useTLS bool
+
 var checkVersion bool
 
 // Version is popualated when building with Makefile
@@ -54,5 +56,6 @@ func init() {
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
+	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport: the host serves https, the client expects it")
 	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
 }
