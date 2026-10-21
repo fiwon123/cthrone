@@ -39,7 +39,9 @@ internal/core/<transport>/  the operation: connect, host, scan
   ↓
 internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
-internal/data/app/          the in-memory configuration (the port)
+internal/data/app/          the in-memory configuration (the port, the bind address)
+  ↓
+internal/auth/              the shared secret: where it comes from, how it is compared
 ```
 
 The transport is chosen at the command level: `--nats` selects the NATS path,
@@ -53,6 +55,7 @@ cmd/                 cobra commands: connect, host, scan
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
+internal/auth/       the shared secret of the websocket transport
 scripts/             add_to_path installers + the dev sandbox runtime
 docker-compose.yml   the dev sandbox and a local NATS server
 ```

@@ -13,13 +13,18 @@ import (
 var connect = websockethandler.Connect
 
 // Connect receive a args with ip for establish connection
-func Connect(args []string, app *app.Data) error {
+func Connect(args []string, app *app.Data, flagToken, tokenFile string) error {
 	address := connectAddress(args)
 	if address == "" {
 		return errors.New("the address of the host to connect to is required")
 	}
 
-	return connect(address, app.Port)
+	token, err := clientToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
+	if err != nil {
+		return err
+	}
+
+	return connect(address, app.Port, token)
 }
 
 // connectAddress returns the address of the host from the argument, or an
