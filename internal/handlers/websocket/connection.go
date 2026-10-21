@@ -2,19 +2,31 @@ package websockethandler
 
 import (
 	"fmt"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// Connect to websocket host
-func Connect(ip string, port int) {
-	url := fmt.Sprintf("ws://%s:%d/ws", ip, port)
-
+// dial connects to the host. It waits a moment first: the host is often
+// started right before the client connects to it. It is a variable so a test
+// can replace it — the connection is the one step that needs a host to talk
+// to, and a test that cannot reach it cannot check what is done with the
+// error it returns.
+var dial = func(url string) (*websocket.Conn, *http.Response, error) {
 	time.Sleep(1 * time.Second)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+
+	return websocket.DefaultDialer.Dial(url, nil)
+}
+
+// Connect to websocket host
+func Connect(address string, port int) error {
+	url := buildURL(address, port)
+
+	conn, _, err := dial(url)
 	if err != nil {
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -25,4 +37,14 @@ func Connect(ip string, port int) {
 	go receiveMsgLoop(conn, &currentInput)
 
 	select {}
+}
+
+// buildURL returns the URL of the host. An address that carries a port is
+// used as it is, so that the port is not appended twice.
+func buildURL(address string, port int) string {
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return fmt.Sprintf("ws://%s/ws", address)
+	}
+
+	return fmt.Sprintf("ws://%s:%d/ws", address, port)
 }
