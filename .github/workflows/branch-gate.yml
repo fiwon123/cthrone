@@ -1,0 +1,99 @@
+name: Branch gate
+
+# Enforces the two-tier branch model on every pull request.
+#
+# The model is documented in AGENTS.md and workflow.md: feature branches merge
+# into `dev`, and `dev` merges into `main` as a release. This workflow makes the
+# document enforceable, so a PR from the wrong branch fails before a human has
+# to notice.
+#
+# WHAT THIS IS NOT: a security control. A required status check can be
+# overridden by an administrator, and a failed check that nobody blocks on is
+# just noise. Branch protection (Settings -> Branches -> Rules) is what
+# actually enforces the model -- this workflow is the guard rail that tells an
+# author they got it wrong. See the repo-settings checklist in AGENTS.md.
+#
+# Two things this workflow deliberately does NOT do:
+#
+#   - It never checks out the pull request. A `pull_request` workflow that
+#     checks out PR code runs untrusted code, and a `pull_request_target`
+#     workflow that does the same gets the base repository's secrets. This one
+#     only reads two branch names out of the event payload, so it needs no
+#     checkout and no token.
+#   - It has no `workflow_dispatch:` trigger. A manual run has no pull request,
+#     so there is no head or base branch to check; the job would fail for a
+#     reason that has nothing to do with the author's work.
+#
+# A gated-out or never-triggered run is not a pass. This workflow has no
+# `paths:` filter and no `if:` condition, so it runs on every pull request to
+# `dev` or `main` -- but a skipped run still proves nothing.
+# Skipped is not passed: neither outcome verifies a change, so test locally
+# before relying on CI.
+
+on:
+  pull_request:
+    branches: [dev, main]
+    # `edited` re-runs the gate when the base branch changes, so moving a PR
+    # from `dev` to `main` re-checks it against the new base's policy.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+env:
+  # Branches that may target `dev`. Keep in sync with the branch types
+  # documented in AGENTS.md and workflow.md -- they are the same list, and the
+  # issue number is part of the convention (`<type>/<issue-number>-<slug>`), so
+  # a branch that names no issue is rejected too.
+  #
+  # If your project keeps release branches, add `release/` to the main pattern
+  # below rather than loosening it further.
+  DEV_BRANCH_PATTERN: '^(feat|fix|refactor|docs|test|chore|ci)/[0-9]+-'
+
+  # Branches that may target `main`:
+  #   - `dev`  -- the release pull request. The head of that PR *is* the
+  #               integration branch, because the release is `dev` -> `main`
+  #               and not a separate release branch. A pattern that requires a
+  #               `release/` prefix here would block the library's own
+  #               release flow.
+  #   - `fix/` -- the urgent hotfix path, for a fix that must land on `main`
+  #               before it can be cherry-picked back to `dev`.
+  MAIN_BRANCH_PATTERN: '^(dev$|fix/[0-9]+-)'
+
+jobs:
+  gate:
+    name: Branch gate
+    runs-on: ubuntu-latest
+    steps:
+      # The branch names come from the event payload, which the pull request
+      # author controls. They are passed in through `env:` and read as quoted
+      # shell variables -- a value spliced directly into the `run:` body is a
+      # script injection, because the author chooses it.
+      - name: Check the head branch against the base branch's policy
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          case "$BASE_REF" in
+            dev)
+              pattern="$DEV_BRANCH_PATTERN"
+              expected="<type>/<issue-number>-<slug> -- <type> is one of feat, fix, refactor, docs, test, chore, ci"
+              ;;
+            main)
+              pattern="$MAIN_BRANCH_PATTERN"
+              expected="dev (the release pull request) or fix/<issue-number>-<slug> (an urgent hotfix)"
+              ;;
+            *)
+              echo "::error::unexpected base branch '$BASE_REF' -- this gate only knows dev and main"
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$HEAD_REF" =~ $pattern ]]; then
+            echo "::error::branch '$HEAD_REF' may not target '$BASE_REF'. Expected: $expected"
+            exit 1
+          fi
+
+          echo "accepted: '$HEAD_REF' -> '$BASE_REF'"
