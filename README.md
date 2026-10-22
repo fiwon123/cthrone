@@ -472,6 +472,22 @@ The container is Linux, so a macOS or Windows opencode install cannot execute
 inside it. Use WSL2 — where the host binary is Linux — or run opencode on the
 host against the running stack.
 
+### The sandbox fails with `EACCES: permission denied, mkdir '/home/devuser/.cache/opencode'`, or `mkdir /go/pkg/mod/cache: permission denied`
+
+The sandbox's caches are Docker volumes, and Docker creates a mount destination
+the image does not contain **as root** — while the container runs as your UID.
+The image now creates those directories itself, so a sandbox built from the
+current `Dockerfile` is fine.
+
+A sandbox created **before** that fix keeps its old, root-owned volumes:
+Docker does not re-initialise a volume that already exists. Recreate them
+once:
+
+```bash
+make reset        # docker compose down -v
+make dev-up
+```
+
 ### The broker port is already taken
 
 Another NATS server (or another sandbox) already owns port 4222. Move this one:

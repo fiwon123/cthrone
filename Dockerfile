@@ -67,6 +67,31 @@ RUN if ! getent group ${HOST_GID} >/dev/null; then groupadd --gid ${HOST_GID} de
     && chown -R ${HOST_UID}:${HOST_GID} /home/devuser \
     && git config --system --add safe.directory /workspace
 
+# --- the mount points, created in the image ---
+#
+# Docker creates the DESTINATION of a bind mount or a volume when the image
+# does not already contain it, and it creates that path as **root**. The
+# runtime user is ${HOST_UID}, not root, so it then cannot write what Docker
+# just made for it, and both failures land far from their cause:
+#
+#   - the agent dies on its first run with
+#     `Error: EACCES: permission denied, mkdir '/home/devuser/.cache/opencode'`;
+#   - the build fails with `mkdir /go/pkg/mod/cache: permission denied`;
+#
+# while the container still reports `Up` and the entrypoint still prints its
+# "sleeping indefinitely" banner.
+#
+# Creating them here means Docker finds the path already there and leaves the
+# ownership alone. The contents are still the host's, or the volume's.
+#
+# ADD YOUR OWN MOUNT POINTS HERE: every directory the compose file mounts
+# into needs a line in this block, or the runtime user cannot write it.
+RUN mkdir -p /home/devuser/.cache /home/devuser/.cache/go-build \
+             /home/devuser/.config /home/devuser/.config/gh \
+             /home/devuser/.config/opencode \
+             /go/pkg/mod \
+    && chown -R ${HOST_UID}:${HOST_GID} /home/devuser/.cache /home/devuser/.config /go/pkg/mod
+
 # --- dev-sandbox rc (badge + terminal title, loaded for BOTH users) ---
 # `make dev-shell` opens an interactive *non-login* bash, which reads only
 # ~/.bashrc (HOME comes from the compose environment), never /etc/profile.d.

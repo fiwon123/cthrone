@@ -97,6 +97,13 @@ The container pins Go 1.25.5 — the version in `go.mod` — so a build inside t
 sandbox is the build CI runs. The sandbox is **optional**: a host toolchain
 still works, and `make check` does not require Docker.
 
+The image creates the directories the compose file mounts into, owned by the
+runtime user: Docker creates a mount destination the image does not contain as
+**root**, and the container runs as `${HOST_UID}`, so a sandbox whose image
+omits them cannot write its own caches. A sandbox created before that fix
+keeps its old root-owned volumes — Docker does not re-initialise a volume that
+already exists — so it needs `make reset` once.
+
 ### The current state of this suite — read this before claiming coverage
 
 **The coverage is partial.** Both transports, the two commands that use them
