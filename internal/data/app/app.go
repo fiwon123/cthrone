@@ -15,6 +15,9 @@ type Data struct {
 	// state the tool was in before, and it should never be the state it
 	// is in by accident.
 	AllowAnonymous bool
+
+	// Name is the device name announced on the network.
+	Name string
 }
 
 func New(port int) *Data {
