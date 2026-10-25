@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	stdin  *os.File = os.Stdin
+	stdin  *os.File  = os.Stdin
 	stdout io.Writer = os.Stdout
 )
 
