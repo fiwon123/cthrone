@@ -27,7 +27,7 @@ ANDROID_ZIP := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.zip
 ANDROID_TAR := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.tar.gz
 
 
-.PHONY: all windows linux android zip_linux zip_windows zip_android clean release check \
+.PHONY: all windows linux android zip_linux zip_windows zip_android clean release check assets \
 	help dev-up dev-down dev-shell dev-opencode dev-opencode-auto dev-log dev-build reset \
 	preflight require-agent prepare-agent-mounts check-identity opencode-version opencode-upgrade \
 	shell opencode opencode-auto
@@ -259,3 +259,8 @@ dev-opencode: preflight require-agent ## Run the AI coding agent inside the dev 
 # denied (every secret-file deny rule still applies).
 dev-opencode-auto: OPENCODE_ARGS = --auto
 dev-opencode-auto: dev-opencode
+
+# Generate logo assets from SVG master
+assets: ## generate logo assets from SVG
+	@go run ./cmd/assets
+	@echo "Assets generated in assets/"
