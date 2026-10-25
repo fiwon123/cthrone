@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fiwon123/cthrone/main/assets/logo-128.png" alt="cthrone logo" width="128" height="128">
+</p>
+
 <h1 align="center">
   cthrone
 </h1>
@@ -248,7 +252,10 @@ works the moment the folder is on your PATH.
 |---|---|
 | `cthrone host` | host the chat server and wait for a client |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
-| `cthrone scan` | scan the local subnet for chat servers |
+| `cthrone scan` | scan the local subnet for chat servers (shows device names when discovered) |
+| `cthrone ui` | launch the Fyne GUI (desktop; build with `-tags gui` and required system libraries) |
+| `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
+| `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
 
 | Flag | What it does |
 |---|---|
@@ -259,6 +266,7 @@ works the moment the folder is on your PATH.
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
 | `--allow-anonymous` | let clients join without the shared secret |
+| `--name` | device name announced on the network (stored in `~/.config/cthrone/device.json`) |
 | `--tls` | encrypt the transport: the host serves https, the client expects it |
 | `--cert-fingerprint` | the fingerprint of the certificate to pin, with `--tls` |
 | `--insecure` | accept any certificate, with `--tls` |
