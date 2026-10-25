@@ -7,23 +7,57 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+type publisher interface {
+	Publish(string, []byte) error
+	Flush() error
+}
+
+type subscription interface {
+	Unsubscribe() error
+}
+
+type subscriber interface {
+	Subscribe(string, nats.MsgHandler) (subscription, error)
+}
+
+type natsSubscriber struct {
+	nc *nats.Conn
+}
+
+func (n *natsSubscriber) Subscribe(subj string, h nats.MsgHandler) (subscription, error) {
+	return n.nc.Subscribe(subj, h)
+}
+
+var (
+	pub  = func(nc *nats.Conn) publisher { return nc }
+	subs = func(nc *nats.Conn) subscriber { return &natsSubscriber{nc: nc} }
+)
+
 // Publish Message using a string subject
 func PublishMessages(nc *nats.Conn, message string, subject string) error {
+	return publishMessages(pub(nc), message, subject)
+}
 
-	err := nc.Publish(subject, []byte(message))
+func publishMessages(p publisher, message string, subject string) error {
+	err := p.Publish(subject, []byte(message))
 	if err != nil {
 		return fmt.Errorf("Error publishing: %v", err)
 	}
 
-	nc.Flush()
+	if err := p.Flush(); err != nil {
+		return err
+	}
 
 	return nil
 }
 
 // Subscribe Message using a string subject
 func SubscribeMessages(nc *nats.Conn, subject string) {
+	subscribeMessages(subs(nc), subject)
+}
 
-	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+func subscribeMessages(s subscriber, subject string) {
+	sub, err := s.Subscribe(subject, func(m *nats.Msg) {
 		log.Printf("Received message: %s", string(m.Data))
 	})
 
@@ -31,9 +65,7 @@ func SubscribeMessages(nc *nats.Conn, subject string) {
 		log.Printf("Error subscribing: %v", err)
 		return
 	}
-	defer sub.Unsubscribe()
+	sub.Unsubscribe()
 
 	log.Println("Subscriptions active")
-
-	select {}
 }
