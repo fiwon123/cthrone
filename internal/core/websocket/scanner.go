@@ -3,19 +3,32 @@ package websocketcore
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/data/app"
 )
 
+var localIP = getLocalIP
+
+var dialScan = func(addr string, timeout time.Duration) error {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return err
+	}
+	conn.Close()
+	return nil
+}
+
 // Scan all available local ips
-func Scan(app *app.Data) {
-	myIP, err := getLocalIP()
+func Scan(app *app.Data) []string {
+	myIP, err := localIP()
 	if err != nil {
 		fmt.Println(err)
-		return
+		return nil
 	}
 
 	fmt.Println("MyLocalIP: ", myIP)
@@ -23,20 +36,31 @@ func Scan(app *app.Data) {
 	timeout := 300 * time.Millisecond
 
 	fmt.Println("Scanning...")
+
+	var mu sync.Mutex
+	var found []string
+	var wg sync.WaitGroup
+
 	for i := 1; i <= 254; i++ {
 		ip := fmt.Sprintf("%s%d", mySubnet, i)
+		wg.Add(1)
 		go func(ip string) {
-			conn, err := net.DialTimeout("tcp", ip+":"+strconv.Itoa(app.Port), timeout)
+			defer wg.Done()
+			err := dialScan(ip+":"+strconv.Itoa(app.Port), timeout)
 			if err == nil {
+				mu.Lock()
+				found = append(found, ip)
+				mu.Unlock()
 				fmt.Println("Found chat server at:", ip)
-				conn.Close()
 			}
 		}(ip)
 	}
 
-	fmt.Println("Done")
+	wg.Wait()
+	sort.Strings(found)
 
-	time.Sleep(1 * time.Second)
+	fmt.Println("Done")
+	return found
 }
 
 func getLocalIP() (string, error) {
@@ -45,21 +69,66 @@ func getLocalIP() (string, error) {
 		return "", err
 	}
 
-	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok {
-			ip := ipnet.IP
-			if ip.To4() != nil && !ip.IsLoopback() {
+	ip, ok := selectLocalIP(addrs)
+	if !ok {
+		return "", fmt.Errorf("no local IP found")
+	}
+	return ip, nil
+}
 
-				if strings.Contains(ip.String(), "192.168.") {
-					return ip.String(), nil
-				}
-			}
+func selectLocalIP(addrs []net.Addr) (string, bool) {
+	var fallback string
+
+	for _, addr := range addrs {
+		ipnet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipnet.IP
+		if ip.To4() == nil || ip.IsLoopback() {
+			continue
+		}
+
+		s := ip.String()
+		if isRFC1918(s) {
+			return s, true
+		}
+		if fallback == "" {
+			fallback = s
 		}
 	}
-	return "", fmt.Errorf("no local IP found")
+
+	if fallback != "" {
+		return fallback, true
+	}
+	return "", false
+}
+
+func isRFC1918(ip string) bool {
+	if strings.HasPrefix(ip, "192.168.") {
+		return true
+	}
+	if strings.HasPrefix(ip, "10.") {
+		return true
+	}
+	if strings.HasPrefix(ip, "172.") {
+		parts := strings.Split(ip, ".")
+		if len(parts) >= 2 {
+			var second int
+			fmt.Sscanf(parts[1], "%d", &second)
+			if second >= 16 && second <= 31 {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func subnetFromIP(ip string) string {
 	lastDot := strings.LastIndex(ip, ".")
+	if lastDot == -1 {
+		return ip + "."
+	}
 	return ip[:lastDot+1]
 }
