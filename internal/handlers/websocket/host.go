@@ -25,7 +25,7 @@ func Host(port int, bindAddress, token string, allowAnonymous bool, certFile, ke
 
 	address := listenAddress(bindAddress, port)
 
-	log.Println("WebSocket server listening on", address)
+	log.Println("WebSocket server listening on", address, "-", describeBind(bindAddress))
 
 	if allowAnonymous {
 		log.Println("WARNING: anonymous connections are allowed, anyone who can reach this port can join the chat")
@@ -63,6 +63,16 @@ func openConnection(w http.ResponseWriter, r *http.Request, token string, allowA
 	go sendMsgLoop(conn, &currentInput)
 
 	select {}
+}
+
+func describeBind(bindAddress string) string {
+	if bindAddress == "" {
+		return "every interface — reachable from the local network"
+	}
+	if bindAddress == "127.0.0.1" || bindAddress == "localhost" {
+		return "loopback only — this machine alone"
+	}
+	return bindAddress + " — a specific interface"
 }
 
 // allowed checks the shared secret. A host that allows anonymous connections
