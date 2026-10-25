@@ -18,6 +18,8 @@ var bindAddressFlag string
 
 var allowAnonymousFlag bool
 
+var nameFlag string
+
 // Cmd represents the host command
 var Cmd = &cobra.Command{
 	Use:   "host",
@@ -37,6 +39,7 @@ On nats connection only host receive message and only connect device send messag
 		app := app.New(port)
 		app.Host = bindAddressFlag
 		app.AllowAnonymous = allowAnonymousFlag
+		app.Name = nameFlag
 
 		tlsConf := auth.TLS{
 			Enabled:     tlsEnabled,
@@ -61,4 +64,5 @@ func init() {
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&bindAddressFlag, "host", "", "the interface to bind to (default: every interface, so another device can reach it)")
 	Cmd.Flags().BoolVar(&allowAnonymousFlag, "allow-anonymous", false, "let clients join without the shared secret")
+	Cmd.Flags().StringVar(&nameFlag, "name", "", "device name announced on the network")
 }
