@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fiwon123/cthrone/main/assets/logo-128.png" alt="cthrone logo" width="128" height="128">
+  <img src="assets/logo-128.png" alt="cthrone logo" width="128" height="128">
 </p>
 
 <h1 align="center">
