@@ -5,8 +5,11 @@ import (
 	"os"
 
 	connectcmd "github.com/fiwon123/cthrone/cmd/connect"
+	execcmd "github.com/fiwon123/cthrone/cmd/exec"
 	hostcmd "github.com/fiwon123/cthrone/cmd/host"
+	recvcmd "github.com/fiwon123/cthrone/cmd/recv"
 	scancmd "github.com/fiwon123/cthrone/cmd/scan"
+	uicmd "github.com/fiwon123/cthrone/cmd/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +59,9 @@ func init() {
 	rootCmd.AddCommand(connectcmd.Cmd)
 	rootCmd.AddCommand(hostcmd.Cmd)
 	rootCmd.AddCommand(scancmd.Cmd)
+	rootCmd.AddCommand(uicmd.Cmd)
+	rootCmd.AddCommand(recvcmd.Cmd)
+	rootCmd.AddCommand(execcmd.Cmd)
 
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")
