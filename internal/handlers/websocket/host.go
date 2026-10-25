@@ -31,11 +31,13 @@ func Host(port int, bindAddress, token string, allowAnonymous bool, certFile, ke
 		log.Println("WARNING: anonymous connections are allowed, anyone who can reach this port can join the chat")
 	}
 
+	server := &http.Server{Addr: address, Handler: mux}
+
 	if certFile != "" {
-		return http.ListenAndServeTLS(address, certFile, keyFile, mux)
+		return server.ListenAndServeTLS(certFile, keyFile)
 	}
 
-	return http.ListenAndServe(address, mux)
+	return server.ListenAndServe()
 }
 
 // listenAddress returns the address the server listens on. An empty bind
