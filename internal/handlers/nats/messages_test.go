@@ -10,11 +10,11 @@ import (
 )
 
 type fakePub struct {
-	published [][]byte
-	subject   string
-	flushErr  error
+	published  [][]byte
+	subject    string
+	flushErr   error
 	publishErr error
-	flushed   bool
+	flushed    bool
 }
 
 func (f *fakePub) Publish(subj string, data []byte) error {

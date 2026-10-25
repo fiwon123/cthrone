@@ -51,8 +51,8 @@ func wsPair(t *testing.T) (*websocket.Conn, *websocket.Conn) {
 }
 
 var (
-	wsConn       *websocket.Conn
-	serverReady  = make(chan struct{})
+	wsConn      *websocket.Conn
+	serverReady = make(chan struct{})
 )
 
 func TestReceiveMsgLoopPrintsMessage(t *testing.T) {
