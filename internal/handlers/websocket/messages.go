@@ -57,6 +57,9 @@ func sendMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
 
 		switch b {
 		case ctrlC:
+			fmt.Fprintf(stdout, "\r\nExiting...\n")
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye"))
+			_ = conn.Close()
 			return
 		case enter:
 			mu.Lock()
