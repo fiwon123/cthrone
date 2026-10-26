@@ -4,7 +4,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
