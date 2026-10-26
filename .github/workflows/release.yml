@@ -280,6 +280,11 @@ jobs:
 
       - name: Compose the release description
         env:
+          # `gh` refuses to authenticate without this, and the compose step calls
+          # `releases/generate-notes`. Without it the step still succeeds — it
+          # falls back to a pointer at the commit list — so the loss is silent
+          # unless the token is set here.
+          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REPO: ${{ github.repository }}
