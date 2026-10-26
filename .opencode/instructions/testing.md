@@ -29,20 +29,25 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-This project's test suite is **small**. `go test ./...` prints
-`? package [no test files]` for every package without a test file, and exits 0.
-That is not a pass: it means nothing was executed there.
+The coverage is **partial**: 13 of the 20 packages in the module have tests.
+`go test ./...` prints `? package [no test files]` for the other seven and exits
+0. That is not a pass: it means nothing was executed there.
 
-So a green `make check` currently proves exactly three things:
+- **Covered**: `cmd` (root), `cmd/connect`, `cmd/host`, `cmd/scan`,
+  `internal/auth`, `internal/core/nats`, `internal/core/websocket` (scanner
+  included), `internal/discovery`, `internal/exec`, `internal/handlers/nats`,
+  `internal/handlers/websocket`, `internal/session`, `internal/shutdown`.
+- **Not covered**: `main`, `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`,
+  `internal/data/app`, `ui`.
 
-- the code is `gofmt`-clean,
-- `go vet` found nothing,
-- the code compiles.
+So a green `make check` proves the code is `gofmt`-clean, `go vet` found
+nothing, it compiles, and the covered packages passed — nothing about the seven
+above.
 
-It does **not** prove the behaviour still works. Until a package has a test
-file, treat its behaviour as unverified, and say so when reporting. The honest
-report is "gofmt, vet, and build are clean; the changed package has no test
-coverage", not "tests pass".
+Until a package has a test file, treat its behaviour as unverified and say so
+when reporting. The honest report is "gofmt, vet, and build are clean; the
+transports, the scanner and the CLI commands are covered, `cmd/recv` is not",
+not "tests pass".
 
 ### Go conventions
 

@@ -453,16 +453,19 @@ agent inside the sandbox cannot manage containers.
 
 ### A note on what `make check` proves
 
-`make check` runs gofmt, vet, test, and build. **This repository has no test
-files at all**: `go test ./...` prints `[no test files]` for every package and
-still exits 0.
+`make check` runs gofmt, vet, test, and build. The suite is **partial**: 13 of
+the 20 packages in the module have tests, covering the transports, the scanner,
+the CLI commands and the shared secret/TLS handling. Seven packages are not
+covered — `main`, `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`,
+`internal/data/app` and `ui` (the Fyne GUI, which is only built with `-tags gui`
+under CI).
 
-A green run therefore proves exactly three things — the code is formatted, it
-vets clean, and it compiles. It does **not** prove the behaviour works, and
-for a chat tool the behaviour is the whole point: that a message arrives, that
-a host binds the right port, that a scan finds the server. `make check` prints
-the list of uncovered packages after the run so the gap is visible in the
-output, not only in this paragraph.
+A green run therefore proves that the code is formatted, that it vets clean,
+that it compiles, and that the 13 covered packages passed. It does **not** prove
+the behaviour of the seven above: the GUI, the remote-exec CLI wiring, the asset
+embedding, the in-memory configuration, and `main`. `make check` prints the list
+of uncovered packages after the run so the gap is visible in the output, not
+only in this paragraph.
 
 ## Troubleshooting
 

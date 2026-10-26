@@ -108,24 +108,30 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**The coverage is partial.** Both transports, the two commands that use them
-and the `host`/`connect` command flags have tests; the scanner and the `scan`
-command do not. `go test ./...` prints `? package [no test files]` for those,
-and exits 0. That is not a pass: it means nothing was executed for them.
+**The coverage is partial.** The transports, the scanner, and the CLI commands
+have tests; seven packages do not. `go test ./...` prints `? package [no test
+files]` for those and exits 0. That is not a pass: it means nothing was executed
+for them.
+
+- **Covered (13 packages)**: `cmd` (root), `cmd/connect`, `cmd/host`,
+  `cmd/scan`, `internal/auth`, `internal/core/nats`, `internal/core/websocket`
+  (the scanner included), `internal/discovery`, `internal/exec`,
+  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
+  `internal/shutdown`.
+- **Not covered (7 packages)**: `main` (`github.com/fiwon123/cthrone`),
+  `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`, `internal/data/app`, `ui`.
 
 So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
 - the code compiles,
-- the tested packages passed — currently both transports and the two
-  commands that use them.
+- the 13 covered packages passed.
 
-It does **not** prove the behaviour of the scanner works. A chat tool's
-behaviour — a message that arrives, a host that binds the right port, a scan
-that finds the server — is partly untested here. Report honestly: "gofmt, vet,
-and build are clean; the transports are covered, the scanner is not", not
-"tests pass".
+It does **not** prove the behaviour of the seven above — the GUI, the
+remote-exec CLI wiring, the asset embedding, the in-memory configuration, and
+`main`. Report honestly: "gofmt, vet, and build are clean; the transports, the
+scanner and the CLI commands are covered, `cmd/recv` is not", not "tests pass".
 
 `make check` prints the list of packages with no test file after the run, so
 the gap is visible in the output rather than only in this document.
