@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/fiwon123/cthrone/actions/workflows/ci.go.yml"><img src="https://github.com/fiwon123/cthrone/actions/workflows/ci.go.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/go-1.25.5-informational" alt="Go 1.25.5">
+  <img src="https://img.shields.io/badge/go-1.26.10-informational" alt="Go 1.26.10">
   <a href="https://github.com/fiwon123/cthrone/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
 </p>
 
@@ -308,9 +308,9 @@ decide *how* the transport does it.
 
 Either of these works:
 
-- **Host toolchain** — Go 1.25.5 or newer (the version is pinned in `go.mod`)
+- **Host toolchain** — Go 1.26.10 or newer (the version is pinned in `go.mod`)
   and `make`. Fastest for a quick edit.
-- **Dev sandbox** — Docker, and nothing else. The container pins Go 1.25.5, so
+- **Dev sandbox** — Docker, and nothing else. The container pins Go 1.26.10, so
   your build is the build CI runs.
 
 OpenCode is optional — see `AGENTS.md` for how the agent layer is configured.
@@ -508,7 +508,7 @@ NATS_PORT=4223 NATS_MONITOR_PORT=8223 docker compose up -d nats
 
 | Layer | Technology |
 |---|---|
-| Language | Go 1.25.5 |
+| Language | Go 1.26.10 |
 | CLI | spf13/cobra |
 | Transports | gorilla/websocket, nats-io/nats.go |
 | Terminal | golang.org/x/term |

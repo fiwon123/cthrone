@@ -26,12 +26,12 @@ through a NATS broker.
 
 ## Stack
 
-- **Language**: Go 1.25.5 (see `go.mod`)
+- **Language**: Go 1.26.10 (see `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **Configuration**: none on disk — the port is the only setting, and it comes from the command line
-- **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.25.5 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container.
+- **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container.
 
 ## Architecture
 

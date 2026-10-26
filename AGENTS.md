@@ -24,11 +24,11 @@ through a NATS broker.
 
 ### Main Technology
 
-- **Language**: Go 1.25.5 (pinned in `go.mod`)
+- **Language**: Go 1.26.10 (pinned in `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term
-- **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.25.5 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
+- **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
 ### Core Architecture
 
@@ -93,7 +93,7 @@ docker compose up -d nats # just the broker, on nats://127.0.0.1:4222
 
 On native Windows, where `make` does not exist: `python scripts/dev-up.py dev-up`.
 
-The container pins Go 1.25.5 — the version in `go.mod` — so a build inside the
+The container pins Go 1.26.10 — the version in `go.mod` — so a build inside the
 sandbox is the build CI runs. The sandbox is **optional**: a host toolchain
 still works, and `make check` does not require Docker.
 
@@ -141,7 +141,7 @@ machine. This is what `make check` and `git` operate on.
 ### Sandbox mode (optional)
 
 `make dev-opencode` runs the agent inside the dev container, where the
-toolchain is pinned to Go 1.25.5 — the version in `go.mod`, the same one CI
+toolchain is pinned to Go 1.26.10 — the version in `go.mod`, the same one CI
 uses. The workspace is bind-mounted at `/workspace`; edits made inside are the
 same files on the host.
 
