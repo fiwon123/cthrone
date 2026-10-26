@@ -165,6 +165,7 @@ Reference issues in commits and PRs:
 - `Closes #42`
 - `Fixes #42`
 
-Because feature PRs merge into `dev`, not the default branch, `Closes #N` does
-not auto-close the issue. Close it with `gh issue close <issue-number>` after
-the merge to `dev`.
+The repository's default branch is `dev`, so `Closes #N` in a PR body closes
+the issue automatically when the PR merges into `dev`. Still run
+`gh issue close <issue-number>` afterwards: it is the verification, and
+"already closed" is the expected answer — not an error.
