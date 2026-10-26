@@ -47,7 +47,9 @@ There is nothing to configure: the only setting is the port, and it comes from
 the command line. The `ct` short alias ships next to the `cthrone` binary,
 because a name you type many times a day should be short.
 
-**Supported platforms**: Windows, Linux, and Android (arm64).
+**Supported platforms**: Windows, Linux, macOS, and Android (arm64). The Android
+build is a **command-line program** that runs in a terminal app on the phone —
+there is no APK and no app icon. See [Android](#android-arm64) below.
 
 > **Security**: the websocket transport requires a **shared secret** — a
 > client that does not know it is refused — and it can be **encrypted** with
@@ -235,8 +237,9 @@ join, it does not hide what is said.
 
 Download the archive for your platform from the
 [releases page](https://github.com/fiwon123/cthrone/releases), then run the
-installer it ships with. Every release also carries a `checksums.txt` — verify
-a download before running it.
+installer it ships with — Linux, macOS and Windows carry one; the Android
+archive does not. Every release also carries a `checksums.txt` — verify a
+download before running it.
 
 | Platform | Archive | Install |
 |---|---|---|
@@ -244,7 +247,7 @@ a download before running it.
 | macOS (Apple silicon) | `*_darwin_arm64.tar.gz` | `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
 | macOS (Intel) | `*_darwin_amd64.tar.gz` | same as above |
 | Windows (amd64) | `*_windows.zip` | `Expand-Archive <archive>` then `.\add_to_path.bat` |
-| Android (arm64) | `*_android.zip` / `.tar.gz` | unpack it, then run `./cthrone` (arm64) |
+| Android (arm64) | `*_android.zip` / `.tar.gz` | **CLI, not an app** — runs in Termux; see [Android](#android-arm64) |
 
 The desktop GUI (`cthrone ui`) ships as its own archive, so a terminal-only
 user does not download a window toolkit:
@@ -257,6 +260,43 @@ user does not download a window toolkit:
 
 Each archive carries both `cthrone` and the short alias `ct`, so `ct host`
 works the moment the folder is on your PATH.
+
+### Android (arm64)
+
+The Android archive holds the same command-line program, compiled for Android's
+CPU. **It is not an APK.** There is no app icon and nothing to tap: Android has
+no terminal of its own, so the tool runs inside one —
+[Termux](https://termux.dev) is the one it is written for.
+
+```bash
+# inside Termux
+cd ~                       # not /sdcard — that mount is noexec, and running
+                           # the binary from there fails with "Permission denied"
+curl -LO https://github.com/fiwon123/cthrone/releases/download/<tag>/cthrone_<tag>_android.tar.gz
+tar -xzf cthrone_<tag>_android.tar.gz
+chmod +x cthrone ct
+./cthrone connect <ip>     # or ./cthrone host — same commands as on a desktop
+```
+
+The shared secret works the same way, with one extra step: the first
+`cthrone host` run creates `~/.config/cthrone/token`, and the device that
+connects has to hold the same value or the connection is refused. Whichever
+device hosts, copy the file across before connecting.
+
+What the Android build does and does not give you:
+
+- **arm64, `v8.0` only** — a 32-bit phone and an x86_64 emulator cannot run it.
+- the archive carries **no installer script** (Linux, macOS and Windows ship
+  one); to type `cthrone` from any directory, add the folder to `PATH` yourself,
+  e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
+- `cthrone ui` (the Fyne GUI) is desktop-only. An Android APK is
+  [issue #9](https://github.com/fiwon123/cthrone/issues/9), not yet started.
+- **it is not verified on a device.** The binary is cross-compiled and published;
+  nothing in this project's CI runs it on a phone or an emulator, so "built for
+  Android" is a build claim, not an observed result. If it fails on your device,
+  that is a bug worth
+  [reporting](https://github.com/fiwon123/cthrone/issues) rather than a
+  surprise.
 
 ## Commands
 
