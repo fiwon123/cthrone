@@ -278,11 +278,12 @@ on your way past:
 - Every pull request is assigned to a milestone when created
 - No orphaned branches, pull requests, or issues
 
-> `Closes #N` does not close the issue on a `dev` merge. GitHub auto-closes a
-> linked issue only when the pull request merges into the repository's *default*
-> branch, which is `main`. A feature pull request merges into `dev`, so
-> `Closes #N` gives you the cross-reference and nothing more. Close the issue
-> explicitly with `gh issue close` after the merge to `dev`.
+> The repository's **default branch is `dev`**, so `Closes #N` in a pull request
+> body does close the issue when that pull request merges into `dev` — GitHub
+> auto-closes on a merge into the *default* branch, and `dev` is it. Run
+> `gh issue close` after the merge anyway: it is the verification, and it is
+> expected to answer "already closed". The release pull request (`dev` → `main`)
+> closes nothing, because every milestone issue is closed before it is opened.
 
 ### Branch Strategy
 
