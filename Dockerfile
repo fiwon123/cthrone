@@ -7,7 +7,7 @@
 # go-version-file). A sandbox on a different Go version is not the same
 # environment, and "works on my machine" is what this image exists to remove.
 
-FROM golang:1.25.5-bookworm
+FROM golang:1.26.10-bookworm
 
 # Build-time ARGs are declared here, AFTER the first FROM. An ARG declared
 # before FROM is in scope only for the FROM lines themselves — every
@@ -108,7 +108,7 @@ RUN chsh -s /usr/bin/zsh root 2>/dev/null || true \
     && chown ${HOST_UID}:${HOST_GID} \
         /home/devuser/.bashrc /home/devuser/.zshrc /home/devuser/.zprofile
 
-# The Go toolchain is already in the base image (golang:1.25.5-bookworm), so
+# The Go toolchain is already in the base image (golang:1.26.10-bookworm), so
 # there is nothing to install here. A tool that must be built from source is
 # installed as devuser, not as root: `go install` writes to a root-owned
 # directory otherwise, and the runtime user could only read it.
