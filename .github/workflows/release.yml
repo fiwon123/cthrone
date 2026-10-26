@@ -313,7 +313,7 @@ jobs:
           | macOS arm64 | `cthrone_@VERSION@_darwin_arm64.tar.gz` | CLI, Apple silicon |
           | macOS amd64 | `cthrone_@VERSION@_darwin_amd64.tar.gz` | CLI, Intel |
           | macOS arm64, GUI | `cthrone_@VERSION@_darwin_gui_arm64.tar.gz` | Fyne GUI |
-          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | CLI. Unpack, then run `./cthrone` on the device |
+          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | **CLI, not an app** — no APK. Runs in Termux; unpack into the Termux home (not `/sdcard`, which is `noexec`), then `chmod +x cthrone ct` |
 
           Every archive carries both `cthrone` and the short alias `ct`, so
           `ct host` works as soon as the folder is on your `PATH`. The GUI
