@@ -92,11 +92,17 @@ release: zip_windows zip_linux zip_android
 #     prints "[no test files]" for those and still exits 0, so a green run
 #     would otherwise look like coverage that does not exist.
 #
-# This repository has no test file at all yet, so every package shows up in
-# that list. That is the state of the suite, not a pass.
+# Most packages have no test file, so most of them show up in that list. Treat
+# the list as the uncovered surface, not as a pass.
+#
+#   - EVERY stage fails the target. The recipe runs under `set -e`, because a
+#     stage chained with `;` hands its exit status to the next command and the
+#     final `if` would report success over a failing vet, test or build. A gate
+#     that cannot fail is worse than no gate.
 # ---------------------------------------------------------------------------
 check: ## gofmt, vet, test, build — the local verification gate
-	@if ! command -v go >/dev/null 2>&1; then \
+	@set -e; \
+	if ! command -v go >/dev/null 2>&1; then \
 		echo "ERROR: go is not installed — the check cannot run, so nothing is verified" >&2; \
 		exit 1; \
 	fi; \
@@ -105,7 +111,7 @@ check: ## gofmt, vet, test, build — the local verification gate
 	go vet ./...; \
 	go test ./...; \
 	go build ./...; \
-	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')"; \
+	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$' || true)"; \
 	if [ -n "$$notested" ]; then \
 		echo ""; \
 		echo "NOTE: these packages have no test files — this run does not cover them:"; \
