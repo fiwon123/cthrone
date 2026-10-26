@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
+	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
@@ -15,13 +15,13 @@ import (
 	"github.com/fiwon123/cthrone/internal/auth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
-	"github.com/fiwon123/cthrone/internal/data/app"
+	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
 // Run starts the Fyne GUI.
 func Run() {
-	a := app.NewWithID("com.cthrone.app")
+	a := fyneapp.NewWithID("com.cthrone.app")
 	w := a.NewWindow("cthrone")
 	w.Resize(fyne.NewSize(800, 600))
 
@@ -99,15 +99,15 @@ func Run() {
 		go func() {
 			p := 8080
 			fmt.Sscanf(portEntry.Text, "%d", &p)
-			appData := app.New(p)
+			appData := appdata.New(p)
 			tlsConf := auth.TLS{
-				Enabled:  tlsCheck.Checked,
-				Insecure: insecureCheck.Checked,
+				Enabled:     tlsCheck.Checked,
+				Insecure:    insecureCheck.Checked,
+				Fingerprint: "",
 			}
 			var err error
 			if natsCheck.Checked {
-				args := []string{hostEntry.Text}
-				natscore.Connect(args, appData, tokenEntry.Text, "", tlsConf)
+				natscore.Connect([]string{}, appData, natsURLEntry.Text, tlsConf)
 			} else {
 				err = websocketcore.Connect([]string{hostEntry.Text}, appData, tokenEntry.Text, "", tlsConf)
 			}
@@ -125,11 +125,12 @@ func Run() {
 		go func() {
 			p := 8080
 			fmt.Sscanf(portEntry.Text, "%d", &p)
-			appData := app.New(p)
+			appData := appdata.New(p)
 			appData.Name = nameEntry.Text
 			tlsConf := auth.TLS{
-				Enabled:  tlsCheck.Checked,
-				Insecure: insecureCheck.Checked,
+				Enabled:     tlsCheck.Checked,
+				Insecure:    insecureCheck.Checked,
+				Fingerprint: "",
 			}
 			var err error
 			if natsCheck.Checked {
