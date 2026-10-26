@@ -5,12 +5,25 @@ import (
 	"os"
 
 	connectcmd "github.com/fiwon123/cthrone/cmd/connect"
+	execcmd "github.com/fiwon123/cthrone/cmd/exec"
 	hostcmd "github.com/fiwon123/cthrone/cmd/host"
+	recvcmd "github.com/fiwon123/cthrone/cmd/recv"
 	scancmd "github.com/fiwon123/cthrone/cmd/scan"
+	uicmd "github.com/fiwon123/cthrone/cmd/ui"
 	"github.com/spf13/cobra"
 )
 
 var port int
+
+var token string
+
+var tokenFile string
+
+var useTLS bool
+
+var certFingerprint string
+
+var insecure bool
 
 var checkVersion bool
 
@@ -46,7 +59,15 @@ func init() {
 	rootCmd.AddCommand(connectcmd.Cmd)
 	rootCmd.AddCommand(hostcmd.Cmd)
 	rootCmd.AddCommand(scancmd.Cmd)
+	rootCmd.AddCommand(uicmd.Cmd)
+	rootCmd.AddCommand(recvcmd.Cmd)
+	rootCmd.AddCommand(execcmd.Cmd)
 
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
-	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host ctrhone")
+	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")
+	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
+	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport: the host serves https, the client expects it")
+	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
+	rootCmd.PersistentFlags().StringVar(&certFingerprint, "cert-fingerprint", "", "the fingerprint of the certificate to pin, with --tls")
+	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "accept any certificate, with --tls; the traffic is still encrypted, but the peer is not checked")
 }

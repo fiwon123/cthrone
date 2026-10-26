@@ -6,11 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var scanFunc = core.Scan
+
 // Cmd represents the scan command
 var Cmd = &cobra.Command{
 	Use:   "scan",
 	Short: "scan available IPs",
-	Long: `scan available local IPs starting with '192.168.'
+	Long: `scan available local IPs in the local subnet.
 
 Usage:
 	cthrone scan
@@ -20,7 +22,7 @@ Usage:
 
 		app := app.New(port)
 
-		core.Scan(app)
+		scanFunc(app)
 	},
 }
 

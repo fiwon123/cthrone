@@ -1,0 +1,105 @@
+# Dev sandbox compose file — the entry point that needs no host setup.
+#
+# `docker compose up` works on this file alone, on any OS, with **no host-side
+# prerequisites beyond Docker itself**: no Make, no Python, no opencode, no gh.
+# Every host-derived value below has an inline default, so nothing has to be
+# exported first.
+#
+# This file replaces the repository's earlier `docker-compose.yaml`, which held
+# the NATS broker alone. The broker lives here now, next to the sandbox, so
+# `docker compose up -d nats` still gives you a broker and `docker compose up`
+# still gives you the sandbox — one file, one command, no `-f` flags.
+#
+# Host-only mounts (the gh/opencode config dirs, `~/.gitconfig`) deliberately do
+# NOT live here. Compose treats a missing bind-mount source as fatal on Windows
+# and creates a root-owned directory for it on Linux, so a single absent
+# `~/.config/gh` would break the one command this file exists to support. They
+# live in `docker-compose.agent.yml`, merged only by the developer entry points
+# and only when the host can actually provide them.
+
+name: cthrone
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    # The sandbox talks to the broker, so the broker starts with it. Compose
+    # starts a service's dependencies along with it, and without this every
+    # service-scoped start — `make dev-up`, `scripts/dev-up.py dev-up`,
+    # `docker compose up dev` — would bring up the client alone and leave
+    # the developer with a connection error instead of a running stack.
+    depends_on:
+      - nats
+    # Host identity defaults to UID/GID 1000, which is correct for Docker
+    # Desktop (macOS/Windows virtualise bind-mount ownership). A Linux user
+    # whose uid differs overrides it: `HOST_UID="$(id -u)" docker compose up`.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    extra_hosts:
+      # Docker Desktop injects this name itself; plain Linux Docker does not,
+      # so it is declared for both.
+      - "host.docker.internal:host-gateway"
+    # Invoked through bash rather than executed directly: a Windows checkout
+    # does not preserve the executable bit through a bind mount, so running the
+    # path itself fails with "Permission denied". This also makes the LF policy
+    # in .gitattributes a redundancy rather than a hard requirement here.
+    command: ["/bin/bash", "/workspace/scripts/dev-entrypoint.sh"]
+    # No `ports:` block on the sandbox itself: cthrone is a client, it binds
+    # nothing. The broker's ports are published by the `nats` service below.
+    environment:
+      - GH_TOKEN=${GH_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - HOME=/home/devuser
+      # The broker asks for credentials, so the sandbox needs the same
+      # ones. They default to the dev values the broker also uses.
+      - NATS_USER=${NATS_USER:-cthrone}
+      - NATS_PASSWORD=${NATS_PASSWORD:-cthrone-dev}
+      # Forwarded so the entrypoint can probe ownership and the compose
+      # interpolation above has something to fall back to.
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+    volumes:
+      # The workspace bind mount is the only mount in this file: it exists on
+      # every platform and needs no host setup.
+      - .:/workspace:cached
+      # The Go module cache and build cache live OUTSIDE the bind mount, in the
+      # image's own filesystem. Without these volumes every rebuild re-downloads
+      # the whole dependency set and re-compiles the standard library.
+      - gomodcache:/go/pkg/mod
+      - gocache:/home/devuser/.cache/go-build
+    tty: true
+    stdin_open: true
+
+  # The NATS broker. This service replaces the repository's old
+  # docker-compose.yaml — one file.
+  nats:
+    # Pinned, not `latest`: an unpinned tag means the broker can change
+    # behaviour under a running client without anything in the repository
+    # changing. 2.15.1 is the current stable release.
+    #
+    # The broker no longer runs with `-js`: chat traffic is not
+    # persisted, so a conversation does not outlive the session.
+    image: nats:2.15.1
+    ports:
+      # Host ports are overridable so two sandboxes can run at once: two
+      # containers publishing the same host port means the second cannot
+      # program its mapping and can be left with no network attachment at all.
+      # The defaults are the ones the README documents:
+      # nats://127.0.0.1:4222 for the client, 8222 for the monitoring endpoint.
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+    # The broker's configuration: it asks for credentials, and JetStream
+    # is off. The credentials come from the environment, so the password
+    # is never in a committed file — the defaults below are dev values.
+    environment:
+      - NATS_USER=${NATS_USER:-cthrone}
+      - NATS_PASSWORD=${NATS_PASSWORD:-cthrone-dev}
+    volumes:
+      - ./nats.conf:/etc/nats/nats-server.conf:ro
+
+volumes:
+  gomodcache:
+  gocache:

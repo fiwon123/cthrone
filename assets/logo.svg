@@ -1,0 +1,21 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <g fill="white">
+    <!-- throne backrest as chat bubble -->
+    <path d="M 256 104 C 188 104 132 148 132 204 C 132 238 150 268 178 286 L 170 344 L 226 310 C 236 312 246 314 256 314 C 324 314 380 270 380 214 C 380 158 324 104 256 104 Z"/>
+    <!-- throne seat/support -->
+    <rect x="224" y="328" width="64" height="16" rx="8"/>
+    <rect x="216" y="350" width="80" height="14" rx="7"/>
+    <rect x="210" y="370" width="92" height="12" rx="6"/>
+    <!-- typing indicator dots inside bubble -->
+    <circle cx="232" cy="210" r="10"/>
+    <circle cx="256" cy="210" r="10"/>
+    <circle cx="280" cy="210" r="10"/>
+  </g>
+</svg>

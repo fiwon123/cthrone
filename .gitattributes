@@ -1,0 +1,41 @@
+# Line-ending policy. Copy this to `.gitattributes` at the project root.
+#
+# Why this file exists at all: the host shell scripts (`dev-entrypoint.sh`,
+# `scripts/*.sh`) are executed INSIDE the Linux container through a bind mount,
+# so bash parses the *working-tree* bytes, not what git stored. With
+# `core.autocrlf=true` (the Git for Windows default) those bytes are CRLF and
+# bash dies before it runs a line:
+#
+#     /bin/bash^M: bad interpreter: No such file or directory
+#     $'\r': command not found
+#     set: pipefail: invalid option name
+#
+# Pinning LF here prevents the problem for a fresh clone. It cannot repair a
+# working tree that was already materialised before this file existed — git
+# compares normalized content, so such a tree stays CRLF while `git status`
+# reports clean. `dev-entrypoint.sh` detects that case itself and prints the
+# remedy (see README.md -> Troubleshooting).
+
+# Normalize every text file to LF in the working tree on every platform.
+# Do NOT relax this to `eol=crlf` for scripts: the Linux container is what runs
+# them, and a CRLF shebang line is unparseable there.
+* text=auto eol=lf
+
+# Binary assets are never normalized — a line-ending rewrite corrupts them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.webm binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Windows entry points may keep CRLF without affecting anything: PowerShell and
+# cmd.exe read them, not the Linux kernel.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

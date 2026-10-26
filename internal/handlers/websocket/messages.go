@@ -2,10 +2,17 @@ package websockethandler
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/term"
+)
+
+var (
+	stdin  *os.File  = os.Stdin
+	stdout io.Writer = os.Stdout
 )
 
 const (
@@ -18,64 +25,80 @@ func receiveMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Println("Read error:", err)
+			fmt.Fprintln(stdout, "Read error:", err)
 			break
 		}
 
 		clearLine()
-		fmt.Printf("%s: %s\n", conn.RemoteAddr(), string(msg))
+		fmt.Fprintf(stdout, "%s: %s\n", conn.RemoteAddr(), string(msg))
 		printCursor()
-		fmt.Printf("%s", string(*currentInput))
+		fmt.Fprintf(stdout, "%s", string(*currentInput))
 	}
 }
 
 func sendMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
-
-	oldState, _ := term.MakeRaw(int(os.Stdin.Fd()))
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
+	var mu sync.Mutex
+	var oldState *term.State
+	var err error
+	oldState, err = term.MakeRaw(int(stdin.Fd()))
+	if err == nil {
+		defer term.Restore(int(stdin.Fd()), oldState)
+	}
 
 	buf := make([]byte, 1)
 	printCursor()
 
 	for {
-		n, _ := os.Stdin.Read(buf)
-		if n > 0 {
-			b := buf[0]
+		n, err := stdin.Read(buf)
+		if n == 0 || err != nil {
+			return
+		}
+		b := buf[0]
 
-			switch b {
-			case ctrlC:
+		switch b {
+		case ctrlC:
+			fmt.Fprintf(stdout, "\r\nExiting...\n")
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye"))
+			_ = conn.Close()
+			return
+		case enter:
+			mu.Lock()
+			msg := string(*currentInput)
+			*currentInput = []rune{}
+			mu.Unlock()
+			err := conn.WriteMessage(websocket.TextMessage, []byte(msg))
+			if err != nil {
 				return
-			case enter:
-				err := conn.WriteMessage(websocket.TextMessage, []byte(string(*currentInput)))
-				if err != nil {
-					return
-				} else {
-					fmt.Println("\rYou:", string(*currentInput))
-					*currentInput = []rune{}
-					printCursor()
-				}
-			case backspace:
-				if len(*currentInput) > 0 {
-					*currentInput = (*currentInput)[:len(*currentInput)-1]
-					removeCharacterFromScreen()
-				}
-			default:
-				*currentInput = append(*currentInput, rune(b))
-				fmt.Printf("%c", b)
 			}
+			fmt.Fprintf(stdout, "\rYou: %s\n", msg)
+			printCursor()
+		case backspace:
+			mu.Lock()
+			if len(*currentInput) > 0 {
+				*currentInput = (*currentInput)[:len(*currentInput)-1]
+				mu.Unlock()
+				removeCharacterFromScreen()
+			} else {
+				mu.Unlock()
+			}
+		default:
+			mu.Lock()
+			*currentInput = append(*currentInput, rune(b))
+			mu.Unlock()
+			fmt.Fprintf(stdout, "%c", b)
 		}
 
 	}
 }
 
 func printCursor() {
-	fmt.Print("\r> ")
+	fmt.Fprint(stdout, "\r> ")
 }
 
 func removeCharacterFromScreen() {
-	fmt.Print("\b \b")
+	fmt.Fprint(stdout, "\b \b")
 }
 
 func clearLine() {
-	fmt.Print("\r\033[2K")
+	fmt.Fprint(stdout, "\r\033[2K")
 }

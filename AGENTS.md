@@ -24,13 +24,11 @@ through a NATS broker.
 
 ### Main Technology
 
-- **Language**: Go 1.25.5 (pinned in `go.mod`)
+- **Language**: Go 1.26.10 (pinned in `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term
-- **Development**: a local Go toolchain and `make`. `docker-compose.yaml` starts
-  a NATS server for local experiments, but nothing in the build or the test
-  gate needs a container.
+- **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
 ### Core Architecture
 
@@ -41,7 +39,9 @@ internal/core/<transport>/  the operation: connect, host, scan
   ↓
 internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
-internal/data/app/          the in-memory configuration (the port)
+internal/data/app/          the in-memory configuration (the port, the bind address)
+  ↓
+internal/auth/              the shared secret and the TLS material: where they come from, how they are compared
 ```
 
 The transport is chosen at the command level: `--nats` selects the NATS path,
@@ -55,15 +55,18 @@ cmd/                 cobra commands: connect, host, scan
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
-scripts/             add_to_path installers (sh, bat)
-docker-compose.yaml  a local NATS server, for experiments
+internal/auth/       the shared secret and the TLS material of the websocket transport
+scripts/             add_to_path installers + the dev sandbox runtime
+.github/workflows/   CI, the branch gate, and the draft-release workflow
+docker-compose.yml   the dev sandbox and a local NATS server
 ```
 
 ## Development Commands
 
 ```bash
 make check           # the local gate: gofmt, vet, test, build
-make release         # build the Windows and Linux archives and the Android binary
+make release         # build every CLI archive: Windows, Linux, Android, macOS
+make release-gui     # the GUI archives a Linux host can produce (Linux, Windows)
 make clean           # remove build/
 go run ./ --help     # run from source
 go test ./...        # tests only
@@ -73,30 +76,85 @@ go test ./...        # tests only
 toolchain is missing — a gate that cannot run reports nothing, and reporting
 nothing must not look like reporting success.
 
+### Dev sandbox — the same toolchain on every machine
+
+```bash
+make dev-up          # start the sandbox (foreground; Ctrl+C stops it)
+make dev-shell       # a shell inside the sandbox
+make dev-opencode    # run the agent inside the sandbox (Linux/WSL2 only)
+make dev-down        # stop the sandbox
+make help            # every target, with a one-line description
+```
+
+Without `make`, on any OS with Docker:
+
+```bash
+docker compose up         # the sandbox
+docker compose up -d nats # just the broker, on nats://127.0.0.1:4222
+```
+
+On native Windows, where `make` does not exist: `python scripts/dev-up.py dev-up`.
+
+The container pins Go 1.26.10 — the version in `go.mod` — so a build inside the
+sandbox is the build CI runs. The sandbox is **optional**: a host toolchain
+still works, and `make check` does not require Docker.
+
+The image creates the directories the compose file mounts into, owned by the
+runtime user: Docker creates a mount destination the image does not contain as
+**root**, and the container runs as `${HOST_UID}`, so a sandbox whose image
+omits them cannot write its own caches. A sandbox created before that fix
+keeps its old root-owned volumes — Docker does not re-initialise a volume that
+already exists — so it needs `make reset` once.
+
 ### The current state of this suite — read this before claiming coverage
 
-**This repository has no test files at all.** `go test ./...` prints
-`? package [no test files]` for every package, and exits 0. That is not a
-pass: it means nothing was executed.
+**The coverage is partial.** Both transports, the two commands that use them
+and the `host`/`connect` command flags have tests; the scanner and the `scan`
+command do not. `go test ./...` prints `? package [no test files]` for those,
+and exits 0. That is not a pass: it means nothing was executed for them.
 
-So a green `make check` currently proves exactly three things:
+So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
-- the code compiles.
+- the code compiles,
+- the tested packages passed — currently both transports and the two
+  commands that use them.
 
-It does **not** prove the behaviour works. A chat tool's behaviour — a message
-that arrives, a host that binds the right port, a scan that finds the server —
-is exactly what is untested here. Report honestly: "gofmt, vet, and build are
-clean; this package has no test coverage", not "tests pass".
+It does **not** prove the behaviour of the scanner works. A chat tool's
+behaviour — a message that arrives, a host that binds the right port, a scan
+that finds the server — is partly untested here. Report honestly: "gofmt, vet,
+and build are clean; the transports are covered, the scanner is not", not
+"tests pass".
 
 `make check` prints the list of packages with no test file after the run, so
 the gap is visible in the output rather than only in this document.
 
 ## Runtime Environment
 
-The AI agent (opencode) runs at the repository root, directly on the host. There
-is no container and no sandbox: the tools are the ones installed on the machine.
+The AI agent (opencode) runs at the repository root. There are two modes, and
+they are not equivalent — say which one a claim was made in.
+
+### Host mode (the default)
+
+The agent runs directly on the host, against the tools installed on the
+machine. This is what `make check` and `git` operate on.
+
+### Sandbox mode (optional)
+
+`make dev-opencode` runs the agent inside the dev container, where the
+toolchain is pinned to Go 1.26.10 — the version in `go.mod`, the same one CI
+uses. The workspace is bind-mounted at `/workspace`; edits made inside are the
+same files on the host.
+
+The container has **no Docker socket**: the agent inside it cannot manage
+containers, and that is deliberate. `docker` commands fail there, and a claim
+about the sandbox made from inside it cannot be about the host's Docker.
+
+The in-container agent needs a **Linux** opencode binary (the container is
+Linux). On macOS and native Windows, `make dev-opencode` refuses with a clear
+message and the agent stays on the host; use WSL2, where the host binary *is*
+Linux.
 
 ### What the agent CAN do
 
@@ -104,11 +162,13 @@ is no container and no sandbox: the tools are the ones installed on the machine.
 - Run `make` targets
 - Run git and GitHub CLI commands
 - Read and edit any file in the repository except the secret files listed below
+- Start and use the dev sandbox (`make dev-up`, `make dev-shell`) from the host
 
 ### What the agent CANNOT do
 
 - Access `.env`, `.env.*`, `.envrc`, or any other secret file without explicit permission
 - Run commands that dump environment values (`printenv`, `env`)
+- Run `docker` from **inside** the sandbox (no socket is mounted)
 - Push directly to `dev` or `main`
 - Merge a pull request without explicit instruction
 
@@ -128,27 +188,41 @@ is no container and no sandbox: the tools are the ones installed on the machine.
 
 ### Security — read this before changing the transport
 
-Neither transport authenticates its peers, and neither encrypts the traffic.
-The websocket server binds `:8080` on **every** interface, the client dials
-plain `ws://`, and the NATS connection carries no credentials. The
-`docker-compose.yaml` broker starts with `-js`, so it also **persists** the
-messages.
+Both transports authenticate their peers, and both can encrypt the traffic.
+The model is the one issue #11 decided:
 
-This is tracked in issue #11. Until that issue is resolved:
+- the **websocket** transport requires a **shared secret** — a client that
+  does not know it is refused — and `--tls` encrypts the connection, with
+  the host's certificate pinned by its fingerprint;
+- the **NATS** transport sends the broker's credentials from the environment
+  (`NATS_USER`, `NATS_PASSWORD`), and a `tls://` broker URL asks for an
+  encrypted connection with the same pinning;
+- the `docker-compose.yml` broker asks for credentials and **persists
+  nothing**: JetStream is off, so a conversation does not outlive the
+  session it happened in.
 
-- do not describe this tool as encrypted, private, or authenticated — the
-  README says plainly that it is none of those;
+The rules that come with it:
+
+- do not describe this tool as encrypted or authenticated **by default**:
+  the websocket transport needs a shared secret, and `--tls` on top of it;
+  the NATS path needs a broker that asks for credentials;
 - do not add a credential to a **command-line flag** — a flag value is visible
   in the process list. Use an environment variable or a file;
+- the broker reads its password through its own configuration parser, so a
+  password with a `#` or a quote in it does not survive the trip;
 - if you touch the transport, read issue #11 first: the security model is a
   design decision, not an implementation detail, and it changes the CLI
   surface.
 
 ## Environment and Secret-File Rules
 
-- The application holds no configuration file on disk — the port is the only
-  setting, and it comes from the command line. There is nothing in the
-  user's home directory to protect.
+- The application holds no configuration file in the repository — the port is
+  the only setting, and it comes from the command line.
+- The user's configuration directory **does** hold two files: the shared
+  secret (`~/.config/cthrone/token`, `0600`) and the TLS material
+  (`~/.config/cthrone/cert.pem` and `key.pem`, the key `0600`). They are
+  generated on first use, they are never committed, and the secret is the
+  one thing that must not be shared.
 - Never access `.env`, `.env.*`, `.envrc`, or any other environment/secret file without explicit permission.
 - Never open, read, print, summarize, quote, or send the contents of those files. `.env.example` is the one exception: it holds placeholders and is safe to read.
 - Read `.env.example` with the **Read tool**, not with `cat`. Bash denies cover every `.env*` path on purpose.
@@ -204,11 +278,12 @@ on your way past:
 - Every pull request is assigned to a milestone when created
 - No orphaned branches, pull requests, or issues
 
-> `Closes #N` does not close the issue on a `dev` merge. GitHub auto-closes a
-> linked issue only when the pull request merges into the repository's *default*
-> branch, which is `main`. A feature pull request merges into `dev`, so
-> `Closes #N` gives you the cross-reference and nothing more. Close the issue
-> explicitly with `gh issue close` after the merge to `dev`.
+> The repository's **default branch is `dev`**, so `Closes #N` in a pull request
+> body does close the issue when that pull request merges into `dev` — GitHub
+> auto-closes on a merge into the *default* branch, and `dev` is it. Run
+> `gh issue close` after the merge anyway: it is the verification, and it is
+> expected to answer "already closed". The release pull request (`dev` → `main`)
+> closes nothing, because every milestone issue is closed before it is opened.
 
 ### Branch Strategy
 
@@ -248,6 +323,29 @@ follow the model above, so the author finds out before a reviewer does. It is a
 **guard rail, not a lock**: an administrator can override a failed required
 check, and a check nobody blocks on is noise. Branch protection (below) is the
 control; the gate is the feedback.
+
+**The Dependabot exemption.** Dependabot derives its head branch from the
+ecosystem, the target branch and the dependency —
+`dependabot/<ecosystem>/<target-branch>/<dependency>-<version>` — and offers no
+way to rename it. The convention above therefore can never apply to a
+dependency update, and a gate that rejects the dependency automation forever is
+a check nobody can pass, which is the "noise" failure this section warns about.
+So `dependabot/` is accepted **for a `dev` base only**:
+
+| Base | Accepted head branches |
+|---|---|
+| `dev` | `<type>/<issue-number>-<slug>`, or `dependabot/…` |
+| `main` | `dev`, or `fix/<issue-number>-<slug>` — unchanged |
+
+The exemption stops at `dev` on purpose: a dependency bump still has to reach
+`main` through the release pull request, so it cannot bypass the integration
+branch. The pattern is the exact prefix `^dependabot/`, not a looser match, so
+a human who wants a differently named branch still has the convention above.
+
+A dependency pull request into `dev` gets the gate and **nothing else** — CI
+runs on release pull requests only. Verification of a bump is therefore the
+merger's local `make check`; a `gui`-tagged dependency (Fyne) cannot be built in
+this environment at all, so its PR body must say the change is unverified.
 
 ### Repository settings (configure by hand)
 
@@ -321,8 +419,9 @@ All workflow rules that agents must follow are documented in this file:
 
 - branch strategy and naming conventions;
 - CI strategy — `.github/workflows/ci.go.yml` runs on release pull requests (`dev` → `main`) and manual dispatch, not on feature-branch pull requests, which are gated by local `make check`;
+- release strategy — `.github/workflows/release.yml` builds every asset and creates a **draft** release; a human publishes it. It runs on manual dispatch, from `main` only, and never pushes a tag;
 - milestone and issue conventions;
-- development commands — `make check`, `make release`, `make clean`;
+- development commands — `make check`, `make release`, `make release-gui`, `make clean`;
 - environment and secret-file rules;
 - the transport security gap above, and the rule that a skipped or empty run is not a pass.
 
@@ -343,3 +442,26 @@ say the change is unverified and test it locally.
 
 The same rule applies locally: `go test` reporting `[no test files]` for a
 package is not a pass for that package.
+
+### Release workflow (read this before tagging)
+
+`.github/workflows/release.yml` builds the release and opens a **draft**. It is
+manual-dispatch, `main`-only, and it never publishes and never pushes a tag —
+publishing the draft by hand creates the tag.
+
+```bash
+gh workflow run release.yml --ref main -f version=v0.2.0
+```
+
+- It runs `make check` first, so a red tree produces no draft at all.
+- It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI for
+  Linux, Windows and macOS, writes `checksums.txt`, and attaches every archive
+  to the draft.
+- The GUI jobs need CGO and platform headers (GTK3/X11/GL on Linux, mingw-w64
+  for Windows, a macOS runner for darwin), so they exist in CI and not in the
+  dev sandbox — a GUI build cannot be verified locally.
+- Re-running the same version refreshes the existing draft; a release that is
+  already **published** is refused, not modified.
+- The workflow itself is not covered by CI. Its first real proof is a dry run,
+  and a run whose jobs never executed proves nothing.
+

@@ -1,20 +1,61 @@
 package websockethandler
 
 import (
+	"crypto/tls"
 	"fmt"
+	"net"
+	"net/http"
 	"time"
 
+	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/gorilla/websocket"
 )
 
-// Connect to websocket host
-func Connect(ip string, port int) {
-	url := fmt.Sprintf("ws://%s:%d/ws", ip, port)
-
+// dial connects to the host. It waits a moment first: the host is often
+// started right before the client connects to it. It is a variable so a
+// test can replace it — the connection is the one step that needs a host to
+// talk to, and a test that cannot reach it cannot check what is done with
+// the error it returns.
+var dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
 	time.Sleep(1 * time.Second)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+
+	return dialerFor(tlsConfig).Dial(url, header)
+}
+
+// dialerFor returns the dialer used to reach the host. The TLS
+// configuration is the one that checks the certificate of the host, so it
+// has to reach the dialer: a dialer without it would use the system roots,
+// and a self-signed certificate is in none of them.
+func dialerFor(tlsConfig *tls.Config) *websocket.Dialer {
+	dialer := *websocket.DefaultDialer
+	if tlsConfig != nil {
+		dialer.TLSClientConfig = tlsConfig
+	}
+
+	return &dialer
+}
+
+// Connect to websocket host
+func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) error {
+	url := buildURL(address, port, useTLS)
+
+	header := http.Header{}
+	if token != "" {
+		header.Set(auth.HeaderName, token)
+	}
+
+	conn, resp, err := dial(url, header, tlsConfig)
 	if err != nil {
-		return
+		if resp != nil {
+			switch resp.StatusCode {
+			case http.StatusUnauthorized:
+				return fmt.Errorf("the host refused the connection: it needs the shared secret")
+			case http.StatusBadRequest:
+				return fmt.Errorf("the host refused the connection: it is serving TLS, add --tls")
+			}
+		}
+
+		return err
 	}
 	defer conn.Close()
 
@@ -25,4 +66,19 @@ func Connect(ip string, port int) {
 	go receiveMsgLoop(conn, &currentInput)
 
 	select {}
+}
+
+// buildURL returns the URL of the host. An address that carries a port is
+// used as it is, so that the port is not appended twice.
+func buildURL(address string, port int, useTLS bool) string {
+	scheme := "ws"
+	if useTLS {
+		scheme = "wss"
+	}
+
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return fmt.Sprintf("%s://%s/ws", scheme, address)
+	}
+
+	return fmt.Sprintf("%s://%s:%d/ws", scheme, address, port)
 }

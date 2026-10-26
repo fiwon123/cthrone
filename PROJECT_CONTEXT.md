@@ -26,12 +26,12 @@ through a NATS broker.
 
 ## Stack
 
-- **Language**: Go 1.25.5 (see `go.mod`)
+- **Language**: Go 1.26.10 (see `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **Configuration**: none on disk — the port is the only setting, and it comes from the command line
-- **Dev environment**: a local Go toolchain and `make`. `docker-compose.yaml` starts a local NATS server for experiments; nothing in the build or the gate needs a container.
+- **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container.
 
 ## Architecture
 
@@ -84,8 +84,9 @@ cmd/                 cobra commands: connect, host, scan
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
-scripts/             add_to_path installers (sh, bat)
-docker-compose.yaml  a local NATS server, for experiments
+scripts/             add_to_path installers + the dev sandbox runtime
+.github/workflows/   CI, the branch gate, and the draft-release workflow
+docker-compose.yml   the dev sandbox and a local NATS server
 ```
 
 ## Key Commands
@@ -96,11 +97,14 @@ docker-compose.yaml  a local NATS server, for experiments
 - **Format check**: `gofmt -l .`
 - **Vet**: `go vet ./...`
 - **Full gate**: `make check`
-- **Release archives**: `make release` (writes to `build/`)
+- **Release archives**: `make release` builds every CLI archive into `build/`;
+  `make release-gui` builds the GUI archive a Linux host can produce. The
+  release workflow (`.github/workflows/release.yml`) runs both in CI and opens
+  a draft for a human to publish.
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, release archives for Windows and Linux plus an Android arm64 binary.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, CLI release archives for Windows, Linux, Android and macOS plus a Fyne GUI archive for the three desktop platforms, and a draft-release workflow that builds and attaches them all.
 - **In progress**: the tool has no authentication and no encryption on either transport, and the websocket server binds every interface (issue #11).
 
 ## Backlog
@@ -117,9 +121,9 @@ docker-compose.yaml  a local NATS server, for experiments
 - The websocket server listens on `:8080` — every interface — and the client
   dials plain `ws://`. Messages travel in plaintext and any client that can
   reach the port gets a session. See issue #11.
-- The `docker-compose.yaml` broker runs with `-js` (JetStream), so it also
+- The `docker-compose.yml` broker runs with `-js` (JetStream), so it also
   persists the messages it carries.
-- `docker-compose.yaml` is a convenience for local experiments, not a
+- `docker-compose.yml` is a convenience for local experiments, not a
   dependency: the build, the gate, and the websocket transport need nothing
   but Go.
 - Windows uses `cmd` to execute commands, Linux uses `sh`; the `add_to_path`

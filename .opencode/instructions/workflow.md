@@ -49,11 +49,12 @@ Every change must be traceable end-to-end:
 
 No orphaned branches, PRs, or issues. Every piece of work is linked.
 
-> **`Closes #N` does not close the issue on a `dev` merge.** GitHub auto-closes
-> a linked issue only when the PR merges into the repository's *default* branch,
-> which is `main`. Feature PRs merge into `dev`, so `Closes #N` gives you the
-> cross-reference and nothing more. The issue is closed explicitly in step 6
-> with `gh issue close`.
+> **`Closes #N` does close the issue on a `dev` merge.** The repository's
+> *default* branch is `dev`, and GitHub auto-closes a linked issue when the PR
+> merges into the default branch. Feature PRs merge into `dev`, so the clause
+> does the work; step 6's `gh issue close` is the verification and is expected
+> to answer "already closed". The release PR (`dev` → `main`) closes nothing,
+> because every milestone issue is closed before it is opened.
 
 ### Label mapping (commit type → GitHub label)
 
@@ -185,16 +186,14 @@ gh pr create \
 - After merging to `dev`:
   - **Comment on the issue**: `gh issue comment <issue-number> --body "Merged into dev — ready for release"`
   - **Comment on the PR**: `gh pr comment <pr-number> --body "Merged into dev — thanks!"`
-  - **Close the issue**: `gh issue close <issue-number>`
-    - Required, not optional. `Closes #N` in a PR body closes an issue only when
-      the PR merges into the repository's **default** branch, which is `main`
-      here. A feature PR merges into `dev`, so its `Closes #N` links the issue
-      and closes nothing. Without this step issues stay open forever.
-    - Closing here rather than at release keeps the milestone tracker live —
-      GitHub computes milestone progress from closed issues — and keeps step 7's
-      "all milestone issues are complete" check satisfiable before release. If
-      issues only closed during the release merge, that check could never be
-      verified in advance.
+  - **Verify the issue is closed**: `gh issue close <issue-number>`
+    - Keep this step, but it is a **verification, not the mechanism**. The
+      repository's default branch is `dev`, so GitHub has already closed the
+      issue through the PR body's `Closes #N` clause; this command is expected
+      to answer "already closed", and that is success, not an error.
+    - It still matters: a PR body without the clause, or a merge that did not
+      auto-close, leaves the issue open — and the milestone tracker, which
+      GitHub computes from closed issues, is what step 7 checks before release.
 - **Always return to dev after merge**:
   ```bash
   git checkout dev
@@ -222,11 +221,11 @@ gh pr create \
     --base main
   ```
 - CI runs automatically on this PR
-- **This PR closes no issues.** Every issue in the milestone was closed when its
-  PR merged to `dev` (step 6), so `Closes #N` here would be a no-op at best.
-  If an issue turns out to still be open at release time, close it explicitly
-  rather than adding a `Closes` clause to this PR — the milestone check in the
-  step above is what should have caught it.
+- **This PR closes no issues.** Every issue in the milestone was auto-closed by
+  its own `Closes #N` clause when its PR merged to `dev` (step 6), so a `Closes`
+  clause here would be a no-op at best. If an issue turns out to still be open
+  at release time, close it explicitly rather than adding a `Closes` clause to
+  this PR — the milestone check in the step above is what should have caught it.
 - **Comment on the issue**: `gh issue comment <issue-number> --body "Release PR opened: #<pr-number>"`
 - After CI passes:
   - **Comment on the issue**: `gh issue comment <issue-number> --body "CI passed — ready to merge to main"`
@@ -244,22 +243,27 @@ gh pr create \
 - After merging:
   - **Comment on the issue**: `gh issue comment <issue-number> --body "Released in <commit-sha>"`
   - **Comment on the PR**: `gh pr comment <pr-number> --body "Released — thanks!"`
-- **Publish the artifacts** — when the project ships a downloadable binary, the
-  tag is what publishes it. Tag the tip of `main` (the squash merge commit) and
-  push the tag:
+- **Publish the artifacts** — when the project ships a downloadable binary,
+  `.github/workflows/release.yml` builds them and opens a **draft** release.
+  Run it from `main`, with the version you are releasing:
   ```bash
-  git fetch origin main
-  git tag -a v<major>.<minor>.<patch> "$(git rev-parse origin/main)" -m "Release v<major>.<minor>.<patch>"
-  git push origin v<major>.<minor>.<patch>
+  gh workflow run release.yml --ref main -f version=v<major>.<minor>.<patch>
   ```
-  - The tag must point at a commit that is on `main` — the release workflow
-    refuses to publish a tag that does not, so a tag cut from a side branch
-    fails loudly instead of shipping an unreleased commit.
-  - The workflow builds every platform, writes `checksums.txt`, and creates the
-    GitHub Release. Watch it run before announcing the release.
-  - **A skipped run published nothing.** A run that never triggered, or whose
-    jobs were all gated out, leaves the tag with no assets — confirm the
-    release page shows the archives before telling anyone to download them.
+  - The workflow runs `make check` first, so a red tree produces no draft.
+  - It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI
+    for Linux, Windows and macOS, writes `checksums.txt`, and attaches every
+    archive to the draft — with a description carrying the install matrix, the
+    security caveats and the generated changelog.
+  - **The workflow never publishes and never pushes a tag.** A human reviews
+    the draft and publishes it; publishing creates the tag
+    `v<major>.<minor>.<patch>` from the released commit. Check
+    `.github/workflows/release.yml` before relying on a new platform — a job
+    that never ran proves nothing.
+  - Re-running the same version refreshes the draft; a release that is already
+    published is refused rather than modified.
+  - **A skipped or failed job leaves no draft**, because the draft job depends
+    on every build job. Confirm the release page lists every archive before
+    announcing the release.
   - A project that ships no binary skips this step entirely.
 - **Merge `main` back into `dev`** — a squash merge leaves `dev` and `main`
   diverged at the old merge-base, so the *next* release PR would re-list every
