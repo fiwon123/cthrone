@@ -57,6 +57,7 @@ internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
 internal/auth/       the shared secret and the TLS material of the websocket transport
 scripts/             add_to_path installers + the dev sandbox runtime
+.github/workflows/   CI, the branch gate, and the draft-release workflow
 docker-compose.yml   the dev sandbox and a local NATS server
 ```
 
@@ -64,7 +65,8 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ```bash
 make check           # the local gate: gofmt, vet, test, build
-make release         # build the Windows and Linux archives and the Android binary
+make release         # build every CLI archive: Windows, Linux, Android, macOS
+make release-gui     # the GUI archives a Linux host can produce (Linux, Windows)
 make clean           # remove build/
 go run ./ --help     # run from source
 go test ./...        # tests only
@@ -416,8 +418,9 @@ All workflow rules that agents must follow are documented in this file:
 
 - branch strategy and naming conventions;
 - CI strategy — `.github/workflows/ci.go.yml` runs on release pull requests (`dev` → `main`) and manual dispatch, not on feature-branch pull requests, which are gated by local `make check`;
+- release strategy — `.github/workflows/release.yml` builds every asset and creates a **draft** release; a human publishes it. It runs on manual dispatch, from `main` only, and never pushes a tag;
 - milestone and issue conventions;
-- development commands — `make check`, `make release`, `make clean`;
+- development commands — `make check`, `make release`, `make release-gui`, `make clean`;
 - environment and secret-file rules;
 - the transport security gap above, and the rule that a skipped or empty run is not a pass.
 
@@ -438,3 +441,26 @@ say the change is unverified and test it locally.
 
 The same rule applies locally: `go test` reporting `[no test files]` for a
 package is not a pass for that package.
+
+### Release workflow (read this before tagging)
+
+`.github/workflows/release.yml` builds the release and opens a **draft**. It is
+manual-dispatch, `main`-only, and it never publishes and never pushes a tag —
+publishing the draft by hand creates the tag.
+
+```bash
+gh workflow run release.yml --ref main -f version=v0.2.0
+```
+
+- It runs `make check` first, so a red tree produces no draft at all.
+- It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI for
+  Linux, Windows and macOS, writes `checksums.txt`, and attaches every archive
+  to the draft.
+- The GUI jobs need CGO and platform headers (GTK3/X11/GL on Linux, mingw-w64
+  for Windows, a macOS runner for darwin), so they exist in CI and not in the
+  dev sandbox — a GUI build cannot be verified locally.
+- Re-running the same version refreshes the existing draft; a release that is
+  already **published** is refused, not modified.
+- The workflow itself is not covered by CI. Its first real proof is a dry run,
+  and a run whose jobs never executed proves nothing.
+

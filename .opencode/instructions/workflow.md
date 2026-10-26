@@ -244,22 +244,27 @@ gh pr create \
 - After merging:
   - **Comment on the issue**: `gh issue comment <issue-number> --body "Released in <commit-sha>"`
   - **Comment on the PR**: `gh pr comment <pr-number> --body "Released — thanks!"`
-- **Publish the artifacts** — when the project ships a downloadable binary, the
-  tag is what publishes it. Tag the tip of `main` (the squash merge commit) and
-  push the tag:
+- **Publish the artifacts** — when the project ships a downloadable binary,
+  `.github/workflows/release.yml` builds them and opens a **draft** release.
+  Run it from `main`, with the version you are releasing:
   ```bash
-  git fetch origin main
-  git tag -a v<major>.<minor>.<patch> "$(git rev-parse origin/main)" -m "Release v<major>.<minor>.<patch>"
-  git push origin v<major>.<minor>.<patch>
+  gh workflow run release.yml --ref main -f version=v<major>.<minor>.<patch>
   ```
-  - The tag must point at a commit that is on `main` — the release workflow
-    refuses to publish a tag that does not, so a tag cut from a side branch
-    fails loudly instead of shipping an unreleased commit.
-  - The workflow builds every platform, writes `checksums.txt`, and creates the
-    GitHub Release. Watch it run before announcing the release.
-  - **A skipped run published nothing.** A run that never triggered, or whose
-    jobs were all gated out, leaves the tag with no assets — confirm the
-    release page shows the archives before telling anyone to download them.
+  - The workflow runs `make check` first, so a red tree produces no draft.
+  - It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI
+    for Linux, Windows and macOS, writes `checksums.txt`, and attaches every
+    archive to the draft — with a description carrying the install matrix, the
+    security caveats and the generated changelog.
+  - **The workflow never publishes and never pushes a tag.** A human reviews
+    the draft and publishes it; publishing creates the tag
+    `v<major>.<minor>.<patch>` from the released commit. Check
+    `.github/workflows/release.yml` before relying on a new platform — a job
+    that never ran proves nothing.
+  - Re-running the same version refreshes the draft; a release that is already
+    published is refused rather than modified.
+  - **A skipped or failed job leaves no draft**, because the draft job depends
+    on every build job. Confirm the release page lists every archive before
+    announcing the release.
   - A project that ships no binary skips this step entirely.
 - **Merge `main` back into `dev`** — a squash merge leaves `dev` and `main`
   diverged at the old merge-base, so the *next* release PR would re-list every

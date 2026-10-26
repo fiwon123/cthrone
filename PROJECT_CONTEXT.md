@@ -85,6 +85,7 @@ internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
 scripts/             add_to_path installers + the dev sandbox runtime
+.github/workflows/   CI, the branch gate, and the draft-release workflow
 docker-compose.yml   the dev sandbox and a local NATS server
 ```
 
@@ -96,11 +97,14 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - **Format check**: `gofmt -l .`
 - **Vet**: `go vet ./...`
 - **Full gate**: `make check`
-- **Release archives**: `make release` (writes to `build/`)
+- **Release archives**: `make release` builds every CLI archive into `build/`;
+  `make release-gui` builds the GUI archive a Linux host can produce. The
+  release workflow (`.github/workflows/release.yml`) runs both in CI and opens
+  a draft for a human to publish.
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, release archives for Windows and Linux plus an Android arm64 binary.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, CLI release archives for Windows, Linux, Android and macOS plus a Fyne GUI archive for the three desktop platforms, and a draft-release workflow that builds and attaches them all.
 - **In progress**: the tool has no authentication and no encryption on either transport, and the websocket server binds every interface (issue #11).
 
 ## Backlog
