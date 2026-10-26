@@ -26,8 +26,37 @@ SHORT_ANDROID_BIN := $(ANDROID_BUILD)/$(APP_NAME_SHORT)
 ANDROID_ZIP := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.zip
 ANDROID_TAR := $(ANDROID_BUILD)/$(APP_NAME)_$(VERSION)_android.tar.gz
 
+# macOS CLI. One archive per architecture: the two `cthrone` binaries cannot
+# share a directory, so they cannot share an archive.
+DARWIN_BUILD := $(BUILD_DIR)/Darwin
+DARWIN_ARM64_DIR := $(DARWIN_BUILD)/arm64
+DARWIN_AMD64_DIR := $(DARWIN_BUILD)/amd64
+DARWIN_ARM64_TAR := $(DARWIN_BUILD)/$(APP_NAME)_$(VERSION)_darwin_arm64.tar.gz
+DARWIN_AMD64_TAR := $(DARWIN_BUILD)/$(APP_NAME)_$(VERSION)_darwin_amd64.tar.gz
 
-.PHONY: all windows linux android zip_linux zip_windows zip_android clean release check assets \
+# The Fyne GUI (`-tags gui`). These are separate targets because they need
+# CGO and platform headers a plain cross-compile does not have: GTK/X11/GL on
+# Linux, mingw-w64 for Windows, and a macOS host for darwin. The local dev
+# sandbox has none of them, which is why `release` does not depend on them.
+GUI_BUILD := $(BUILD_DIR)/GUI
+GUI_LINUX_DIR := $(GUI_BUILD)/Linux
+GUI_WINDOWS_DIR := $(GUI_BUILD)/Windows
+GUI_DARWIN_DIR := $(GUI_BUILD)/Darwin
+GUI_LINUX_TAR := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_linux_gui_amd64.tar.gz
+GUI_WINDOWS_ZIP := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_windows_gui_amd64.zip
+GUI_DARWIN_TAR := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_darwin_gui_arm64.tar.gz
+
+# What every Unix archive carries, in the order it is listed inside the
+# archive. The staging directory holds a copy of each file, so the binaries and
+# the documents sit next to each other with no `../` paths in the recipe.
+UNIX_ARCHIVE_FILES := $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh
+
+# What every Windows archive carries.
+WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).bat README.md LICENSE LICENSE-APACHE NOTICE
+
+
+.PHONY: all windows linux android darwin zip_linux zip_windows zip_android clean release \
+	gui-linux gui-windows gui-darwin release-gui check assets \
 	help dev-up dev-down dev-shell dev-opencode dev-opencode-auto dev-log dev-build reset \
 	preflight require-agent prepare-agent-mounts check-identity opencode-version opencode-upgrade \
 	shell opencode opencode-auto
@@ -74,9 +103,87 @@ zip_android: android
 clean:
 	rm -rf $(BUILD_DIR)
 
-# Build & compress everything
-release: zip_windows zip_linux zip_android
+# Build & compress the CLI for every platform. `VERSION` may be overridden on
+# the command line (`make release VERSION=v0.2.0`) — the release workflow does
+# exactly that, because a shallow CI checkout has no tags for `git describe`.
+release: zip_windows zip_linux zip_android darwin ## build every CLI archive (windows, linux, android, darwin)
 	@echo "Release ready: $(VERSION)"
+
+# ---------------------------------------------------------------------------
+# macOS CLI
+#
+# CGO is off: nothing the CLI imports needs cgo, so both architectures
+# cross-compile from Linux, macOS or Windows alike.
+# ---------------------------------------------------------------------------
+darwin: $(BUILD_DIR) ## build the macOS CLI archives (arm64, amd64)
+	@mkdir -p $(DARWIN_ARM64_DIR) $(DARWIN_AMD64_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(DARWIN_ARM64_DIR)/$(APP_NAME)
+	cp $(DARWIN_ARM64_DIR)/$(APP_NAME) $(DARWIN_ARM64_DIR)/$(APP_NAME_SHORT)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(DARWIN_AMD64_DIR)/$(APP_NAME)
+	cp $(DARWIN_AMD64_DIR)/$(APP_NAME) $(DARWIN_AMD64_DIR)/$(APP_NAME_SHORT)
+	@for arch in arm64 amd64; do \
+	  dir="$(DARWIN_BUILD)/$$arch"; \
+	  cp README.md LICENSE LICENSE-APACHE NOTICE "$$dir/"; \
+	  cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh "$$dir/"; \
+	  tar -czf "$(DARWIN_BUILD)/$(APP_NAME)_$(VERSION)_darwin_$$arch.tar.gz" -C "$$dir" $(UNIX_ARCHIVE_FILES); \
+	done
+
+# ---------------------------------------------------------------------------
+# Fyne GUI (`-tags gui`)
+#
+# Three targets, because the three platforms need three different build hosts
+# or toolchains. None of them is part of `release`: a GUI build that silently
+# fails, or that the local sandbox cannot run at all, would turn the release
+# target into something that only works on one machine.
+#
+#   gui-linux    needs CGO + GTK3/X11/GL headers    (any Linux with them)
+#   gui-windows  needs mingw-w64's x86_64-w64-mingw32-gcc
+#   gui-darwin   must run on macOS; refused elsewhere
+#
+# `release-gui` is the Linux half only — the Windows cross-build and the macOS
+# native build are separate because no single host can do all three. The
+# release workflow runs each one on the runner that can.
+# ---------------------------------------------------------------------------
+gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL headers)
+	@command -v pkg-config >/dev/null 2>&1 && pkg-config --exists gtk+-3.0 || { \
+	  echo "ERROR: the GTK3/X11/GL development headers are missing — the Linux GUI needs them." >&2; \
+	  echo "  Debian/Ubuntu: sudo apt-get install gcc libgl1-mesa-dev xorg-dev libgtk-3-dev libxkbcommon-dev" >&2; \
+	  exit 1; }
+	@mkdir -p $(GUI_LINUX_DIR)
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)
+	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
+	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
+	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(UNIX_ARCHIVE_FILES)
+
+gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
+	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { \
+	  echo "ERROR: x86_64-w64-mingw32-gcc is missing — the Windows GUI needs mingw-w64." >&2; \
+	  echo "  Debian/Ubuntu: sudo apt-get install gcc-mingw-w64-x86-64" >&2; \
+	  exit 1; }
+	@mkdir -p $(GUI_WINDOWS_DIR)
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
+	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
+	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
+	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
+	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(WINDOWS_ARCHIVE_FILES)
+
+gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
+	@test "$$(go env GOOS)" = "darwin" || { \
+	  echo "ERROR: gui-darwin must run on macOS — the Fyne darwin build needs the native toolchain." >&2; \
+	  echo "  This target is built by the release workflow on a macos-latest runner." >&2; \
+	  exit 1; }
+	@mkdir -p $(GUI_DARWIN_DIR)
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)
+	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
+	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
+	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(UNIX_ARCHIVE_FILES)
+
+# The GUI archives a Linux machine with the headers can produce on its own.
+release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can produce (linux, windows)
+	@echo "GUI release ready: $(VERSION)"
+	@echo "  gui-darwin is built separately on macOS."
 
 # ---------------------------------------------------------------------------
 # Local verification gate
