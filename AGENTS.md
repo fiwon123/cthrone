@@ -321,6 +321,29 @@ follow the model above, so the author finds out before a reviewer does. It is a
 check, and a check nobody blocks on is noise. Branch protection (below) is the
 control; the gate is the feedback.
 
+**The Dependabot exemption.** Dependabot derives its head branch from the
+ecosystem, the target branch and the dependency —
+`dependabot/<ecosystem>/<target-branch>/<dependency>-<version>` — and offers no
+way to rename it. The convention above therefore can never apply to a
+dependency update, and a gate that rejects the dependency automation forever is
+a check nobody can pass, which is the "noise" failure this section warns about.
+So `dependabot/` is accepted **for a `dev` base only**:
+
+| Base | Accepted head branches |
+|---|---|
+| `dev` | `<type>/<issue-number>-<slug>`, or `dependabot/…` |
+| `main` | `dev`, or `fix/<issue-number>-<slug>` — unchanged |
+
+The exemption stops at `dev` on purpose: a dependency bump still has to reach
+`main` through the release pull request, so it cannot bypass the integration
+branch. The pattern is the exact prefix `^dependabot/`, not a looser match, so
+a human who wants a differently named branch still has the convention above.
+
+A dependency pull request into `dev` gets the gate and **nothing else** — CI
+runs on release pull requests only. Verification of a bump is therefore the
+merger's local `make check`; a `gui`-tagged dependency (Fyne) cannot be built in
+this environment at all, so its PR body must say the change is unverified.
+
 ### Repository settings (configure by hand)
 
 These live in the repository settings, not in a file, so no agent can set them.

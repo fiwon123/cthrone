@@ -50,6 +50,16 @@ env:
   # below rather than loosening it further.
   DEV_BRANCH_PATTERN: '^(feat|fix|refactor|docs|test|chore|ci)/[0-9]+-'
 
+  # Dependabot builds its head branch from the ecosystem, the target branch and
+  # the dependency (`dependabot/<ecosystem>/dev/<dependency>-<version>`) and
+  # offers no way to rename it, so the convention above can never apply to a
+  # dependency update. This is the narrowest exemption that lets one merge: a
+  # `dependabot/` head branch is accepted for `dev` only, and never for `main`,
+  # so a bump still reaches `main` through the release pull request and nothing
+  # else. It is deliberately an exact prefix and not a looser pattern -- a human
+  # who wants a differently named branch has the convention above.
+  DEPENDABOT_BRANCH_PATTERN: '^dependabot/'
+
   # Branches that may target `main`:
   #   - `dev`  -- the release pull request. The head of that PR *is* the
   #               integration branch, because the release is `dev` -> `main`
@@ -78,11 +88,14 @@ jobs:
 
           case "$BASE_REF" in
             dev)
-              pattern="$DEV_BRANCH_PATTERN"
-              expected="<type>/<issue-number>-<slug> -- <type> is one of feat, fix, refactor, docs, test, chore, ci"
+              # The convention, plus the dependency bot's namespace. See the
+              # comment on DEPENDABOT_BRANCH_PATTERN for why the exemption
+              # exists and why it stops at `dev`.
+              patterns=("$DEV_BRANCH_PATTERN" "$DEPENDABOT_BRANCH_PATTERN")
+              expected="<type>/<issue-number>-<slug> -- <type> is one of feat, fix, refactor, docs, test, chore, ci -- or dependabot/<ecosystem>/dev/<dependency>-<version>"
               ;;
             main)
-              pattern="$MAIN_BRANCH_PATTERN"
+              patterns=("$MAIN_BRANCH_PATTERN")
               expected="dev (the release pull request) or fix/<issue-number>-<slug> (an urgent hotfix)"
               ;;
             *)
@@ -91,9 +104,16 @@ jobs:
               ;;
           esac
 
-          if [[ ! "$HEAD_REF" =~ $pattern ]]; then
-            echo "::error::branch '$HEAD_REF' may not target '$BASE_REF'. Expected: $expected"
-            exit 1
-          fi
+          # Every accepted pattern is tried; the branch fails only when none of
+          # them matches. A `for` loop rather than one alternation keeps each
+          # pattern readable on its own and keeps the error message honest about
+          # which set of names was allowed.
+          for pattern in "${patterns[@]}"; do
+            if [[ "$HEAD_REF" =~ $pattern ]]; then
+              echo "accepted: '$HEAD_REF' -> '$BASE_REF'"
+              exit 0
+            fi
+          done
 
-          echo "accepted: '$HEAD_REF' -> '$BASE_REF'"
+          echo "::error::branch '$HEAD_REF' may not target '$BASE_REF'. Expected: $expected"
+          exit 1
