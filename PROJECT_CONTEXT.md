@@ -30,7 +30,7 @@ through a NATS broker.
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
-- **Configuration**: none on disk — the port is the only setting, and it comes from the command line
+- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--allow-anonymous`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The only files written are the shared secret and the TLS material, generated in `~/.config/cthrone` on first use
 - **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container.
 
 ## Architecture
@@ -46,7 +46,7 @@ internal/core/<transport>/  the operation: connect, host, scan
   ↓
 internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
-internal/data/app/          the in-memory configuration (the port)
+internal/data/app/          the in-memory configuration (port, bind address, device name)
 ```
 
 `internal/core` decides *what* to do (`connect`, `host`, `scan`); the handlers
@@ -60,30 +60,39 @@ the addresses that answer on the chat port.
   (2026-01)
 - **The websocket transport is the default** — it needs nothing but the two
   binaries, while NATS needs a broker. (2026-01)
-- **No configuration file** — the only setting is the port, so there is no
-  state to migrate, no file to protect, and nothing to write in the user's
-  home directory. (2026-01)
+- **No configuration file** — settings come from flags and the environment, so
+  there is no state to migrate. The two files the tool writes (`~/.config/cthrone/token`,
+  `cert.pem`/`key.pem`) are generated on first use and are secrets, not
+  configuration. (2026-01, corrected 2026-10)
 - **The `ct` short alias ships next to the `cthrone` binary** — a name typed
   many times a day should be short. (2026-01)
 - **The release archive carries the README and the licenses** — a download has
   to be usable and lawful without the repository. (2026-01)
-- **An Android arm64 binary ships alongside the Windows and Linux archives** —
+- **An Android arm64 binary ships alongside the desktop archives** —
   the tool is meant to run on a phone. (2026-01)
 
 ## Topology
 
 - kind: cli, path: ., purpose: the single binary — commands, transports, and the chat loop
-- kind: library, path: internal/, purpose: the transport packages
+- kind: library, path: internal/, purpose: the transport packages and the supporting ones (auth, data, discovery, exec, session, shutdown)
 
-There is one component: the repository root *is* the Go module.
+There is one component: the repository root *is* the Go module. The Fyne GUI
+lives in `ui/` behind the `gui` build tag; without it, `ui.Run` prints a message
+and exits.
 
 ## Directory Layout
 
 ```text
-cmd/                 cobra commands: connect, host, scan
+cmd/                 cobra commands: connect, host, scan, ui, recv, exec (+ the assets package)
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
+internal/auth/       the shared secret and the TLS material
+internal/discovery/  the device identity kept on disk
+internal/exec/       the allowlist behind `recv`/`exec`
+internal/session/    the message hub the GUI uses
+internal/shutdown/   graceful stop and terminal restore
+ui/                  the Fyne GUI, behind the `gui` build tag
 scripts/             add_to_path installers + the dev sandbox runtime
 .github/workflows/   CI, the branch gate, and the draft-release workflow
 docker-compose.yml   the dev sandbox and a local NATS server
@@ -104,29 +113,38 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, CLI release archives for Windows, Linux, Android and macOS plus a Fyne GUI archive for the three desktop platforms, and a draft-release workflow that builds and attaches them all.
-- **In progress**: the tool has no authentication and no encryption on either transport, and the websocket server binds every interface (issue #11).
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), CLI release archives for Windows, Linux, Android and macOS plus a Fyne GUI archive for the three desktop platforms, and a draft-release workflow that builds and attaches them all. `v0.5.0` is the published release.
+- **Defaults, not guarantees**: the websocket transport requires the shared secret unless the host passes `--allow-anonymous`; encryption is **opt-in** — `--tls` on the websocket path, a `tls://` NATS URL (with `--cert-fingerprint`, or `--insecure`) on the NATS path; the websocket host binds **every interface** unless `--host` narrows it; and a NATS deployment is only as protected as its broker. The model behind these is issue #11.
+- **Open**: see Backlog.
 
 ## Backlog
 
-1. Decide and implement the transport security model — authentication, `wss://`, and a loopback default (issue #11).
-2. Add the first tests. The repository has no test file at all, so `make check` currently proves only that the code is formatted, vetted, and buildable.
+1. Cut the next release to carry what `dev` holds beyond `main` — currently the Fyne 2.8.2 bump. Its release run is the first native GUI build against that version.
+2. Cover the seven packages that still have no test file: `main`, `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`, `internal/data/app`, `ui`. The transports, the scanner and the CLI commands are covered.
 3. Delete the leftover `feature/*` branches — the branch gate rejects their names.
-4. Release `v0.2.0` to `main`, which is 11 commits behind `dev`.
+4. Reconcile the coverage claims in `AGENTS.md` and `.opencode/instructions/testing.md` with the real suite (issue #81).
+5. An APK is not started — the Android archive is the CLI, and a Kotlin UI is issue #9.
 
 ## Notes
 
 - The `ct` alias is the same binary under a second name; both are shipped in
   the release archive.
-- The websocket server listens on `:8080` — every interface — and the client
-  dials plain `ws://`. Messages travel in plaintext and any client that can
-  reach the port gets a session. See issue #11.
-- The `docker-compose.yml` broker runs with `-js` (JetStream), so it also
-  persists the messages it carries.
+- The websocket transport defaults to port `8080` on **every interface**; the
+  client dials `ws://` (or `wss://` with `--tls`) and the server serves https
+  under the same flag. The host generates a shared secret on its first run
+  (`~/.config/cthrone/token`, mode `0600`) and refuses a client that does not
+  send it, unless the host passed `--allow-anonymous`. With `--tls` the host's
+  certificate is pinned by `--cert-fingerprint`; `--insecure` keeps the
+  encryption but skips that check. See issue #11 for the model.
+- The `docker-compose.yml` broker requires the credentials in `NATS_USER` and
+  `NATS_PASSWORD` (`nats.conf`), and runs **without** JetStream, so a
+  conversation does not outlive the session it happened in.
 - `docker-compose.yml` is a convenience for local experiments, not a
   dependency: the build, the gate, and the websocket transport need nothing
   but Go.
 - Windows uses `cmd` to execute commands, Linux uses `sh`; the `add_to_path`
   installers exist for both.
-- There is no configuration file, so there is nothing in the user's home
-  directory to protect and nothing to keep out of the repository.
+- The tool writes two things into the user's home directory, both on first use
+  and both secret: the shared secret (`~/.config/cthrone/token`, `0600`) and the
+  TLS material (`cert.pem`, and `key.pem` at `0600`). Neither is ever committed;
+  see `AGENTS.md` → Environment and Secret-File Rules.
