@@ -235,13 +235,25 @@ join, it does not hide what is said.
 
 Download the archive for your platform from the
 [releases page](https://github.com/fiwon123/cthrone/releases), then run the
-installer it ships with:
+installer it ships with. Every release also carries a `checksums.txt` — verify
+a download before running it.
 
 | Platform | Archive | Install |
 |---|---|---|
-| Linux | `*.tar.gz` | `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
-| Windows | `*.zip` | `Expand-Archive <archive>` then `.\add_to_path.bat` |
-| Android | `*.zip` / `*.tar.gz` | unpack it, then run `./cthrone` (arm64) |
+| Linux (amd64) | `*_linux.tar.gz` | `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
+| macOS (Apple silicon) | `*_darwin_arm64.tar.gz` | `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
+| macOS (Intel) | `*_darwin_amd64.tar.gz` | same as above |
+| Windows (amd64) | `*_windows.zip` | `Expand-Archive <archive>` then `.\add_to_path.bat` |
+| Android (arm64) | `*_android.zip` / `.tar.gz` | unpack it, then run `./cthrone` (arm64) |
+
+The desktop GUI (`cthrone ui`) ships as its own archive, so a terminal-only
+user does not download a window toolkit:
+
+| Platform | Archive | Notes |
+|---|---|---|
+| Linux (amd64) | `*_linux_gui_amd64.tar.gz` | needs the GTK3/GL/X11 runtime libraries, listed in the release notes |
+| Windows (amd64) | `*_windows_gui_amd64.zip` | no extra runtime libraries |
+| macOS (Apple silicon) | `*_darwin_gui_arm64.tar.gz` | no extra runtime libraries |
 
 Each archive carries both `cthrone` and the short alias `ct`, so `ct host`
 works the moment the folder is on your PATH.
@@ -328,11 +340,32 @@ go run ./ --help
 | Command | What it does |
 |---|---|
 | `make check` | gofmt, vet, test, build — the local gate |
-| `make release` | build the Windows and Linux archives and the Android binary into `build/` |
+| `make release` | build every CLI archive (Windows, Linux, Android, macOS) into `build/` |
+| `make release-gui` | build the GUI archives a Linux host can produce (Linux, Windows) |
 | `make clean` | remove `build/` |
 | `go test ./...` | tests only |
 | `gofmt -l .` | list files that are not formatted |
 | `make help` | every target, with a one-line description |
+
+### Releasing
+
+`.github/workflows/release.yml` builds the release and creates a **draft** for
+a human to publish. It runs on manual dispatch, from `main` only:
+
+```bash
+gh workflow run release.yml --ref main -f version=v0.2.0
+```
+
+It runs `make check` first, then builds the CLI for Windows, Linux, Android and
+macOS plus the Fyne GUI for Linux, Windows and macOS, writes `checksums.txt`,
+and attaches everything to a draft release whose description carries the
+install matrix and the generated changelog. **The workflow never publishes and
+never pushes a tag** — publishing the draft by hand is what creates the tag.
+
+The GUI targets need CGO and platform headers, so they run on the GitHub
+runners and not in the dev sandbox: `make release` stays buildable anywhere,
+`make release-gui` needs the GTK3/X11/GL headers, and `make gui-darwin` only
+runs on macOS.
 
 ### Dev sandbox
 

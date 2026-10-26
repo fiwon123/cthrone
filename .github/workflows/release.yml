@@ -1,0 +1,423 @@
+name: Release draft
+
+# Builds every release asset and creates a DRAFT GitHub release for a human to
+# review and publish. It never publishes and never pushes a tag: the tag is
+# created by GitHub when the draft is published by hand.
+#
+# Manual dispatch only (`workflow_dispatch`), and only from `main` — the
+# release is the merge of `dev` into `main`, so a build from any other ref is
+# not a release and is refused in the first job.
+#
+# Asset matrix:
+#
+#   CLI  `make release`          Windows amd64, Linux amd64, Android arm64,
+#                                macOS arm64 + amd64        (ubuntu-latest)
+#   GUI  `make gui-linux`        Linux amd64                (ubuntu-latest)
+#   GUI  `make gui-windows`      Windows amd64, cross-built (ubuntu-latest)
+#   GUI  `make gui-darwin`       macOS arm64                (macos-latest)
+#
+# The GUI targets need CGO and platform headers, so each one runs on the runner
+# that can provide them. None of them can be built in the dev sandbox, which is
+# why local verification of this workflow stops at `make check` plus a dry run
+# of the CLI targets.
+#
+# A skipped or failed job must never leave a partial draft behind: `draft`
+# depends on every build job, and it refuses to add assets to a release that is
+# already published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. v0.2.0 — creates a DRAFT release; nothing is published'
+        required: true
+        type: string
+
+# One release at a time per version. `cancel-in-progress: false` is deliberate:
+# a cancelled run can leave a half-uploaded draft, and a half-uploaded draft
+# looks complete from the release page.
+concurrency:
+  group: release-draft-${{ inputs.version }}
+  cancel-in-progress: false
+
+# Creating a draft release and uploading assets needs write access to contents.
+permissions:
+  contents: write
+
+env:
+  # Injected into the binary by every Makefile target; the archive names use the
+  # same value. Passed with `make VERSION=...` because the Makefile's own
+  # default comes from `git describe`, which a shallow checkout cannot answer.
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Guard rails: a well-formed version, from `main`, ahead of any build.
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to build a release from anything but main
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::a release must be built from main, not '$REF' — merge dev into main first"
+            exit 1
+          fi
+
+      - name: Check the version format
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REQUESTED" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$REQUESTED' is not a version — expected v<major>.<minor>.<patch>, e.g. v0.2.0"
+            exit 1
+          fi
+          echo "building $REQUESTED"
+
+  # ---------------------------------------------------------------------------
+  # The gate. A draft is never created from a tree that fails `make check`.
+  #
+  # What this proves: gofmt-clean, `go vet` clean, the tested packages pass, and
+  # everything compiles (the GUI package compiles with its no-op stub, because
+  # `check` does not use `-tags gui`). It does NOT prove behaviour of packages
+  # without tests — `make check` prints that list, read it.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Gate (make check)
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: make check
+        run: make check
+
+  # ---------------------------------------------------------------------------
+  # CLI archives: `make release` — Windows, Linux, Android and macOS, all pure
+  # Go, so one Linux runner builds all of them.
+  # ---------------------------------------------------------------------------
+  build-cli:
+    name: CLI (windows, linux, android, darwin)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Ensure zip is available
+        run: |
+          if ! command -v zip >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq zip
+          fi
+
+      - name: make release
+        run: make release VERSION="$VERSION"
+
+      - name: Upload the CLI archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-assets
+          path: |
+            build/**/*.zip
+            build/**/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # GUI, Linux: Fyne links against GTK3, GL and the X11/XRandR/XInput headers.
+  # ---------------------------------------------------------------------------
+  gui-linux:
+    name: GUI (linux/amd64)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Install the Fyne build headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc pkg-config zip \
+            libgl1-mesa-dev libgtk-3-dev libxkbcommon-dev xorg-dev
+
+      - name: make gui-linux
+        run: make gui-linux VERSION="$VERSION"
+
+      - name: Upload the Linux GUI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-linux-assets
+          path: build/GUI/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # GUI, Windows: cross-compiled from Linux with mingw-w64. If this job fails
+  # with a glfw/link error, the fallback is a native `windows-latest` job — see
+  # the issue that added this workflow.
+  # ---------------------------------------------------------------------------
+  gui-windows:
+    name: GUI (windows/amd64)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Install the mingw-w64 cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 zip
+
+      - name: make gui-windows
+        run: make gui-windows VERSION="$VERSION"
+
+      - name: Upload the Windows GUI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-windows-assets
+          path: build/GUI/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # GUI, macOS: must be native. The target refuses to run anywhere else, so a
+  # mismatch fails loudly instead of producing a Linux binary in a darwin zip.
+  # ---------------------------------------------------------------------------
+  gui-darwin:
+    name: GUI (darwin/arm64)
+    needs: gate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: make gui-darwin
+        run: make gui-darwin VERSION="$VERSION"
+
+      - name: Upload the macOS GUI archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-darwin-assets
+          path: build/GUI/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The draft. Every archive in one flat directory (release asset names are
+  # flat), a checksum file over all of them, a curated description followed by
+  # GitHub's generated notes, and `gh release create --draft`.
+  # ---------------------------------------------------------------------------
+  draft:
+    name: Draft release
+    needs: [build-cli, gui-linux, gui-windows, gui-darwin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Collect the assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: '*-assets'
+          path: downloaded
+          merge-multiple: true
+
+      # `upload-artifact` keeps the path below the search root, so the archives
+      # arrive under `downloaded/Windows/`, `downloaded/Linux/` and friends.
+      # Release assets are flat, so flatten them here — one place, rather than
+      # a `find -maxdepth 1` that silently matches nothing.
+      - name: Flatten into one asset directory
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find downloaded -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp -v {} assets/ \;
+          echo "collected $(find assets -maxdepth 1 -type f | wc -l) archives"
+
+      - name: Write checksums.txt
+        run: |
+          set -euo pipefail
+          cd assets
+          mapfile -t archives < <(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -printf '%f\n' | sort)
+          if [ "${#archives[@]}" -lt 9 ]; then
+            echo "::error::expected at least 9 archives, found ${#archives[@]}: ${archives[*]}"
+            exit 1
+          fi
+          sha256sum "${archives[@]}" > checksums.txt
+          cat checksums.txt
+
+      - name: Compose the release description
+        env:
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Quoted heredoc: backticks and `$(...)` in the Markdown stay literal.
+          # @PLACEHOLDER@ tokens are substituted below.
+          cat > header.md <<'EOF'
+          ## cthrone @VERSION@
+
+          Terminal chat that carries messages from one device to another — over a
+          websocket by default, or a NATS broker with `--nats` — plus a Fyne
+          desktop GUI.
+
+          Built from commit `@COMMIT@` ([workflow run](@RUN@)).
+
+          ### Download
+
+          | Platform | Asset | Notes |
+          |---|---|---|
+          | Linux amd64 | `cthrone_@VERSION@_linux.tar.gz` | CLI. `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
+          | Linux amd64, GUI | `cthrone_@VERSION@_linux_gui_amd64.tar.gz` | Fyne GUI. Needs the GTK3/GL/X11 runtime libraries — see below |
+          | Windows amd64 | `cthrone_@VERSION@_windows.zip` | CLI. `Expand-Archive <archive>` then `.\add_to_path.bat` |
+          | Windows amd64, GUI | `cthrone_@VERSION@_windows_gui_amd64.zip` | Fyne GUI |
+          | macOS arm64 | `cthrone_@VERSION@_darwin_arm64.tar.gz` | CLI, Apple silicon |
+          | macOS amd64 | `cthrone_@VERSION@_darwin_amd64.tar.gz` | CLI, Intel |
+          | macOS arm64, GUI | `cthrone_@VERSION@_darwin_gui_arm64.tar.gz` | Fyne GUI |
+          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | CLI. Unpack, then run `./cthrone` on the device |
+
+          Every archive carries both `cthrone` and the short alias `ct`, so
+          `ct host` works as soon as the folder is on your `PATH`. The GUI
+          archives are the same tool with `cthrone ui` built in.
+
+          ### Verify the download
+
+          ```bash
+          sha256sum -c checksums.txt        # Linux
+          shasum -a 256 -c checksums.txt    # macOS
+          ```
+
+          `Get-FileHash <file> -Algorithm SHA256` on Windows.
+
+          ### Linux GUI runtime libraries
+
+          The Linux GUI binary is linked dynamically. On a Debian/Ubuntu host:
+
+          ```bash
+          sudo apt-get install libgtk-3-0 libgl1 libx11-6 libxcursor1 \
+            libxrandr2 libxinerama1 libxi6 libxxf86vm1
+          ```
+
+          A CLI-only user does not need any of them.
+
+          ### Security
+
+          This tool is **not** encrypted or authenticated by default:
+
+          - the **websocket** transport requires a shared secret (a client that
+            does not know it is refused), and `--tls` encrypts the connection,
+            with the host's certificate pinned by `--cert-fingerprint`;
+          - the **NATS** transport sends the broker's credentials from
+            `NATS_USER`/`NATS_PASSWORD`, and a `tls://` broker URL asks for an
+            encrypted connection;
+          - prefer `--token-file` or the environment over `--token`: a flag value
+            is visible in the process list.
+
+          ### Changes
+
+          EOF
+
+          sed -i "s|@VERSION@|$VERSION|g; s|@COMMIT@|$COMMIT|g; s|@RUN@|$RUN_URL|g" header.md
+
+          # GitHub's generated notes, from the previous release to this commit.
+          if gh api "repos/$REPO/releases/generate-notes" \
+               -f tag_name="$VERSION" \
+               -f target_commitish="$COMMIT" \
+               --jq .body > generated.md 2>generate-notes.err; then
+            :
+          else
+            echo "::warning::generate-notes failed; shipping the curated header only"
+            sed 's/^/  /' generate-notes.err >&2
+            printf '_Automatic release notes were unavailable for %s. See the full commit list:\n%s/commits/%s_\n' \
+              "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > generated.md
+          fi
+
+          { cat header.md; echo; cat generated.md; } > release-notes.md
+          wc -l release-notes.md
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t files < <(cd assets && find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -printf 'assets/%f\n' | sort)
+          files+=(assets/checksums.txt)
+          echo "uploading ${#files[@]} assets"
+
+          # `gh release view` fails (non-zero) when no release exists yet.
+          state="$(gh release view "$VERSION" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+
+          case "$state" in
+            true)
+              # A previous run left a draft: refresh it instead of failing, so
+              # re-running after a fix is one click and not a manual cleanup.
+              echo "draft $VERSION exists — updating description and assets"
+              gh release edit "$VERSION" --title "cthrone $VERSION" --notes-file release-notes.md --draft
+              gh release upload "$VERSION" "${files[@]}" --clobber
+              ;;
+            false)
+              echo "::error::release $VERSION is already published — refusing to touch it"
+              echo "Pick a new version, or delete the published release by hand."
+              exit 1
+              ;;
+            *)
+              echo "creating draft $VERSION"
+              # No tag is pushed here: `--target` records the commit, and
+              # GitHub creates the tag when the draft is published by hand.
+              gh release create "$VERSION" \
+                --draft \
+                --title "cthrone $VERSION" \
+                --notes-file release-notes.md \
+                --target "$COMMIT" \
+                "${files[@]}"
+              ;;
+          esac
+
+      - name: Report
+        run: |
+          set -euo pipefail
+          {
+            echo "### Draft release: $VERSION"
+            echo
+            echo "Review it on the [releases page](${{ github.server_url }}/${{ github.repository }}/releases) — it stays a draft until a human publishes it."
+            echo
+            echo "No tag exists yet; publishing the draft creates it from this commit."
+            gh release view "$VERSION" --json url,isDraft,assets \
+              --jq '"assets: \(.assets | length) · draft: \(.isDraft) · \(.url)"' || true
+          } >> "$GITHUB_STEP_SUMMARY"
