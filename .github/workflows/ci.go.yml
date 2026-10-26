@@ -69,8 +69,11 @@ jobs:
 # `skipped`, not `passed`. Skipped is not passed: run `make check` locally
 # before relying on CI.
 #
-# THIS REPOSITORY HAS NO TESTS YET. `go test ./...` prints "[no test files]" for
-# every package and still exits 0, so a green `Test` step here means "the
-# packages compiled and nothing was executed". `make check` prints the list of
-# uncovered packages for the same reason. Read the run's log before treating a
-# green build as coverage.
+# COVERAGE IS PARTIAL. `go test ./...` prints "[no test files]" for the packages
+# without a test file and still exits 0, so a green `Test` step means "the
+# packages compiled and the tested ones passed" — not "everything was executed".
+# `make check` prints the list of uncovered packages for the same reason. Read
+# the run's log before treating a green build as coverage.
+#
+# Each stage above is its own step, so a non-zero exit fails the job: unlike the
+# `check` target, nothing here is chained with `;` behind a final `if`.
