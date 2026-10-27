@@ -1,0 +1,8 @@
+Website = "https://github.com/fiwon123/cthrone"
+
+# Android metadata. The version and the build number come from the release
+# (fyne package --app-version/--app-build), so they are deliberately not
+# pinned here: a second source would drift from the tag.
+[Details]
+Name = "cthrone"
+ID = "com.cthrone.app"

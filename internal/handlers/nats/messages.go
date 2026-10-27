@@ -51,21 +51,33 @@ func publishMessages(p publisher, message string, subject string) error {
 	return nil
 }
 
-// Subscribe Message using a string subject
+// Subscribe Message using a string subject, and block until the connection
+// closes. It is the terminal consumer: the GUI uses NewSession instead.
 func SubscribeMessages(nc *nats.Conn, subject string) {
-	subscribeMessages(subs(nc), subject)
+	if _, err := subscribeMessages(subs(nc), subject); err != nil {
+		log.Printf("Error subscribing: %v", err)
+
+		return
+	}
+
+	select {}
 }
 
-func subscribeMessages(s subscriber, subject string) {
+// subscribeMessages registers the handler and returns the subscription. It
+// does not block and it does not unsubscribe: the caller owns the
+// subscription for as long as it needs it.
+func subscribeMessages(s subscriber, subject string) (subscription, error) {
 	sub, err := s.Subscribe(subject, func(m *nats.Msg) {
 		log.Printf("Received message: %s", string(m.Data))
 	})
 
 	if err != nil {
 		log.Printf("Error subscribing: %v", err)
-		return
+
+		return nil, err
 	}
-	sub.Unsubscribe()
 
 	log.Println("Subscriptions active")
+
+	return sub, nil
 }

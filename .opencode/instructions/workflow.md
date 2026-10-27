@@ -250,10 +250,10 @@ gh pr create \
   gh workflow run release.yml --ref main -f version=v<major>.<minor>.<patch>
   ```
   - The workflow runs `make check` first, so a red tree produces no draft.
-  - It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI
-    for Linux, Windows and macOS, writes `checksums.txt`, and attaches every
-    archive to the draft — with a description carrying the install matrix, the
-    security caveats and the generated changelog.
+  - It builds the CLI for Windows, Linux, Android and macOS, the Fyne GUI for
+    Linux, Windows and macOS, and the Android APK, writes `checksums.txt`, and
+    attaches every archive to the draft — with a description carrying the
+    install matrix, the security caveats and the generated changelog.
   - **The workflow never publishes and never pushes a tag.** A human reviews
     the draft and publishes it; publishing creates the tag
     `v<major>.<minor>.<patch>` from the released commit. Check

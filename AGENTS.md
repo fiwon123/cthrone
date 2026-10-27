@@ -7,8 +7,9 @@
 
 ## Project Objective
 
-cthrone — a terminal chat tool that carries messages from one device to
-another, over a websocket or a NATS server, with no GUI.
+cthrone — a chat tool that carries messages from one device to another, over a
+websocket or a NATS server, from a terminal or from a touch-friendly app on a
+phone.
 
 ### Problem
 
@@ -48,14 +49,23 @@ The transport is chosen at the command level: `--nats` selects the NATS path,
 and its absence selects the websocket path. Both paths meet at the same chat
 loop, so the two transports are interchangeable from the user's point of view.
 
+The GUI sits beside the commands rather than inside them: `ui/` builds on the
+same `session.Session` the terminal loops use, and `mobile/` is a second `main`
+that starts that GUI on Android (and, later, iOS). The terminal and the GUI
+therefore share the transports, the secrets and the TLS rules, and differ only
+in how they read and write.
+
 ## Project Structure
 
 ```text
-cmd/                 cobra commands: connect, host, scan
+cmd/                 cobra commands: connect, host, scan, ui, recv, exec
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
 internal/auth/       the shared secret and the TLS material of the websocket transport
+internal/session/    the transport-agnostic session the CLI and the GUI share
+ui/                  the Fyne GUI, behind the `gui` build tag
+mobile/              the Android/iOS entry point: a second `main` that starts `ui`
 scripts/             add_to_path installers + the dev sandbox runtime
 .github/workflows/   CI, the branch gate, and the draft-release workflow
 docker-compose.yml   the dev sandbox and a local NATS server
@@ -67,6 +77,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 make check           # the local gate: gofmt, vet, test, build
 make release         # build every CLI archive: Windows, Linux, Android, macOS
 make release-gui     # the GUI archives a Linux host can produce (Linux, Windows)
+make gui-android     # the Android APK: needs the Android SDK + NDK and the fyne CLI
 make clean           # remove build/
 go run ./ --help     # run from source
 go test ./...        # tests only
@@ -108,24 +119,33 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**The coverage is partial.** Both transports, the two commands that use them
-and the `host`/`connect` command flags have tests; the scanner and the `scan`
-command do not. `go test ./...` prints `? package [no test files]` for those,
-and exits 0. That is not a pass: it means nothing was executed for them.
+**The coverage is partial.** The transports, the scanner, and the CLI commands
+have tests; seven packages do not. `go test ./...` prints `? package [no test
+files]` for those and exits 0. That is not a pass: it means nothing was executed
+for them.
+
+- **Covered (14 packages)**: `cmd` (root), `cmd/connect`, `cmd/host`,
+  `cmd/scan`, `internal/auth`, `internal/core/nats`, `internal/core/websocket`
+  (the scanner included), `internal/discovery`, `internal/exec`,
+  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
+  `internal/shutdown`, `ui` (its non-GUI settings logic; the Fyne widgets are
+  still unverified).
+- **Not covered (7 packages)**: `main` (`github.com/fiwon123/cthrone`),
+  `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`, `internal/data/app`,
+  `mobile`.
 
 So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
 - the code compiles,
-- the tested packages passed — currently both transports and the two
-  commands that use them.
+- the 14 covered packages passed.
 
-It does **not** prove the behaviour of the scanner works. A chat tool's
-behaviour — a message that arrives, a host that binds the right port, a scan
-that finds the server — is partly untested here. Report honestly: "gofmt, vet,
-and build are clean; the transports are covered, the scanner is not", not
-"tests pass".
+It does **not** prove the behaviour of the seven above — the GUI widgets, the
+remote-exec CLI wiring, the asset embedding, the in-memory configuration, the
+mobile entry point, and `main`. Report honestly: "gofmt, vet, and build are
+clean; the transports, the scanner, the CLI commands and the GUI's settings
+logic are covered, `cmd/recv` and `mobile` are not", not "tests pass".
 
 `make check` prints the list of packages with no test file after the run, so
 the gap is visible in the output rather than only in this document.
@@ -454,12 +474,17 @@ gh workflow run release.yml --ref main -f version=v0.2.0
 ```
 
 - It runs `make check` first, so a red tree produces no draft at all.
-- It builds the CLI for Windows, Linux, Android and macOS plus the Fyne GUI for
-  Linux, Windows and macOS, writes `checksums.txt`, and attaches every archive
-  to the draft.
+- It builds the CLI for Windows, Linux, Android and macOS, the Fyne GUI for
+  Linux, Windows and macOS, and the Android APK, writes `checksums.txt`, and
+  attaches every archive to the draft.
 - The GUI jobs need CGO and platform headers (GTK3/X11/GL on Linux, mingw-w64
   for Windows, a macOS runner for darwin), so they exist in CI and not in the
-  dev sandbox — a GUI build cannot be verified locally.
+  dev sandbox — a GUI build cannot be verified locally. The APK is built on
+  `ubuntu-latest` with the runner's Android SDK and NDK; `make gui-android`
+  needs the same three things (SDK, NDK, `fyne` CLI) and refuses with a clear
+  message when one is missing.
+- The APK is packaged **without** `fyne package --release`: that flag emits an
+  `.aab` for a store, while a sideload installs the debug-signed `.apk`.
 - Re-running the same version refreshes the existing draft; a release that is
   already **published** is refused, not modified.
 - The workflow itself is not covered by CI. Its first real proof is a dry run,

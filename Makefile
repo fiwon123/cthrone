@@ -45,6 +45,13 @@ GUI_DARWIN_DIR := $(GUI_BUILD)/Darwin
 GUI_LINUX_TAR := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_linux_gui_amd64.tar.gz
 GUI_WINDOWS_ZIP := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_windows_gui_amd64.zip
 GUI_DARWIN_TAR := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_darwin_gui_arm64.tar.gz
+GUI_ANDROID_APK := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_android_gui_arm64.apk
+
+# The fyne CLI that packages the APK. Pinned: the packager shapes the Android
+# manifest and the signature, so an unpinned upgrade can change the artifact.
+FYNE_CLI_VERSION := v1.26.1
+FYNE := $(shell command -v fyne 2>/dev/null)
+ANDROID_ICON := $(CURDIR)/assets/logo-512.png
 
 # What every Unix archive carries, in the order it is listed inside the
 # archive. The staging directory holds a copy of each file, so the binaries and
@@ -56,7 +63,7 @@ WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).ba
 
 
 .PHONY: all windows linux android darwin zip_linux zip_windows zip_android clean release \
-	gui-linux gui-windows gui-darwin release-gui check assets \
+	gui-linux gui-windows gui-darwin gui-android release-gui check assets \
 	help dev-up dev-down dev-shell dev-opencode dev-opencode-auto dev-log dev-build reset \
 	preflight require-agent prepare-agent-mounts check-identity opencode-version opencode-upgrade \
 	shell opencode opencode-auto
@@ -139,6 +146,12 @@ darwin: $(BUILD_DIR) ## build the macOS CLI archives (arm64, amd64)
 #   gui-linux    needs CGO + GTK3/X11/GL headers    (any Linux with them)
 #   gui-windows  needs mingw-w64's x86_64-w64-mingw32-gcc
 #   gui-darwin   must run on macOS; refused elsewhere
+#   gui-android  needs the Android SDK + NDK and the fyne CLI
+#
+# `gui-android` produces a debug-signed APK with the Fyne toolchain: without
+# `fyne package --release` the packager signs with its bundled debug key, which
+# is what a sideload needs. `--release` would emit an .aab that only a store or
+# bundletool can install, so it is deliberately not used here.
 #
 # `release-gui` is the Linux half only — the Windows cross-build and the macOS
 # native build are separate because no single host can do all three. The
@@ -179,6 +192,55 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
 	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(UNIX_ARCHIVE_FILES)
+
+# Build the Android APK. Everything the packager needs is checked first: a
+# missing SDK, NDK or fyne CLI fails the target with what to install, instead
+# of a stack trace from deep inside the mobile build.
+gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and the fyne CLI)
+	@if [ -z "$(FYNE)" ]; then \
+	  echo "ERROR: the fyne CLI is missing — it packages the APK." >&2; \
+	  echo "  go install fyne.io/tools/cmd/fyne@$(FYNE_CLI_VERSION)" >&2; \
+	  exit 1; \
+	fi; \
+	if [ -z "$${ANDROID_HOME:-}" ] && [ -n "$${ANDROID_SDK_ROOT:-}" ]; then \
+	  ANDROID_HOME="$$ANDROID_SDK_ROOT"; export ANDROID_HOME; \
+	fi; \
+	if [ -z "$${ANDROID_HOME:-}" ] || [ ! -d "$$ANDROID_HOME" ]; then \
+	  echo "ERROR: ANDROID_HOME (or ANDROID_SDK_ROOT) is not set to the Android SDK." >&2; \
+	  exit 1; \
+	fi; \
+	if ! ls "$$ANDROID_HOME"/build-tools/*/aapt2 >/dev/null 2>&1; then \
+	  echo "ERROR: aapt2 is missing from $$ANDROID_HOME/build-tools — install the Android build-tools." >&2; \
+	  exit 1; \
+	fi; \
+	if [ -z "$${ANDROID_NDK_HOME:-}" ]; then \
+	  if [ -d "$$ANDROID_HOME/ndk-bundle" ]; then \
+	    ANDROID_NDK_HOME="$$ANDROID_HOME/ndk-bundle"; export ANDROID_NDK_HOME; \
+	  else \
+	    ndk="$$(ls -d "$$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)"; \
+	    if [ -n "$$ndk" ]; then ANDROID_NDK_HOME="$$ndk"; export ANDROID_NDK_HOME; fi; \
+	  fi; \
+	fi; \
+	if [ -z "$${ANDROID_NDK_HOME:-}" ] || [ ! -d "$$ANDROID_NDK_HOME" ]; then \
+	  echo "ERROR: no Android NDK found — set ANDROID_NDK_HOME, or install one under \$$ANDROID_HOME/ndk." >&2; \
+	  exit 1; \
+	fi; \
+	version="$$(printf '%s' '$(VERSION)' | sed -E 's/^v//; s/[-+].*//')"; \
+	case "$$version" in \
+	  [0-9]*.[0-9]*.[0-9]*) : ;; \
+	  *) echo "ERROR: '$(VERSION)' is not an x.y.z version — pass VERSION=v<major>.<minor>.<patch>." >&2; exit 1 ;; \
+	esac; \
+	build="$$(git rev-list --count HEAD 2>/dev/null || echo 1)"; \
+	mkdir -p $(GUI_BUILD) && \
+	cd mobile && $(FYNE) package \
+	  -target android/arm64 \
+	  -name $(APP_NAME) \
+	  -app-id com.cthrone.app \
+	  -icon $(ANDROID_ICON) \
+	  -app-version "$$version" \
+	  -app-build "$$build" \
+	  -tags gui && \
+	mv $(APP_NAME).apk $(abspath $(GUI_ANDROID_APK))
 
 # The GUI archives a Linux machine with the headers can produce on its own.
 release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can produce (linux, windows)

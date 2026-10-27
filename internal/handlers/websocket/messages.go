@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/gorilla/websocket"
+	"github.com/fiwon123/cthrone/internal/session"
 	"golang.org/x/term"
 )
 
@@ -21,22 +21,19 @@ const (
 	backspace = 127
 )
 
-func receiveMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			fmt.Fprintln(stdout, "Read error:", err)
-			break
-		}
-
+// receiveMsgLoop prints the messages of a session to the terminal. The
+// session does the reading; this only renders.
+func receiveMsgLoop(s session.Session, currentInput *[]rune) {
+	s.OnMessage(func(m session.Message) {
 		clearLine()
-		fmt.Fprintf(stdout, "%s: %s\n", conn.RemoteAddr(), string(msg))
+		fmt.Fprintf(stdout, "%s: %s\n", m.From, string(m.Payload))
 		printCursor()
 		fmt.Fprintf(stdout, "%s", string(*currentInput))
-	}
+	})
 }
 
-func sendMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
+// sendMsgLoop reads raw-mode stdin and sends a line when Enter is pressed.
+func sendMsgLoop(s session.Session, currentInput *[]rune) {
 	var mu sync.Mutex
 	var oldState *term.State
 	var err error
@@ -58,16 +55,15 @@ func sendMsgLoop(conn *websocket.Conn, currentInput *[]rune) {
 		switch b {
 		case ctrlC:
 			fmt.Fprintf(stdout, "\r\nExiting...\n")
-			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye"))
-			_ = conn.Close()
+			s.Close("goodbye")
+
 			return
 		case enter:
 			mu.Lock()
 			msg := string(*currentInput)
 			*currentInput = []rune{}
 			mu.Unlock()
-			err := conn.WriteMessage(websocket.TextMessage, []byte(msg))
-			if err != nil {
+			if err := s.Send([]byte(msg)); err != nil {
 				return
 			}
 			fmt.Fprintf(stdout, "\rYou: %s\n", msg)
