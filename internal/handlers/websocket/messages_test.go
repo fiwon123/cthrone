@@ -63,7 +63,7 @@ func TestReceiveMsgLoopPrintsMessage(t *testing.T) {
 	defer func() { stdout = os.Stdout }()
 
 	current := []rune{}
-	go receiveMsgLoop(server, &current)
+	go receiveMsgLoop(newConnSession(server), &current)
 
 	if err := client.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestSendMsgLoopSendsMessage(t *testing.T) {
 	defer func() { stdin = oldStdin }()
 
 	current := []rune{}
-	go sendMsgLoop(server, &current)
+	go sendMsgLoop(newConnSession(server), &current)
 
 	fmt.Fprint(w, "hi\r")
 	w.Close()
@@ -117,7 +117,7 @@ func TestSendMsgLoopBackspace(t *testing.T) {
 	defer func() { stdin = oldStdin }()
 
 	current := []rune{}
-	go sendMsgLoop(server, &current)
+	go sendMsgLoop(newConnSession(server), &current)
 
 	fmt.Fprint(w, "ab\x7f\r")
 	w.Close()
@@ -147,7 +147,7 @@ func TestSendMsgLoopCtrlC(t *testing.T) {
 	current := []rune{}
 	done := make(chan struct{})
 	go func() {
-		sendMsgLoop(server, &current)
+		sendMsgLoop(newConnSession(server), &current)
 		close(done)
 	}()
 

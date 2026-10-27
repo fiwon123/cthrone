@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/auth"
@@ -35,8 +36,43 @@ func dialerFor(tlsConfig *tls.Config) *websocket.Dialer {
 	return &dialer
 }
 
-// Connect to websocket host
+// Connect to websocket host, then run the terminal chat loop. It returns when
+// the peer disconnects or the user presses Ctrl-C.
 func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) error {
+	conn, url, err := openConnectionDial(address, port, token, useTLS, tlsConfig)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Connected to", url)
+
+	s := newConnSession(conn)
+	defer s.Close("goodbye")
+
+	// The read loop may already have failed before OnClose was registered, so
+	// close the channel from whichever side gets there first.
+	var once sync.Once
+	done := make(chan struct{})
+	finished := func() { once.Do(func() { close(done) }) }
+
+	s.OnClose(func(string) { finished() })
+	if s.IsClosed() {
+		finished()
+	}
+
+	currentInput := []rune{}
+	go receiveMsgLoop(s, &currentInput)
+	go sendMsgLoop(s, &currentInput)
+
+	<-done
+
+	return nil
+}
+
+// openConnectionDial dials the host and returns the connection with the URL
+// it reached. The errors that name a missing secret or a missing --tls are
+// produced here so every caller explains a refusal the same way.
+func openConnectionDial(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) (*websocket.Conn, string, error) {
 	url := buildURL(address, port, useTLS)
 
 	header := http.Header{}
@@ -49,23 +85,16 @@ func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls
 		if resp != nil {
 			switch resp.StatusCode {
 			case http.StatusUnauthorized:
-				return fmt.Errorf("the host refused the connection: it needs the shared secret")
+				return nil, url, fmt.Errorf("the host refused the connection: it needs the shared secret")
 			case http.StatusBadRequest:
-				return fmt.Errorf("the host refused the connection: it is serving TLS, add --tls")
+				return nil, url, fmt.Errorf("the host refused the connection: it is serving TLS, add --tls")
 			}
 		}
 
-		return err
+		return nil, url, err
 	}
-	defer conn.Close()
 
-	fmt.Println("Connected to", url)
-
-	currentInput := []rune{}
-	go sendMsgLoop(conn, &currentInput)
-	go receiveMsgLoop(conn, &currentInput)
-
-	select {}
+	return conn, url, nil
 }
 
 // buildURL returns the URL of the host. An address that carries a port is

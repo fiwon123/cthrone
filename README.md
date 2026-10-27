@@ -47,9 +47,10 @@ There is nothing to configure: the only setting is the port, and it comes from
 the command line. The `ct` short alias ships next to the `cthrone` binary,
 because a name you type many times a day should be short.
 
-**Supported platforms**: Windows, Linux, macOS, and Android (arm64). The Android
-build is a **command-line program** that runs in a terminal app on the phone —
-there is no APK and no app icon. See [Android](#android-arm64) below.
+**Supported platforms**: Windows, Linux, macOS, and Android (arm64). On Android
+there are two downloads: a **command-line program** that runs in a terminal app
+on the phone, and an **APK** — the same chat with a touch-friendly GUI, which
+installs like any other app. See [Android](#android) below.
 
 > **Security**: the websocket transport requires a **shared secret** — a
 > client that does not know it is refused — and it can be **encrypted** with
@@ -247,7 +248,8 @@ download before running it.
 | macOS (Apple silicon) | `*_darwin_arm64.tar.gz` | `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
 | macOS (Intel) | `*_darwin_amd64.tar.gz` | same as above |
 | Windows (amd64) | `*_windows.zip` | `Expand-Archive <archive>` then `.\add_to_path.bat` |
-| Android (arm64) | `*_android.zip` / `.tar.gz` | **CLI, not an app** — runs in Termux; see [Android](#android-arm64) |
+| Android (arm64), app | `*_android_gui_arm64.apk` | copy it to the phone and tap it, or `adb install <file>` — see [Android app](#android-app-arm64) |
+| Android (arm64), CLI | `*_android.zip` / `.tar.gz` | **CLI, not an app** — runs in Termux; see [Android CLI](#android-cli-arm64-termux) |
 
 The desktop GUI (`cthrone ui`) ships as its own archive, so a terminal-only
 user does not download a window toolkit:
@@ -261,11 +263,46 @@ user does not download a window toolkit:
 Each archive carries both `cthrone` and the short alias `ct`, so `ct host`
 works the moment the folder is on your PATH.
 
-### Android (arm64)
+### Android
+
+Android gets two downloads from the same source tree: an **app** you tap, and
+the **CLI** for a terminal app. Pick the app unless you want a terminal.
+
+#### Android app (arm64)
+
+`cthrone_<tag>_android_gui_arm64.apk` is the Fyne GUI compiled for a 64-bit ARM
+phone or tablet — the same chat, with buttons instead of a prompt. It is
+**debug-signed**, which is what a sideload accepts: there is no store listing
+and no update channel, so a new release is a new APK installed over the old
+one. Android asks permission to install from your browser or file manager the
+first time.
+
+```bash
+adb install cthrone_<tag>_android_gui_arm64.apk
+# or copy the file to the device and tap it
+```
+
+The app has three tabs:
+
+- **Chat** — the conversation, a send field and a stop button.
+- **Setup** — the port, the shared secret, the transport (NATS or websocket)
+  and the TLS options, with **Host** and **Connect**.
+- **Devices** — **Scan network** walks the local subnet for a host on the chat
+  port; tap a result to fill in its address.
+
+A phone that hosts generates a shared secret and offers it in a dialog, copied
+to the clipboard — type or paste it on the other device, or the connection is
+refused. The app keeps that secret and its TLS material in its own private data
+directory, separate from the CLI's `~/.config/cthrone`.
+
+The app is an **Android** build today. The same Go code is the source for an
+iOS build, which needs macOS and Xcode and has not been done yet
+([issue #84](https://github.com/fiwon123/cthrone/issues/84)).
+
+#### Android CLI (arm64, Termux)
 
 The Android archive holds the same command-line program, compiled for Android's
-CPU. **It is not an APK.** There is no app icon and nothing to tap: Android has
-no terminal of its own, so the tool runs inside one —
+CPU. Android has no terminal of its own, so it runs inside one —
 [Termux](https://termux.dev) is the one it is written for.
 
 ```bash
@@ -283,17 +320,17 @@ The shared secret works the same way, with one extra step: the first
 connects has to hold the same value or the connection is refused. Whichever
 device hosts, copy the file across before connecting.
 
-What the Android build does and does not give you:
+What the Android CLI does and does not give you:
 
 - **arm64, `v8.0` only** — a 32-bit phone and an x86_64 emulator cannot run it.
 - the archive carries **no installer script** (Linux, macOS and Windows ship
   one); to type `cthrone` from any directory, add the folder to `PATH` yourself,
   e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
-- `cthrone ui` (the Fyne GUI) is desktop-only. An Android APK is
-  [issue #9](https://github.com/fiwon123/cthrone/issues/9), not yet started.
-- **it is not verified on a device.** The binary is cross-compiled and published;
-  nothing in this project's CI runs it on a phone or an emulator, so "built for
-  Android" is a build claim, not an observed result. If it fails on your device,
+- `cthrone ui` is desktop-only; the APK above is the phone equivalent.
+- **neither Android download is verified on a device.** Both are cross-compiled
+  and published; nothing in this project's CI installs the APK or runs the
+  binary on a phone or an emulator, so "built for Android" is a build claim, not
+  an observed result. If it fails on your device,
   that is a bug worth
   [reporting](https://github.com/fiwon123/cthrone/issues) rather than a
   surprise.
@@ -382,6 +419,7 @@ go run ./ --help
 | `make check` | gofmt, vet, test, build — the local gate |
 | `make release` | build every CLI archive (Windows, Linux, Android, macOS) into `build/` |
 | `make release-gui` | build the GUI archives a Linux host can produce (Linux, Windows) |
+| `make gui-android` | build the Android APK (needs the Android SDK, the NDK and the `fyne` CLI) |
 | `make clean` | remove `build/` |
 | `go test ./...` | tests only |
 | `gofmt -l .` | list files that are not formatted |
@@ -397,15 +435,19 @@ gh workflow run release.yml --ref main -f version=v0.2.0
 ```
 
 It runs `make check` first, then builds the CLI for Windows, Linux, Android and
-macOS plus the Fyne GUI for Linux, Windows and macOS, writes `checksums.txt`,
-and attaches everything to a draft release whose description carries the
-install matrix and the generated changelog. **The workflow never publishes and
-never pushes a tag** — publishing the draft by hand is what creates the tag.
+macOS, the Fyne GUI for Linux, Windows and macOS, and the Android APK, writes
+`checksums.txt`, and attaches everything to a draft release whose description
+carries the install matrix and the generated changelog. **The workflow never
+publishes and never pushes a tag** — publishing the draft by hand is what
+creates the tag.
 
 The GUI targets need CGO and platform headers, so they run on the GitHub
 runners and not in the dev sandbox: `make release` stays buildable anywhere,
-`make release-gui` needs the GTK3/X11/GL headers, and `make gui-darwin` only
-runs on macOS.
+`make release-gui` needs the GTK3/X11/GL headers, `make gui-darwin` only runs
+on macOS, and `make gui-android` needs the Android SDK, an NDK and the `fyne`
+CLI. The APK is built **without** `fyne package --release` on purpose: that
+flag emits an `.aab` for a store, while a sideload installs a debug-signed
+`.apk`.
 
 ### Dev sandbox
 

@@ -15,6 +15,7 @@ name: Release draft
 #   GUI  `make gui-linux`        Linux amd64                (ubuntu-latest)
 #   GUI  `make gui-windows`      Windows amd64, cross-built (ubuntu-latest)
 #   GUI  `make gui-darwin`       macOS arm64                (macos-latest)
+#   APP  `make gui-android`      Android arm64 APK          (ubuntu-latest)
 #
 # The GUI targets need CGO and platform headers, so each one runs on the runner
 # that can provide them. None of them can be built in the dev sandbox, which is
@@ -237,13 +238,65 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
+  # Android app: the Fyne GUI packaged as an installable APK.
+  #
+  # `make gui-android` runs `fyne package -target android/arm64` without
+  # `--release`, which signs with the packager's bundled debug key. That is the
+  # signature a sideload accepts; `--release` would emit an .aab that only a
+  # store or bundletool can install.
+  #
+  # The GitHub runner image carries the Android SDK (with build-tools, so
+  # `aapt2` is there) and one or more NDKs; the Makefile finds the NDK under
+  # $ANDROID_HOME/ndk when ANDROID_NDK_HOME is not exported.
+  # ---------------------------------------------------------------------------
+  gui-android:
+    name: App (android/arm64 APK)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Install the fyne CLI
+        # Mirrors FYNE_CLI_VERSION in the Makefile: the packager shapes the
+        # manifest and the signature, so an unpinned upgrade changes the APK.
+        run: go install fyne.io/tools/cmd/fyne@v1.26.1
+
+      - name: make gui-android
+        run: make gui-android VERSION="$VERSION"
+
+      - name: Verify the APK
+        run: |
+          set -euo pipefail
+          apk="$(ls build/GUI/*.apk)"
+          echo "built $apk"
+          file "$apk"
+          unzip -l "$apk" | grep -q 'AndroidManifest.xml' \
+            || { echo "::error::$apk has no AndroidManifest.xml — not an APK"; exit 1; }
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/' \
+            || { echo "::error::$apk carries no arm64 native library — the Go payload is missing"; exit 1; }
+
+      - name: Upload the Android APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: gui-android-assets
+          path: build/GUI/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
   # The draft. Every archive in one flat directory (release asset names are
   # flat), a checksum file over all of them, a curated description followed by
   # GitHub's generated notes, and `gh release create --draft`.
   # ---------------------------------------------------------------------------
   draft:
     name: Draft release
-    needs: [build-cli, gui-linux, gui-windows, gui-darwin]
+    needs: [build-cli, gui-linux, gui-windows, gui-darwin, gui-android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -263,16 +316,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p assets
-          find downloaded -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp -v {} assets/ \;
+          find downloaded -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' \) -exec cp -v {} assets/ \;
           echo "collected $(find assets -maxdepth 1 -type f | wc -l) archives"
 
       - name: Write checksums.txt
         run: |
           set -euo pipefail
           cd assets
-          mapfile -t archives < <(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -printf '%f\n' | sort)
-          if [ "${#archives[@]}" -lt 9 ]; then
-            echo "::error::expected at least 9 archives, found ${#archives[@]}: ${archives[*]}"
+          mapfile -t archives < <(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' \) -printf '%f\n' | sort)
+          if [ "${#archives[@]}" -lt 10 ]; then
+            echo "::error::expected at least 10 archives, found ${#archives[@]}: ${archives[*]}"
             exit 1
           fi
           sha256sum "${archives[@]}" > checksums.txt
@@ -298,7 +351,7 @@ jobs:
 
           Terminal chat that carries messages from one device to another — over a
           websocket by default, or a NATS broker with `--nats` — plus a Fyne
-          desktop GUI.
+          desktop GUI and an Android app built from the same code.
 
           Built from commit `@COMMIT@` ([workflow run](@RUN@)).
 
@@ -313,7 +366,8 @@ jobs:
           | macOS arm64 | `cthrone_@VERSION@_darwin_arm64.tar.gz` | CLI, Apple silicon |
           | macOS amd64 | `cthrone_@VERSION@_darwin_amd64.tar.gz` | CLI, Intel |
           | macOS arm64, GUI | `cthrone_@VERSION@_darwin_gui_arm64.tar.gz` | Fyne GUI |
-          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | **CLI, not an app** — no APK. Runs in Termux; unpack into the Termux home (not `/sdcard`, which is `noexec`), then `chmod +x cthrone ct` |
+          | Android arm64, app | `cthrone_@VERSION@_android_gui_arm64.apk` | Fyne app, debug-signed. Tap to install; no store, no account |
+          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | **CLI, not an app.** Runs in Termux; unpack into the Termux home (not `/sdcard`, which is `noexec`), then `chmod +x cthrone ct` |
 
           Every archive carries both `cthrone` and the short alias `ct`, so
           `ct host` works as soon as the folder is on your `PATH`. The GUI
@@ -338,6 +392,31 @@ jobs:
           ```
 
           A CLI-only user does not need any of them.
+
+          ### The Android app
+
+          `cthrone_@VERSION@_android_gui_arm64.apk` is the same tool with the Fyne
+          GUI, for a 64-bit ARM phone or tablet. It is **debug-signed**, so Android
+          asks you to allow installs from the app you downloaded it with the first
+          time.
+
+          ```bash
+          adb install cthrone_@VERSION@_android_gui_arm64.apk
+          # or copy the file to the device and tap it
+          ```
+
+          The app has three tabs:
+
+          - **Chat** — the conversation, a send field and a stop button.
+          - **Setup** — the port, the shared secret, the transport (`NATS` or
+            websocket) and the TLS options, with **Host** and **Connect**.
+          - **Devices** — **Scan network** walks the local subnet for a host on
+            the chat port; tap a result to fill in its address.
+
+          A phone that hosts generates a shared secret and offers it in a dialog,
+          copied to the clipboard — enter it on the other device. The app keeps
+          that secret and its TLS material in its own private data directory;
+          nothing is shared with another app.
 
           ### Security
 
@@ -381,7 +460,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          mapfile -t files < <(cd assets && find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -printf 'assets/%f\n' | sort)
+          mapfile -t files < <(cd assets && find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' \) -printf 'assets/%f\n' | sort)
           files+=(assets/checksums.txt)
           echo "uploading ${#files[@]} assets"
 

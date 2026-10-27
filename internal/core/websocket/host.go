@@ -9,12 +9,34 @@ import (
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
+	"github.com/fiwon123/cthrone/internal/session"
 )
 
 // host is the function that serves the chat endpoint. It is a variable so a
 // test can replace it: serving means listening on a port, and a test cannot
 // do that.
 var host = websockethandler.Host
+
+// HostHandle is a running host. It carries the two values the other device
+// needs to pair — the shared secret and, with TLS, the certificate
+// fingerprint — because the caller may have no terminal to print them to.
+type HostHandle struct {
+	server *websockethandler.Server
+
+	// Token is the secret the host requires. It is empty when the host
+	// allows anonymous clients.
+	Token string
+
+	// Fingerprint is the certificate the other device must pin. It is empty
+	// when TLS is off.
+	Fingerprint string
+}
+
+// Addr is the address the host is listening on.
+func (h *HostHandle) Addr() string { return h.server.Addr() }
+
+// Stop closes the listener and drops the connections it holds.
+func (h *HostHandle) Stop() error { return h.server.Stop() }
 
 // Host open connection
 func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
@@ -39,6 +61,49 @@ func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 	}
 
 	return host(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile)
+}
+
+// OpenServer starts a host and returns a handle for a caller that is not the
+// terminal — the GUI and the mobile app. It binds the listener before it
+// returns, so Addr reports the port that is actually open, and the caller can
+// Stop it without ending the process.
+//
+// The handle also reports the shared secret and the certificate fingerprint:
+// the terminal prints them, and a GUI has nowhere to print them to.
+func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, onSession func(session.Session)) (*HostHandle, error) {
+	token := ""
+	if !app.AllowAnonymous {
+		var err error
+
+		token, err = hostToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	certFile, keyFile := "", ""
+	fingerprint := ""
+	if tlsConf.Enabled {
+		var err error
+
+		certFile, keyFile, err = hostCertificate(tlsConf.CertFile, tlsConf.KeyFile)
+		if err != nil {
+			return nil, err
+		}
+
+		// The certificate is on disk at this point, so its fingerprint can be
+		// read back without generating anything twice.
+		if fingerprint, err = auth.FingerprintOfFile(certFile); err != nil {
+			return nil, err
+		}
+	}
+
+	server, err := websockethandler.OpenServer(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile, onSession)
+	if err != nil {
+		return nil, err
+	}
+
+	return &HostHandle{server: server, Token: token, Fingerprint: fingerprint}, nil
 }
 
 // hostCertificate returns the certificate and the key the server uses. It
