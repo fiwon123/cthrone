@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/data/app"
+	"github.com/fiwon123/cthrone/internal/discovery"
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
 	"github.com/fiwon123/cthrone/internal/session"
 )
@@ -30,13 +32,21 @@ type HostHandle struct {
 	// Fingerprint is the certificate the other device must pin. It is empty
 	// when TLS is off.
 	Fingerprint string
+
+	// Announcer is optional; stop it when closing.
+	announcer interface{ Stop() }
 }
 
 // Addr is the address the host is listening on.
 func (h *HostHandle) Addr() string { return h.server.Addr() }
 
 // Stop closes the listener and drops the connections it holds.
-func (h *HostHandle) Stop() error { return h.server.Stop() }
+func (h *HostHandle) Stop() error {
+	if h.announcer != nil {
+		h.announcer.Stop()
+	}
+	return h.server.Stop()
+}
 
 // Host open connection
 func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
@@ -60,7 +70,17 @@ func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 		}
 	}
 
-	return host(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile)
+	if err := host(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile); err != nil {
+		return err
+	}
+	name := app.Name
+	if name == "" {
+		name = "cthrone"
+	}
+	ann := discovery.NewAnnouncer(name, app.Port)
+	ann.Start(2 * time.Second)
+	// block to keep announcer alive
+	select {}
 }
 
 // OpenServer starts a host and returns a handle for a caller that is not the
@@ -103,7 +123,14 @@ func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, on
 		return nil, err
 	}
 
-	return &HostHandle{server: server, Token: token, Fingerprint: fingerprint}, nil
+	name := app.Name
+	if name == "" {
+		name = "cthrone"
+	}
+	ann := discovery.NewAnnouncer(name, app.Port)
+	ann.Start(2 * time.Second)
+
+	return &HostHandle{server: server, Token: token, Fingerprint: fingerprint, announcer: ann}, nil
 }
 
 // hostCertificate returns the certificate and the key the server uses. It
