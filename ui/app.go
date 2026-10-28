@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
@@ -95,14 +96,18 @@ func Run() {
 	g.build()
 	// Start discovery after UI is built; on some Android versions
 	// network operations during early startup can be problematic
-	defer func() {
-		if r := recover(); r != nil {
-			// If discovery/startup panics, continue without it
-		}
-	}()
-	g.startDiscovery()
-
-	if !g.mobile {
+	if g.mobile {
+		// Delay discovery on mobile to avoid startup crashes
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			defer func() {
+				if r := recover(); r != nil {
+				}
+			}()
+			g.startDiscovery()
+		}()
+	} else {
+		g.startDiscovery()
 		g.win.Resize(fyne.NewSize(900, 640))
 	}
 
