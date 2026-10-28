@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
@@ -91,29 +90,70 @@ type gui struct {
 func Run() {
 	defer func() {
 		if r := recover(); r != nil {
-			// Try to recover
+			// avoid crash
 		}
 	}()
-	mobile := false
-	if dev := fyne.CurrentDevice(); dev != nil {
-		mobile = dev.IsMobile()
-	}
-	g := &gui{mobile: mobile}
-	g.app = fyneapp.NewWithID("com.cthrone.app")
-	g.win = g.app.NewWindow("cthrone")
-
-	if mobile {
-		// Minimal UI for mobile to test
-		g.win.SetContent(widget.NewLabel("cthrone starting..."))
-		g.win.ShowAndRun()
+	var mobile bool
+	func() {
+		defer func() {
+			recover()
+		}()
+		if dev := fyne.CurrentDevice(); dev != nil {
+			mobile = dev.IsMobile()
+		}
+	}()
+	var a fyne.App
+	var w fyne.Window
+	func() {
+		defer func() {
+			recover()
+		}()
+		a = fyneapp.NewWithID("com.cthrone.app")
+		w = a.NewWindow("cthrone")
+	}()
+	if a == nil || w == nil {
 		return
 	}
-
-	g.build()
-	g.startDiscovery()
-	g.win.Resize(fyne.NewSize(900, 640))
-
-	g.win.ShowAndRun()
+	if mobile {
+		func() {
+			defer func() {
+				recover()
+			}()
+			w.SetContent(widget.NewLabel("cthrone"))
+		}()
+		func() {
+			defer func() {
+				recover()
+			}()
+			w.ShowAndRun()
+		}()
+		return
+	}
+	g := &gui{app: a, win: w, mobile: false}
+	func() {
+		defer func() {
+			recover()
+		}()
+		g.build()
+	}()
+	func() {
+		defer func() {
+			recover()
+		}()
+		g.startDiscovery()
+	}()
+	func() {
+		defer func() {
+			recover()
+		}()
+		w.Resize(fyne.NewSize(900, 640))
+	}()
+	func() {
+		defer func() {
+			recover()
+		}()
+		w.ShowAndRun()
+	}()
 }
 
 // build creates every widget and lays the window out.
@@ -232,7 +272,9 @@ func (g *gui) build() {
 			}
 
 			beacon := g.beacons[id]
-			obj.(*widget.Label).SetText(fmt.Sprintf("%s — %s:%d", beacon.Name, beacon.Addr, beacon.Port))
+			if lbl, ok := obj.(*widget.Label); ok {
+				lbl.SetText(fmt.Sprintf("%s — %s:%d", beacon.Name, beacon.Addr, beacon.Port))
+			}
 		},
 	)
 	g.beaconList.OnSelected = g.selectBeacon
@@ -580,13 +622,15 @@ func (g *gui) startDiscovery() {
 		}
 	}()
 	g.listener = discovery.NewListener()
-	g.listener.OnFound(func(beacon discovery.Beacon) {
-		fyne.Do(func() {
-			g.addBeacon(beacon)
-			g.setStatus("Discovered " + beacon.Name)
+	if g.listener != nil {
+		g.listener.OnFound(func(beacon discovery.Beacon) {
+			fyne.Do(func() {
+				g.addBeacon(beacon)
+				g.setStatus("Discovered " + beacon.Name)
+			})
 		})
-	})
-	g.listener.Start()
+		g.listener.Start()
+	}
 }
 
 // --- settings ---------------------------------------------------------
