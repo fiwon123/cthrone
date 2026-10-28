@@ -94,22 +94,11 @@ func Run() {
 	g.win = g.app.NewWindow("cthrone")
 
 	g.build()
-	// Start discovery after UI is built; on some Android versions
-	// network operations during early startup can be problematic
-	if g.mobile {
-		// Delay discovery on mobile to avoid startup crashes
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			defer func() {
-				if r := recover(); r != nil {
-				}
-			}()
-			g.startDiscovery()
-		}()
-	} else {
+	if !g.mobile {
 		g.startDiscovery()
 		g.win.Resize(fyne.NewSize(900, 640))
 	}
+	// Skip discovery on mobile entirely to debug crash
 
 	g.win.ShowAndRun()
 }
