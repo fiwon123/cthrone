@@ -179,8 +179,8 @@ gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs min
 	  echo "  Debian/Ubuntu: sudo apt-get install gcc-mingw-w64-x86-64" >&2; \
 	  exit 1; }
 	@mkdir -p $(GUI_WINDOWS_DIR)
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H windowsconsole" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/

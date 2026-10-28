@@ -180,6 +180,7 @@ func (g *gui) build() {
 
 	g.chatLog = widget.NewLabel("")
 	g.chatLog.Wrapping = fyne.TextWrapWord
+	g.chatLog.Selectable = true
 
 	g.scroll = container.NewVScroll(g.chatLog)
 	g.scroll.SetMinSize(fyne.NewSize(320, 180))
@@ -194,12 +195,18 @@ func (g *gui) build() {
 	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
 	g.stopBtn.Disable()
 
+	copyBtn := widget.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), func() {
+		if g.app != nil {
+			g.app.Clipboard().SetContent(strings.Join(g.messages, "\n"))
+		}
+	})
+
 	var input fyne.CanvasObject
 	if g.mobile {
 		// Touch: a full-width field, and two large targets below it.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(2, g.stopBtn, g.sendBtn))
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(3, g.stopBtn, g.sendBtn, copyBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, copyBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
@@ -242,16 +249,54 @@ func (g *gui) build() {
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
 	g.anonymousCheck = widget.NewCheck("Allow anonymous clients (no shared secret)", nil)
+	g.anonymousCheck.SetChecked(true)
+
+	// Hide advanced fields by default
+	g.tokenEntry.Hide()
+	g.fingerprintEntry.Hide()
+	g.natsURLEntry.Hide()
+	g.subjectEntry.Hide()
+	g.bindEntry.Hide()
+
+	transportSelect := widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
+		if s == "NATS" {
+			g.natsCheck.SetChecked(true)
+			g.natsURLEntry.Show()
+			g.subjectEntry.Show()
+		} else {
+			g.natsCheck.SetChecked(false)
+			g.natsURLEntry.Hide()
+			g.subjectEntry.Hide()
+		}
+	})
+	transportSelect.SetSelected("WebSocket (default)")
+
+	securityRow := container.NewHBox(
+		g.anonymousCheck,
+		widget.NewButton("More options", func() {
+			if g.tokenEntry.Visible() {
+				g.tokenEntry.Hide()
+				g.fingerprintEntry.Hide()
+				g.tlsCheck.SetChecked(false)
+				g.insecureCheck.SetChecked(false)
+			} else {
+				g.tokenEntry.Show()
+				g.fingerprintEntry.Show()
+			}
+		}),
+	)
 
 	form := widget.NewForm(
-		&widget.FormItem{Text: "Port", Widget: g.portEntry},
-		&widget.FormItem{Text: "Bind address", Widget: g.bindEntry},
 		&widget.FormItem{Text: "Device name", Widget: g.nameEntry},
 		&widget.FormItem{Text: "Host address", Widget: g.hostEntry},
+		&widget.FormItem{Text: "Port", Widget: g.portEntry},
+		&widget.FormItem{Text: "Transport", Widget: transportSelect},
+		&widget.FormItem{Text: "Security", Widget: securityRow},
 		&widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry},
 		&widget.FormItem{Text: "Fingerprint", Widget: g.fingerprintEntry},
-		&widget.FormItem{Text: "NATS subject", Widget: g.subjectEntry},
 		&widget.FormItem{Text: "NATS URL", Widget: g.natsURLEntry},
+		&widget.FormItem{Text: "NATS subject", Widget: g.subjectEntry},
+		&widget.FormItem{Text: "Bind address", Widget: g.bindEntry},
 	)
 
 	actions := container.NewGridWithColumns(2,
@@ -259,16 +304,13 @@ func (g *gui) build() {
 		widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect),
 	)
 
-	hint := widget.NewLabel("Host starts a server; Connect joins one. The shared secret is generated on the first host run and kept next to the app's data. With TLS, copy the host's fingerprint to the other device.")
+	hint := widget.NewLabel("Fast: select Host to start, or pick a device from Devices and Connect. Anonymous is on by default for easy local chat.")
 	hint.Wrapping = fyne.TextWrapWord
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle("Transport", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		g.natsCheck,
+		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		g.tlsCheck,
 		g.insecureCheck,
-		g.anonymousCheck,
-		widget.NewSeparator(),
 		form,
 		widget.NewSeparator(),
 		actions,
@@ -333,6 +375,7 @@ func (g *gui) connect() {
 	subject := g.subject()
 
 	g.setStatus("Connecting…")
+	g.tabs.SelectIndex(0)
 
 	go func() {
 		var (
@@ -358,7 +401,7 @@ func (g *gui) connect() {
 		if useNATS {
 			g.setStatus("Connected through NATS on " + broker)
 		} else {
-			g.setStatus("Connected to " + host)
+			g.setStatus("Connected to " + host + " — chatting")
 		}
 	}()
 }
@@ -388,13 +431,14 @@ func (g *gui) host() {
 
 			g.attach(sess)
 			g.setStatus("Hosting through NATS on " + broker)
+			g.tabs.SelectIndex(0)
 
 			return
 		}
 
 		handle, err := websocketcore.OpenServer(data, token, tokenFile, tlsConf, func(sess session.Session) {
 			g.attach(sess)
-			g.setStatus("A device joined")
+			g.setStatus("A device joined — chatting")
 		})
 		if err != nil {
 			g.setStatus("Host failed")
@@ -408,7 +452,8 @@ func (g *gui) host() {
 		g.mu.Unlock()
 
 		fyne.Do(g.updateButtons)
-		g.setStatus("Hosting on " + handle.Addr())
+		g.setStatus("Hosting on " + handle.Addr() + " — waiting for connection")
+		g.tabs.SelectIndex(0)
 		g.offerPairing(handle.Token, handle.Fingerprint, !typedToken)
 	}()
 }
@@ -538,7 +583,7 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 		g.portEntry.SetText(strconv.Itoa(beacon.Port))
 	}
 
-	g.setStatus("Selected " + beacon.Name)
+	g.setStatus("Selected " + beacon.Name + " (" + beacon.Addr + ")")
 	g.tabs.SelectIndex(1)
 	g.beaconList.UnselectAll()
 }
