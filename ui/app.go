@@ -93,6 +93,13 @@ func Run() {
 	g.win = g.app.NewWindow("cthrone")
 
 	g.build()
+	// Start discovery after UI is built; on some Android versions
+	// network operations during early startup can be problematic
+	defer func() {
+		if r := recover(); r != nil {
+			// If discovery/startup panics, continue without it
+		}
+	}()
 	g.startDiscovery()
 
 	if !g.mobile {
@@ -560,6 +567,11 @@ func (g *gui) addBeacon(beacon discovery.Beacon) {
 
 // startDiscovery listens for beacons announced by other hosts.
 func (g *gui) startDiscovery() {
+	defer func() {
+		if r := recover(); r != nil {
+			// Ignore discovery panics on mobile
+		}
+	}()
 	g.listener = discovery.NewListener()
 	g.listener.OnFound(func(beacon discovery.Beacon) {
 		fyne.Do(func() {
