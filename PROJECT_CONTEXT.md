@@ -135,12 +135,10 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Backlog
 
-1. Cut the next release to carry what `dev` holds beyond `main` — currently the Fyne 2.8.2 bump and the Android APK. Its release run is the first native GUI build against that version and the first APK build at all.
-2. Cover the seven packages that still have no test file: `main`, `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`, `internal/data/app`, `mobile`. The transports, the scanner, the CLI commands and the GUI's settings logic are covered.
-3. Delete the leftover `feature/*` branches — the branch gate rejects their names.
-4. Reconcile the coverage claims in `AGENTS.md` and `.opencode/instructions/testing.md` with the real suite (issue #81).
-5. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
-6. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
+1. Publish the `v0.5.6` draft — it is built from `c83b57f` and waits for a human to press publish.
+2. Delete the leftover `feature/*` branches — the branch gate rejects their names.
+3. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
+4. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
 
 ## Notes
 

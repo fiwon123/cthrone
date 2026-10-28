@@ -119,36 +119,34 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**The coverage is partial.** The transports, the scanner, and the CLI commands
-have tests; seven packages do not. `go test ./...` prints `? package [no test
-files]` for those and exits 0. That is not a pass: it means nothing was executed
-for them.
+**Every package has a test file.** #85/#86 closed the last gap: all 21 packages
+in the module now carry tests, so `go test ./...` prints no `? package [no test
+files]` line and `make check` has no gap left to report.
 
-- **Covered (14 packages)**: `cmd` (root), `cmd/connect`, `cmd/host`,
-  `cmd/scan`, `internal/auth`, `internal/core/nats`, `internal/core/websocket`
-  (the scanner included), `internal/discovery`, `internal/exec`,
-  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
-  `internal/shutdown`, `ui` (its non-GUI settings logic; the Fyne widgets are
-  still unverified).
-- **Not covered (7 packages)**: `main` (`github.com/fiwon123/cthrone`),
-  `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`, `internal/data/app`,
-  `mobile`.
+- **Covered (21 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+  (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/recv`,
+  `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/core/nats`,
+  `internal/core/websocket` (the scanner included), `internal/data/app`,
+  `internal/discovery`, `internal/exec`, `internal/handlers/nats`,
+  `internal/handlers/websocket`, `internal/session`, `internal/shutdown`,
+  `mobile`, `ui` (its non-GUI settings logic; the Fyne widgets are still
+  unverified).
 
 So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
 - the code compiles,
-- the 14 covered packages passed.
+- every package's tests passed.
 
-It does **not** prove the behaviour of the seven above — the GUI widgets, the
-remote-exec CLI wiring, the asset embedding, the in-memory configuration, the
-mobile entry point, and `main`. Report honestly: "gofmt, vet, and build are
-clean; the transports, the scanner, the CLI commands and the GUI's settings
-logic are covered, `cmd/recv` and `mobile` are not", not "tests pass".
+**A test file is not depth.** The newest ones are small — `cmd/assets`,
+`cmd/ui`, `internal/data/app` and `mobile` have one test function each — and
+the Fyne widgets are still only type-checked with `go build -tags "gui ci"
+./ui`, which `make check` does not run. Report what executed, not just that the
+package list is complete.
 
-`make check` prints the list of packages with no test file after the run, so
-the gap is visible in the output rather than only in this document.
+`make check` prints the list of packages with no test file after the run, so a
+green run with no such list means every package was exercised.
 
 ## Runtime Environment
 
