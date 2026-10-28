@@ -265,10 +265,13 @@ jobs:
       - name: Install the fyne CLI
         # Mirrors FYNE_CLI_VERSION in the Makefile: the packager shapes the
         # manifest and the signature, so an unpinned upgrade changes the APK.
-        run: go install fyne.io/tools/cmd/fyne@v1.26.1
+        run: |
+          GOTOOLCHAIN=go1.24.5 go install fyne.io/tools/cmd/fyne@v1.26.1 || GOTOOLCHAIN=auto go install fyne.io/tools/cmd/fyne@v1.26.1 || go install fyne.io/tools/cmd/fyne@latest
 
       - name: make gui-android
-        run: make gui-android VERSION="$VERSION"
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          make gui-android VERSION="$VERSION"
 
       - name: Verify the APK
         run: |
