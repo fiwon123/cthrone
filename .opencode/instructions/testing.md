@@ -29,29 +29,27 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-The coverage is **partial**: 14 of the 21 packages in the module have tests.
-`go test ./...` prints `? package [no test files]` for the other seven and exits
-0. That is not a pass: it means nothing was executed there.
+**Every package has a test file**: #85/#86 closed the last gap, so all 21
+packages in the module carry tests and `go test ./...` prints no
+`? package [no test files]` line.
 
-- **Covered**: `cmd` (root), `cmd/connect`, `cmd/host`, `cmd/scan`,
-  `internal/auth`, `internal/core/nats`, `internal/core/websocket` (scanner
-  included), `internal/discovery`, `internal/exec`, `internal/handlers/nats`,
-  `internal/handlers/websocket`, `internal/session`, `internal/shutdown`, `ui`
-  (its non-GUI settings logic only — the Fyne widgets need `-tags gui` and the
-  `ci` driver, and `make check` runs neither).
-- **Not covered**: `main`, `cmd/assets`, `cmd/exec`, `cmd/recv`, `cmd/ui`,
-  `internal/data/app`, `mobile`.
+- **Covered (21)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
+  `cmd/exec`, `cmd/host`, `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`,
+  `internal/core/nats`, `internal/core/websocket` (scanner included),
+  `internal/data/app`, `internal/discovery`, `internal/exec`,
+  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
+  `internal/shutdown`, `mobile`, `ui` (its non-GUI settings logic only — the
+  Fyne widgets need `-tags gui` and the `ci` driver, and `make check` runs
+  neither).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
-nothing, it compiles, and the covered packages passed — nothing about the seven
-above.
+nothing, it compiles, and every package's tests passed.
 
-Until a package has a test file, treat its behaviour as unverified and say so
-when reporting. The honest report is "gofmt, vet, and build are clean; the
-transports, the scanner, the CLI commands and the GUI's settings logic are
-covered, `cmd/recv` and `mobile` are not", not "tests pass". A GUI widget change
-is verified by `go build -tags "gui ci" ./ui` (type-check only) and by nothing
-else in this environment.
+**A test file is not depth.** Several newer files hold one test function
+(`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`), and a GUI widget change
+is still verified only by `go build -tags "gui ci" ./ui` (type-check) and by
+nothing else in this environment. Report what executed; "21/21 packages have
+tests" is not "the behaviour is covered".
 
 ### Go conventions
 
