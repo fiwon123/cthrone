@@ -239,7 +239,8 @@ gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and 
 	  -icon $(ANDROID_ICON) \
 	  -app-version "$$version" \
 	  -app-build "$$build" \
-	  -tags gui && \
+	  -tags gui \
+	  -android-permissions android.permission.INTERNET,android.permission.ACCESS_NETWORK_STATE,android.permission.ACCESS_WIFI_STATE,android.permission.CHANGE_WIFI_MULTICAST_STATE && \
 	mv $(APP_NAME).apk $(abspath $(GUI_ANDROID_APK))
 
 # The GUI archives a Linux machine with the headers can produce on its own.

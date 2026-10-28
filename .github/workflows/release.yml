@@ -271,7 +271,9 @@ jobs:
       - name: make gui-android
         run: |
           export PATH="$PATH:$(go env GOPATH)/bin"
-          make gui-android VERSION="$VERSION"
+          make gui-android VERSION="$VERSION" && \
+          echo "---" && \
+          unzip -p build/GUI/*.apk AndroidManifest.xml | head -80
 
       - name: Verify the APK
         run: |
