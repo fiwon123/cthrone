@@ -109,7 +109,19 @@ func Run() {
 			recover()
 		}()
 		a = fyneapp.NewWithID("com.cthrone.app")
-		w = a.NewWindow("cthrone")
+		if a != nil {
+			if ic := appIcon(); ic != nil {
+				a.SetIcon(ic)
+			}
+		}
+		if a != nil {
+			w = a.NewWindow("cthrone")
+			if w != nil {
+				if ic := appIcon(); ic != nil {
+					w.SetIcon(ic)
+				}
+			}
+		}
 	}()
 	if a == nil || w == nil {
 		return
