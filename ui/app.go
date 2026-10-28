@@ -89,16 +89,29 @@ type gui struct {
 
 // Run starts the Fyne GUI.
 func Run() {
-	g := &gui{mobile: fyne.CurrentDevice().IsMobile()}
+	defer func() {
+		if r := recover(); r != nil {
+			// Try to recover
+		}
+	}()
+	mobile := false
+	if dev := fyne.CurrentDevice(); dev != nil {
+		mobile = dev.IsMobile()
+	}
+	g := &gui{mobile: mobile}
 	g.app = fyneapp.NewWithID("com.cthrone.app")
 	g.win = g.app.NewWindow("cthrone")
 
-	g.build()
-	if !g.mobile {
-		g.startDiscovery()
-		g.win.Resize(fyne.NewSize(900, 640))
+	if mobile {
+		// Minimal UI for mobile to test
+		g.win.SetContent(widget.NewLabel("cthrone starting..."))
+		g.win.ShowAndRun()
+		return
 	}
-	// Skip discovery on mobile entirely to debug crash
+
+	g.build()
+	g.startDiscovery()
+	g.win.Resize(fyne.NewSize(900, 640))
 
 	g.win.ShowAndRun()
 }
