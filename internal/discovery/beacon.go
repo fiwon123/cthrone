@@ -73,6 +73,11 @@ func (l *Listener) OnFound(fn func(Beacon)) {
 
 func (l *Listener) Start() {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				return
+			}
+		}()
 		addr := &net.UDPAddr{IP: net.IPv4zero, Port: 9999}
 		conn, err := net.ListenUDP("udp4", addr)
 		if err != nil {
