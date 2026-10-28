@@ -2,6 +2,7 @@ APP_NAME := cthrone
 APP_NAME_SHORT := ct
 BUILD_DIR := build
 SCRIPTS_DIR := scripts
+ASSETS_DIR := assets
 SCRIPT_NAME := add_to_path
 INJECT_VERSION:= github.com/fiwon123/cthrone/cmd.Version
 
