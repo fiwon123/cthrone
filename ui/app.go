@@ -126,40 +126,34 @@ func Run() {
 	if a == nil || w == nil {
 		return
 	}
-	if mobile {
-		func() {
-			defer func() {
-				recover()
-			}()
-			w.SetContent(widget.NewLabel("cthrone"))
-		}()
-		func() {
-			defer func() {
-				recover()
-			}()
-			w.ShowAndRun()
-		}()
-		return
-	}
-	g := &gui{app: a, win: w, mobile: false}
+	g := &gui{app: a, win: w, mobile: mobile}
 	func() {
 		defer func() {
 			recover()
 		}()
 		g.build()
 	}()
-	func() {
-		defer func() {
-			recover()
+	if !mobile {
+		func() {
+			defer func() {
+				recover()
+			}()
+			g.startDiscovery()
 		}()
-		g.startDiscovery()
-	}()
-	func() {
-		defer func() {
-			recover()
+		func() {
+			defer func() {
+				recover()
+			}()
+			w.Resize(fyne.NewSize(900, 640))
 		}()
-		w.Resize(fyne.NewSize(900, 640))
-	}()
+	} else {
+		// Skip discovery on mobile to avoid startup crashes
+		func() {
+			defer func() {
+				recover()
+			}()
+		}()
+	}
 	func() {
 		defer func() {
 			recover()
@@ -172,9 +166,14 @@ func Run() {
 func (g *gui) build() {
 	// --- chat ---------------------------------------------------------
 	logo := widget.NewIcon(appIcon())
-	logo.SetMinSize(fyne.NewSize(32, 32))
 	title := widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	header := container.NewHBox(logo, title)
+	var header *fyne.Container
+	if logo != nil {
+		header = container.NewHBox(logo, title)
+	} else {
+		header = container.NewHBox(title)
+	}
+
 	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
 	g.status.Wrapping = fyne.TextWrapWord
@@ -195,13 +194,6 @@ func (g *gui) build() {
 	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
 	g.stopBtn.Disable()
 
-	chat = container.NewBorder(
-		container.NewVBox(container.NewPadded(container.NewHBox(header, widget.NewSeparator())), container.NewPadded(g.status), widget.NewSeparator()),
-		container.NewPadded(input),
-		nil, nil,
-		g.scroll,
-	)
-
 	var input fyne.CanvasObject
 	if g.mobile {
 		// Touch: a full-width field, and two large targets below it.
@@ -210,15 +202,6 @@ func (g *gui) build() {
 		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.sendBtn), g.entry)
 	}
 
-	logo := widget.NewIcon(appIcon())
-	if logo != nil {
-		logo.SetMinSize(fyne.NewSize(32, 32))
-	}
-	title := widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	header := container.NewHBox(logo, title)
-	if logo == nil {
-		header = container.NewHBox(title)
-	}
 	chat := container.NewBorder(
 		container.NewVBox(container.NewPadded(header), container.NewPadded(g.status), widget.NewSeparator()),
 		container.NewPadded(input),
