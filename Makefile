@@ -167,7 +167,9 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
-	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(UNIX_ARCHIVE_FILES)
+	cp $(SCRIPTS_DIR)/cthrone.desktop $(GUI_LINUX_DIR)/ 2>/dev/null || true
+	cp $(ASSETS_DIR)/logo-512.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || cp $(ASSETS_DIR)/logo-128.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || true
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(UNIX_ARCHIVE_FILES) cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(UNIX_ARCHIVE_FILES)
 
 gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
 	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { \
@@ -179,7 +181,8 @@ gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs min
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
-	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(WINDOWS_ARCHIVE_FILES)
+	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/cthrone.ico 2>/dev/null || true
+	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(WINDOWS_ARCHIVE_FILES) cthrone.ico 2>/dev/null || cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(WINDOWS_ARCHIVE_FILES)
 
 gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	@test "$$(go env GOOS)" = "darwin" || { \
@@ -191,7 +194,8 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
-	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(UNIX_ARCHIVE_FILES)
+	cp $(ASSETS_DIR)/logo-512.png $(GUI_DARWIN_DIR)/cthrone.png 2>/dev/null || true
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(UNIX_ARCHIVE_FILES) cthrone.png 2>/dev/null || tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(UNIX_ARCHIVE_FILES)
 
 # Build the Android APK. Everything the packager needs is checked first: a
 # missing SDK, NDK or fyne CLI fails the target with what to install, instead
