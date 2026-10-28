@@ -79,8 +79,7 @@ func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 	}
 	ann := discovery.NewAnnouncer(name, app.Port)
 	ann.Start(2 * time.Second)
-	// block to keep announcer alive
-	select {}
+	return nil
 }
 
 // OpenServer starts a host and returns a handle for a caller that is not the
