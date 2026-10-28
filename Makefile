@@ -165,13 +165,13 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	  exit 1; }
 	@mkdir -p $(GUI_LINUX_DIR)
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui
-	cp $(GUI_LINUX_DIR)/$(APP_NAME)_gui $(GUI_LINUX_DIR)/$(APP_NAME) 2>/dev/null || true
-	cp $(GUI_LINUX_DIR)/$(APP_NAME)_gui $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)_gui 2>/dev/null || true
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)
+	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/cthrone.desktop $(GUI_LINUX_DIR)/ 2>/dev/null || true
 	cp $(ASSETS_DIR)/logo-512.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || cp $(ASSETS_DIR)/logo-128.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT)_gui README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME)_gui README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png
 
 gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
 	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { \
@@ -180,12 +180,13 @@ gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs min
 	  exit 1; }
 	@mkdir -p $(GUI_WINDOWS_DIR)
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe
-	cp $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe $(GUI_WINDOWS_DIR)/$(APP_NAME).exe 2>/dev/null || true
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
+	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
 	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/cthrone.ico 2>/dev/null || true
 	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.ico 2>/dev/null || true
-	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico $(APP_NAME)_gui.ico 2>/dev/null || cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico
+	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico $(APP_NAME)_gui.ico 2>/dev/null || cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico
 
 gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	@test "$$(go env GOOS)" = "darwin" || { \
@@ -194,11 +195,12 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	  exit 1; }
 	@mkdir -p $(GUI_DARWIN_DIR)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui
-	cp $(GUI_DARWIN_DIR)/$(APP_NAME)_gui $(GUI_DARWIN_DIR)/$(APP_NAME) 2>/dev/null || true
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)
+	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
 	cp $(ASSETS_DIR)/logo-512.png $(GUI_DARWIN_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png 2>/dev/null || tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui cthrone.png
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png 2>/dev/null || tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png
 
 # Build the Android APK. Everything the packager needs is checked first: a
 # missing SDK, NDK or fyne CLI fails the target with what to install, instead
