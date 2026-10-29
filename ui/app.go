@@ -65,6 +65,15 @@ type gui struct {
 	natsCheck        *widget.Check
 	anonymousCheck   *widget.Check
 
+	// setup layout: the form is rebuilt whenever the mode changes, because a
+	// Fyne Form always renders a label for every item it holds.
+	moreOptions bool
+	moreBtn     *widget.Button
+	securityRow *fyne.Container
+	formHolder  *fyne.Container
+	transport   *widget.Select
+	hint        *widget.Label
+
 	// chat
 	tabs     *container.AppTabs
 	status   *widget.Label
@@ -245,77 +254,48 @@ func (g *gui) build() {
 	g.natsURLEntry = widget.NewEntry()
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
-	g.tlsCheck = widget.NewCheck("Encrypt with TLS", nil)
+	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
 	g.anonymousCheck = widget.NewCheck("Allow anonymous clients (no shared secret)", nil)
 	g.anonymousCheck.SetChecked(true)
 
-	// Hide advanced fields by default
-	g.tokenEntry.Hide()
-	g.fingerprintEntry.Hide()
-	g.natsURLEntry.Hide()
-	g.subjectEntry.Hide()
-	g.bindEntry.Hide()
-
-	transportSelect := widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
-		if s == "NATS" {
-			g.natsCheck.SetChecked(true)
-			g.natsURLEntry.Show()
-			g.subjectEntry.Show()
-		} else {
-			g.natsCheck.SetChecked(false)
-			g.natsURLEntry.Hide()
-			g.subjectEntry.Hide()
-		}
+	g.moreBtn = widget.NewButton("More options", func() {
+		g.moreOptions = !g.moreOptions
+		g.rebuildSetupForm()
 	})
-	transportSelect.SetSelected("WebSocket (default)")
 
-	securityRow := container.NewHBox(
-		g.anonymousCheck,
-		widget.NewButton("More options", func() {
-			if g.tokenEntry.Visible() {
-				g.tokenEntry.Hide()
-				g.fingerprintEntry.Hide()
-				g.tlsCheck.SetChecked(false)
-				g.insecureCheck.SetChecked(false)
-			} else {
-				g.tokenEntry.Show()
-				g.fingerprintEntry.Show()
-			}
-		}),
-	)
+	g.securityRow = container.NewHBox(g.anonymousCheck, g.moreBtn)
 
-	form := widget.NewForm(
-		&widget.FormItem{Text: "Device name", Widget: g.nameEntry},
-		&widget.FormItem{Text: "Host address", Widget: g.hostEntry},
-		&widget.FormItem{Text: "Port", Widget: g.portEntry},
-		&widget.FormItem{Text: "Transport", Widget: transportSelect},
-		&widget.FormItem{Text: "Security", Widget: securityRow},
-		&widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry},
-		&widget.FormItem{Text: "Fingerprint", Widget: g.fingerprintEntry},
-		&widget.FormItem{Text: "NATS URL", Widget: g.natsURLEntry},
-		&widget.FormItem{Text: "NATS subject", Widget: g.subjectEntry},
-		&widget.FormItem{Text: "Bind address", Widget: g.bindEntry},
-	)
+	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
+		g.natsCheck.SetChecked(s == "NATS")
+		g.rebuildSetupForm()
+	})
+	g.transport.SetSelected("WebSocket (default)")
+
+	// The form is rebuilt into this stack: a Fyne form has no way to drop a
+	// single row, so the visible subset becomes a fresh form instead.
+	g.formHolder = container.NewStack()
 
 	actions := container.NewGridWithColumns(2,
 		widget.NewButtonWithIcon("Host", theme.MediaPlayIcon(), g.host),
 		widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect),
 	)
 
-	hint := widget.NewLabel("Fast: select Host to start, or pick a device from Devices and Connect. Anonymous is on by default for easy local chat.")
-	hint.Wrapping = fyne.TextWrapWord
+	g.hint = widget.NewLabel("")
+	g.hint.Wrapping = fyne.TextWrapWord
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		g.tlsCheck,
 		g.insecureCheck,
-		form,
+		g.formHolder,
 		widget.NewSeparator(),
 		actions,
-		hint,
+		g.hint,
 	)))
+
+	g.rebuildSetupForm()
 
 	// --- devices ------------------------------------------------------
 	g.scanBtn = widget.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan)
@@ -352,6 +332,66 @@ func (g *gui) build() {
 	)
 
 	g.win.SetContent(g.tabs)
+}
+
+// rebuildSetupForm lays out the rows the current configuration uses.
+//
+// Fyne's widget.Form renders a label for every FormItem it holds, and there is
+// no public handle on that label, so hiding a field's entry leaves its label
+// dangling on screen. The rows are therefore rebuilt from the visible subset:
+// the entries themselves live on g, so the text already typed into them
+// survives.
+func (g *gui) rebuildSetupForm() {
+	// The transport's OnSelected runs while build() is still wiring the tab.
+	if g.formHolder == nil {
+		return
+	}
+
+	useNATS := g.natsCheck.Checked
+	view := setupVisibility(useNATS, g.tlsCheck.Checked, g.moreOptions)
+
+	items := []*widget.FormItem{
+		{Text: "Device name", Widget: g.nameEntry},
+		{Text: "Host address", Widget: g.hostEntry},
+		{Text: "Port", Widget: g.portEntry},
+		{Text: "Transport", Widget: g.transport},
+	}
+	if view.Security {
+		items = append(items, &widget.FormItem{Text: "Security", Widget: g.securityRow})
+	}
+	if view.SharedSecret {
+		items = append(items, &widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry})
+	}
+	if view.Fingerprint {
+		items = append(items, &widget.FormItem{Text: "Fingerprint", Widget: g.fingerprintEntry})
+	}
+	if view.NATSBroker {
+		items = append(items, &widget.FormItem{Text: "NATS URL", Widget: g.natsURLEntry})
+	}
+	if view.NATSSubject {
+		items = append(items, &widget.FormItem{Text: "NATS subject", Widget: g.subjectEntry})
+	}
+	if view.BindAddress {
+		items = append(items, &widget.FormItem{Text: "Bind address", Widget: g.bindEntry})
+	}
+
+	// A check carries its own label, so hiding the widget removes the text.
+	if view.Insecure {
+		g.insecureCheck.Show()
+	} else {
+		g.insecureCheck.Hide()
+	}
+
+	if g.moreOptions {
+		g.moreBtn.SetText("Fewer options")
+	} else {
+		g.moreBtn.SetText("More options")
+	}
+
+	g.hint.SetText(setupHint(useNATS))
+
+	g.formHolder.Objects = []fyne.CanvasObject{widget.NewForm(items...)}
+	g.formHolder.Refresh()
 }
 
 // --- actions ----------------------------------------------------------
