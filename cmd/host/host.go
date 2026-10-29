@@ -1,6 +1,7 @@
 package hostcmd
 
 import (
+	"errors"
 	"log"
 
 	"github.com/fiwon123/cthrone/internal/auth"
@@ -29,6 +30,10 @@ var Cmd = &cobra.Command{
 On websocket connection devices can send and receive message from host or connect device
 On nats connection only host receive message and only connect device send message`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if allowAnonymousFlag {
+			log.Fatal(errors.New("--allow-anonymous has been retired: all sessions are encrypted with the shared secret"))
+		}
+
 		port, _ := cmd.Flags().GetInt("port")
 		secret, _ := cmd.Flags().GetString("token")
 		secretFile, _ := cmd.Flags().GetString("token-file")
@@ -38,7 +43,6 @@ On nats connection only host receive message and only connect device send messag
 
 		app := app.New(port)
 		app.Host = bindAddressFlag
-		app.AllowAnonymous = allowAnonymousFlag
 		app.Name = nameFlag
 
 		tlsConf := auth.TLS{
@@ -48,7 +52,7 @@ On nats connection only host receive message and only connect device send messag
 		}
 
 		if natsFlag {
-			natscore.Host(args, app, natsURLFlag, tlsConf)
+			natscore.Host(args, app, secret, secretFile, natsURLFlag, tlsConf)
 
 			return
 		}
@@ -63,6 +67,6 @@ func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&bindAddressFlag, "host", "", "the interface to bind to (default: every interface, so another device can reach it)")
-	Cmd.Flags().BoolVar(&allowAnonymousFlag, "allow-anonymous", false, "let clients join without the shared secret")
+	Cmd.Flags().BoolVar(&allowAnonymousFlag, "allow-anonymous", false, "retired: all sessions are encrypted with the shared secret")
 	Cmd.Flags().StringVar(&nameFlag, "name", "", "device name announced on the network")
 }

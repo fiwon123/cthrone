@@ -13,9 +13,6 @@ func TestNew(t *testing.T) {
 	if d.Host != "" {
 		t.Errorf("Host = %q, want empty", d.Host)
 	}
-	if d.AllowAnonymous {
-		t.Error("AllowAnonymous should be false")
-	}
 	if d.Name != "" {
 		t.Errorf("Name = %q, want empty", d.Name)
 	}

@@ -177,6 +177,7 @@ type Conn struct {
 	order   []string
 	timer   *time.Timer
 	onError func(error)
+	onPeer  func(Peer)
 }
 
 // New wraps s and starts the handshake.
@@ -265,11 +266,49 @@ func (c *Conn) OnError(fn func(error)) {
 	c.mu.Unlock()
 }
 
+// OnPeer reports every peer that has completed the handshake: the ones already
+// verified when it is installed, and each new one as it authenticates, once per
+// peer. It is how a caller says "encrypted with X" without polling Peers and
+// guessing when to look.
+//
+// The replay matters because a fast peer can answer before the caller has had
+// the wrapper back — installing the callback and reading the list are two steps,
+// and a peer that finished in between would be seen by neither.
+func (c *Conn) OnPeer(fn func(Peer)) {
+	c.mu.Lock()
+	c.onPeer = fn
+
+	known := make([]Peer, 0, len(c.order))
+
+	for _, key := range c.order {
+		p := c.peers[key]
+		if p == nil || !p.verified {
+			continue
+		}
+
+		known = append(known, Peer{Device: p.device, Key: append([]byte(nil), p.key...)})
+	}
+	c.mu.Unlock()
+
+	// Outside the lock, for the same reason markVerified reports outside it: a
+	// callback that sends must not deadlock on the mutex.
+	if fn == nil {
+		return
+	}
+
+	for _, p := range known {
+		fn(p)
+	}
+}
+
 // Peer is a correspondent that has completed the handshake.
 type Peer struct {
 	Device string
 	Key    []byte
 }
+
+// Name is what to call the peer when its device name may be empty.
+func (p Peer) Name() string { return peerName(p.Device) }
 
 // Peers lists the peers whose confirm arrived, in the order they were heard.
 func (c *Conn) Peers() []Peer {
@@ -398,7 +437,27 @@ func (c *Conn) receive(m session.Message) {
 		return
 	}
 
-	c.NotifyMessage(session.Message{From: m.From, Payload: plain, Time: m.Time})
+	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Payload: plain, Time: m.Time})
+}
+
+// senderName is what to call the peer a frame came from. The transport's From
+// is the subject or the address — the same for every peer on a bus — so the
+// device name that authenticated the handshake is a better answer when the
+// peer announced one. The fallback keeps an unnamed peer identifiable.
+func (c *Conn) senderName(key, fallback string) string {
+	c.mu.Lock()
+	p := c.peers[key]
+	device := ""
+	if p != nil {
+		device = p.device
+	}
+	c.mu.Unlock()
+
+	if device != "" {
+		return device
+	}
+
+	return fallback
 }
 
 // receiveFrame handles a payload that carries the wire magic: either a
@@ -654,7 +713,16 @@ func (c *Conn) markVerified(p *peer) {
 		c.timer = nil
 	}
 
+	handler := c.onPeer
+	info := Peer{Device: p.device, Key: append([]byte(nil), p.key...)}
+
 	c.mu.Unlock()
+
+	// Outside the lock: a caller that sends in the callback would deadlock on
+	// it, and the peer is recorded either way.
+	if handler != nil {
+		handler(info)
+	}
 }
 
 // handshakeTimedOut closes a single-peer session whose handshake never

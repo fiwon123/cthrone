@@ -40,14 +40,17 @@ internal/core/<transport>/  the operation: connect, host, scan
   ↓
 internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
+internal/e2e/               the end-to-end layer every session is wrapped in
+  ↓
 internal/data/app/          the in-memory configuration (the port, the bind address)
   ↓
 internal/auth/              the shared secret and the TLS material: where they come from, how they are compared
 ```
 
 The transport is chosen at the command level: `--nats` selects the NATS path,
-and its absence selects the websocket path. Both paths meet at the same chat
-loop, so the two transports are interchangeable from the user's point of view.
+and its absence selects the websocket path. Both paths meet at the same
+`internal/chat` loop over the same sealed `session.Session`, so the two
+transports are interchangeable from the user's point of view.
 
 The GUI sits beside the commands rather than inside them: `ui/` builds on the
 same `session.Session` the terminal loops use, and `mobile/` is a second `main`
@@ -62,7 +65,10 @@ cmd/                 cobra commands: connect, host, scan, ui, recv, exec
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
-internal/auth/       the shared secret and the TLS material of the websocket transport
+internal/auth/       the shared secret and the TLS material: where they come from, how they are compared
+internal/chat/       the terminal loop both transports run a session on
+internal/e2e/        the end-to-end layer every session is wrapped in
+internal/wire/       the CTH1 envelope and the file chunk arithmetic
 internal/session/    the transport-agnostic session the CLI and the GUI share
 ui/                  the Fyne GUI, behind the `gui` build tag
 mobile/              the Android/iOS entry point: a second `main` that starts `ui`
@@ -119,18 +125,18 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 21 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 24 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (21 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (24 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/recv`,
-  `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/core/nats`,
+  `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`, `internal/core/nats`,
   `internal/core/websocket` (the scanner included), `internal/data/app`,
-  `internal/discovery`, `internal/exec`, `internal/handlers/nats`,
-  `internal/handlers/websocket`, `internal/session`, `internal/shutdown`,
-  `mobile`, `ui` (its non-GUI settings logic; the Fyne widgets are still
-  unverified).
+  `internal/discovery`, `internal/e2e`, `internal/exec`,
+  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
+  `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its non-GUI settings
+  logic; the Fyne widgets are still unverified).
 
 So a green `make check` proves:
 
@@ -206,31 +212,42 @@ Linux.
 
 ### Security — read this before changing the transport
 
-Both transports authenticate their peers, and both can encrypt the traffic.
-The model is the one issue #11 decided:
+Every session is authenticated and encrypted end to end with the shared
+secret, on both transports; `--tls` adds transport encryption on top. The
+model is the one issues #11 and #109 decided:
 
-- the **websocket** transport requires a **shared secret** — a client that
-  does not know it is refused — and `--tls` encrypts the connection, with
-  the host's certificate pinned by its fingerprint;
+- both transports require the **shared secret** — a client that does not know
+  it is refused — and `internal/e2e` wraps every session with it: an X25519
+  handshake authenticated by the secret, per-direction AES-256-GCM, and a
+  sequence number that fails a replayed frame. There is **no plaintext mode**
+  and no anonymous mode;
+- the **websocket** transport additionally offers `--tls`, which encrypts the
+  connection and pins the host's certificate by its fingerprint;
 - the **NATS** transport sends the broker's credentials from the environment
   (`NATS_USER`, `NATS_PASSWORD`), and a `tls://` broker URL asks for an
-  encrypted connection with the same pinning;
+  encrypted connection with the same pinning. Even without it, the broker
+  carries ciphertext: it cannot read the payloads, only the subject and the
+  timing;
 - the `docker-compose.yml` broker asks for credentials and **persists
   nothing**: JetStream is off, so a conversation does not outlive the
   session it happened in.
 
 The rules that come with it:
 
-- do not describe this tool as encrypted or authenticated **by default**:
-  the websocket transport needs a shared secret, and `--tls` on top of it;
-  the NATS path needs a broker that asks for credentials;
+- "encrypted by default" means the **payload** is sealed; it does not mean the
+  transport is hidden. Frame sizes, timing and the subject or address stay
+  visible, and `--tls` is what encrypts the connection itself. On a websocket
+  the host is the correspondent, not a relay, so the end-to-end layer protects
+  the wire there and the peer on NATS;
 - do not add a credential to a **command-line flag** — a flag value is visible
   in the process list. Use an environment variable or a file;
+- the secret is a key now, not just a password: never log it, print it, or put
+  it in a status line;
 - the broker reads its password through its own configuration parser, so a
   password with a `#` or a quote in it does not survive the trip;
-- if you touch the transport, read issue #11 first: the security model is a
-  design decision, not an implementation detail, and it changes the CLI
-  surface.
+- if you touch the transport, read issues #11 and #109 first: the security
+  model is a design decision, not an implementation detail, and it changes the
+  CLI surface.
 
 ## Environment and Secret-File Rules
 

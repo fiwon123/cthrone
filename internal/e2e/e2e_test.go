@@ -102,11 +102,145 @@ func TestHandshakeCarriesMessages(t *testing.T) {
 	}
 }
 
+// The transport's From is a subject or an address, not a name: on a bus every
+// peer shares the subject, so a message from bob would be labelled "chat". The
+// device name that authenticated the frame is the sender's name.
+func TestTheAuthenticatedPeerNamesTheSender(t *testing.T) {
+	p := newPair(t, secret, secret, Bus)
+
+	from := make(chan string, 1)
+
+	p.a.OnMessage(func(m session.Message) { from <- m.From })
+
+	if err := p.b.Send([]byte("hello")); err != nil {
+		t.Fatalf("bob sends: %v", err)
+	}
+
+	select {
+	case got := <-from:
+		if got != "bob" {
+			t.Errorf("sender is %q, want bob", got)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("the message never arrived")
+	}
+}
+
 func TestConnForwardsTheSessionIdentity(t *testing.T) {
 	p := newPair(t, secret, secret, Single)
 
 	if p.a.ID() != "alice" || p.a.RemoteAddr() != "alice.example:8080" {
 		t.Fatalf("identity is %q/%q", p.a.ID(), p.a.RemoteAddr())
+	}
+}
+
+// A caller that wants to say "encrypted with bob" has to learn it when it
+// happens: the peer is reported once, with the name it announced, and not
+// again for a repeat of the same confirm.
+func TestOnPeerReportsEachPeerOnce(t *testing.T) {
+	sa := newPipe("alice")
+	sb := newPipe("bob")
+	link(sa, sb)
+
+	a, err := New(sa, Config{Secret: secret, Name: "alice"})
+	if err != nil {
+		t.Fatalf("wrapping alice: %v", err)
+	}
+
+	seen := make(chan Peer, 4)
+	a.OnPeer(func(p Peer) { seen <- p })
+
+	if _, err := New(sb, Config{Secret: secret, Name: "bob"}); err != nil {
+		t.Fatalf("wrapping bob: %v", err)
+	}
+
+	select {
+	case p := <-seen:
+		if p.Device != "bob" {
+			t.Fatalf("reported %q, want bob", p.Device)
+		}
+
+		if len(p.Key) != KeySize {
+			t.Fatalf("reported a %d-byte key, want %d", len(p.Key), KeySize)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("the peer was never reported")
+	}
+
+	// A repeated confirm is not a second peer.
+	bob := handshake{
+		V:      Version,
+		Key:    a.Peers()[0].Key,
+		Nonce:  bytes.Repeat([]byte{7}, HandshakeNonce),
+		Device: "bob",
+	}
+	confirm, err := encodeHandshake(handshake{
+		V:      Version,
+		Step:   stepConfirm,
+		Key:    bob.Key,
+		Nonce:  bob.Nonce,
+		Device: bob.Device,
+		To:     a.key,
+		MAC:    confirmMAC(secret, transcript(a.ours(), bob), a.key),
+	})
+	if err != nil {
+		t.Fatalf("encoding a repeat: %v", err)
+	}
+
+	sa.Deliver(confirm)
+
+	select {
+	case p := <-seen:
+		t.Fatalf("reported %q a second time", p.Device)
+
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// A caller that installs OnPeer after the handshake has already finished still
+// learns the peer: the caller gets the wrapper back from New, so a fast peer can
+// win that race, and a status line that misses it would say "encrypted" about
+// nobody.
+func TestOnPeerReplaysPeersThatAlreadyFinished(t *testing.T) {
+	sa := newPipe("alice")
+	sb := newPipe("bob")
+	link(sa, sb)
+
+	a, err := New(sa, Config{Secret: secret, Name: "alice"})
+	if err != nil {
+		t.Fatalf("wrapping alice: %v", err)
+	}
+
+	if _, err := New(sb, Config{Secret: secret, Name: "bob"}); err != nil {
+		t.Fatalf("wrapping bob: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(a.Peers()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the handshake never finished")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	var reported []Peer
+
+	a.OnPeer(func(p Peer) { reported = append(reported, p) })
+
+	if len(reported) != 1 || reported[0].Device != "bob" {
+		t.Fatalf("reported %v, want bob once", reported)
+	}
+
+	// The same peer is not announced again by the next registration's snapshot.
+	var second []Peer
+
+	a.OnPeer(func(p Peer) { second = append(second, p) })
+
+	if len(second) != 1 || second[0].Device != "bob" {
+		t.Fatalf("reported %v on re-install, want bob once", second)
 	}
 }
 

@@ -29,18 +29,18 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file**: #85/#86 closed the last gap, so all 21
+**Every package has a test file**: #85/#86 closed the last gap, so all 24
 packages in the module carry tests and `go test ./...` prints no
 `? package [no test files]` line.
 
-- **Covered (21)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
+- **Covered (24)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
   `cmd/exec`, `cmd/host`, `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`,
-  `internal/core/nats`, `internal/core/websocket` (scanner included),
-  `internal/data/app`, `internal/discovery`, `internal/exec`,
-  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
-  `internal/shutdown`, `mobile`, `ui` (its non-GUI settings logic only — the
-  Fyne widgets need `-tags gui` and the `ci` driver, and `make check` runs
-  neither).
+  `internal/chat`, `internal/core/nats`, `internal/core/websocket` (scanner
+  included), `internal/data/app`, `internal/discovery`, `internal/e2e`,
+  `internal/exec`, `internal/handlers/nats`, `internal/handlers/websocket`,
+  `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
+  non-GUI settings logic only — the Fyne widgets need `-tags gui` and the `ci`
+  driver, and `make check` runs neither).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
 nothing, it compiles, and every package's tests passed.
@@ -48,7 +48,7 @@ nothing, it compiles, and every package's tests passed.
 **A test file is not depth.** Several newer files hold one test function
 (`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`), and a GUI widget change
 is still verified only by `go build -tags "gui ci" ./ui` (type-check) and by
-nothing else in this environment. Report what executed; "21/21 packages have
+nothing else in this environment. Report what executed; "24/24 packages have
 tests" is not "the behaviour is covered".
 
 ### Go conventions
