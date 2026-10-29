@@ -298,6 +298,17 @@ func TestEncodeRefusesToBuildBadFrames(t *testing.T) {
 			payload: []byte("too long"),
 			want:    ErrPayload,
 		},
+		{
+			name:   "handshake without a payload",
+			header: Header{Kind: KindHandshake},
+			want:   ErrPayload,
+		},
+		{
+			name:    "handshake payload past the limit",
+			header:  Header{Kind: KindHandshake},
+			payload: make([]byte, MaxHandshake+1),
+			want:    ErrPayload,
+		},
 	}
 
 	for _, tt := range tests {
@@ -306,6 +317,31 @@ func TestEncodeRefusesToBuildBadFrames(t *testing.T) {
 				t.Errorf("Encode() error = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestHandshakeFrameIsEnvelopeOnly covers the kind the end-to-end handshake
+// rides on: this package moves the bytes and never reads them, so the only
+// rules are that there are some and that they fit.
+func TestHandshakeFrameIsEnvelopeOnly(t *testing.T) {
+	payload := []byte(`{"v":1,"step":"hello"}`)
+
+	frame, err := Encode(Header{Kind: KindHandshake}, payload)
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	parsed, err := Parse(frame)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if parsed.Header.Kind != KindHandshake {
+		t.Fatalf("kind = %q, want %q", parsed.Header.Kind, KindHandshake)
+	}
+
+	if !bytes.Equal(parsed.Payload, payload) {
+		t.Fatalf("payload = %q, want %q", parsed.Payload, payload)
 	}
 }
 
