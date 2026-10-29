@@ -210,6 +210,16 @@ func (g *gui) build() {
 
 	copyBtn := widget.NewButtonWithIcon(copyLabel, theme.ContentCopyIcon(), g.copyAll)
 
+	// The Files action lives beside the transcript rather than in Setup: it is
+	// about what happens to a received file, which is a chat concern, and Setup
+	// is the connection form.
+	filesLabel := "Files"
+	if g.lay.Stack {
+		filesLabel = ""
+	}
+
+	filesBtn := widget.NewButtonWithIcon(filesLabel, theme.FolderIcon(), g.showFiles)
+
 	header := container.NewHBox()
 	if g.mobile {
 		header.Add(widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
@@ -217,6 +227,7 @@ func (g *gui) build() {
 
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
+	header.Add(filesBtn)
 	header.Add(copyBtn)
 
 	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
