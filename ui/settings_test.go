@@ -54,6 +54,90 @@ func TestSubjectOrDefault(t *testing.T) {
 	}
 }
 
+func TestSetupVisibility(t *testing.T) {
+	tests := []struct {
+		name        string
+		useNATS     bool
+		tls         bool
+		moreOptions bool
+		want        setupView
+	}{
+		{
+			name: "websocket, plain",
+			want: setupView{Security: true},
+		},
+		{
+			name: "websocket, TLS adds the insecure row",
+			tls:  true,
+			want: setupView{Security: true, Insecure: true},
+		},
+		{
+			name:        "websocket, more options opens the advanced rows",
+			moreOptions: true,
+			want:        setupView{Security: true, SharedSecret: true, BindAddress: true},
+		},
+		{
+			name:        "websocket, more options with TLS opens every row",
+			tls:         true,
+			moreOptions: true,
+			want: setupView{
+				Security:     true,
+				SharedSecret: true,
+				Fingerprint:  true,
+				BindAddress:  true,
+				Insecure:     true,
+			},
+		},
+		{
+			name:    "NATS hides the websocket security row",
+			useNATS: true,
+			want:    setupView{NATSBroker: true, NATSSubject: true},
+		},
+		{
+			name:    "NATS with TLS keeps the insecure row",
+			useNATS: true,
+			tls:     true,
+			want:    setupView{Insecure: true, NATSBroker: true, NATSSubject: true},
+		},
+		{
+			name:        "NATS ignores the advanced websocket rows",
+			useNATS:     true,
+			moreOptions: true,
+			want:        setupView{NATSBroker: true, NATSSubject: true},
+		},
+		{
+			name:        "NATS with everything on still shows only broker rows",
+			useNATS:     true,
+			tls:         true,
+			moreOptions: true,
+			want:        setupView{Insecure: true, NATSBroker: true, NATSSubject: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := setupVisibility(tt.useNATS, tt.tls, tt.moreOptions)
+			if got != tt.want {
+				t.Errorf("setupVisibility(%v, %v, %v) = %+v, want %+v",
+					tt.useNATS, tt.tls, tt.moreOptions, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetupHint(t *testing.T) {
+	websocket := setupHint(false)
+	nats := setupHint(true)
+
+	if websocket == "" || nats == "" {
+		t.Fatalf("setupHint returned an empty hint: websocket %q, NATS %q", websocket, nats)
+	}
+
+	if websocket == nats {
+		t.Errorf("setupHint is the same for both transports: %q", websocket)
+	}
+}
+
 func TestResolveConfigDir(t *testing.T) {
 	t.Run("desktop uses the user config directory", func(t *testing.T) {
 		config := t.TempDir()
