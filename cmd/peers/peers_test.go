@@ -142,3 +142,61 @@ func TestPeersFileFlagIsRegistered(t *testing.T) {
 		t.Errorf("expected the default file by default, got %q", flag.DefValue)
 	}
 }
+
+// certFile makes a store with one host certificate and returns its path and
+// fingerprint.
+func certFile(t *testing.T, address string) (string, string) {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "peers.json")
+
+	store, err := discovery.NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fingerprint := strings.Repeat("ab", 32)
+	if err := store.PinCert(address, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	return path, fingerprint
+}
+
+// A pinned host certificate is part of the listing: it is the pin a changed
+// certificate is refused against, and the address is what forget takes.
+func TestListShowsPinnedCertificates(t *testing.T) {
+	path, fingerprint := certFile(t, "192.168.1.5:8080")
+
+	var out bytes.Buffer
+	if err := run(nil, path, &out); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	text := out.String()
+	for _, want := range []string{"ADDRESS", "CERTIFICATE", "192.168.1.5:8080", fingerprint} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the listing does not carry %q:\n%s", want, text)
+		}
+	}
+}
+
+// Forgetting a certificate by its address is how a changed certificate is
+// re-paired.
+func TestForgetRemovesACertificatePin(t *testing.T) {
+	path, _ := certFile(t, "192.168.1.5:8080")
+
+	var out bytes.Buffer
+	if err := run([]string{"forget", "192.168.1.5"}, path, &out); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+
+	store, err := discovery.NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(store.Certificates()); got != 0 {
+		t.Fatalf("certificate pins after forget = %d, want 0", got)
+	}
+}

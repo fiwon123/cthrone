@@ -22,6 +22,12 @@ var allowAnonymousFlag bool
 
 var nameFlag string
 
+// hostWebsocket is the websocket host the command starts. It is a variable so
+// a test can see the TLS setting the flags resolved to without opening a
+// listener: the encrypted default is the kind of wiring a test that only
+// checks flag registration would leave unproven.
+var hostWebsocket = websocketcore.Host
+
 // Cmd represents the host command
 var Cmd = &cobra.Command{
 	Use:   "host",
@@ -38,21 +44,23 @@ On nats connection only host receive message and only connect device send messag
 		port, _ := cmd.Flags().GetInt("port")
 		secret, _ := cmd.Flags().GetString("token")
 		secretFile, _ := cmd.Flags().GetString("token-file")
-		tlsEnabled, _ := cmd.Flags().GetBool("tls")
+		tlsFlag, _ := cmd.Flags().GetBool("tls")
+		noTLSFlag, _ := cmd.Flags().GetBool("no-tls")
 		fingerprint, _ := cmd.Flags().GetString("cert-fingerprint")
 		acceptAny, _ := cmd.Flags().GetBool("insecure")
+
+		// The websocket transport is encrypted unless --no-tls says
+		// otherwise; the NATS one is decided by its broker URL.
+		tlsConf, err := auth.TLSFromFlags(tlsFlag, noTLSFlag, fingerprint, acceptAny)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		app := app.New(port)
 		app.Host = bindAddressFlag
 		app.Name = nameFlag
 		// Pairing pins a peer by name, so a run without --name still needs one.
 		app.Name = app.ResolveName()
-
-		tlsConf := auth.TLS{
-			Enabled:     tlsEnabled,
-			Fingerprint: fingerprint,
-			Insecure:    acceptAny,
-		}
 
 		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
 
@@ -62,7 +70,7 @@ On nats connection only host receive message and only connect device send messag
 			return
 		}
 
-		if err := websocketcore.Host(app, opts, tlsConf); err != nil {
+		if err := hostWebsocket(app, opts, tlsConf); err != nil {
 			log.Fatal(err)
 		}
 	},

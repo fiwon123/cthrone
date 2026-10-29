@@ -87,7 +87,7 @@ func setupHint(useNATS bool) string {
 		return "NATS: Host or Connect joins the broker, pairing by device key or with the shared secret; the broker's own credentials come from NATS_USER and NATS_PASSWORD."
 	}
 
-	return "Fast: select Host to start, or pick a device from Devices and Connect. With no shared secret the devices pair on first contact — compare the fingerprint each shows."
+	return "Fast: select Host to start, or pick a device from Devices and Connect. The connection is encrypted and the certificate is pinned on first contact; with no shared secret the devices also pair by key — compare the fingerprint each shows."
 }
 
 // resolveConfigDir returns the directory the app keeps its token and its TLS

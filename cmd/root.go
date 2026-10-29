@@ -22,6 +22,8 @@ var tokenFile string
 
 var useTLS bool
 
+var noTLS bool
+
 var certFingerprint string
 
 var insecure bool
@@ -68,8 +70,9 @@ func init() {
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
-	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport: the host serves https, the client expects it")
+	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport (the default); kept so a command line that passes it still runs")
+	rootCmd.PersistentFlags().BoolVar(&noTLS, "no-tls", false, "serve and dial plaintext ws:// instead of the default wss://; the payload stays sealed end to end")
 	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
-	rootCmd.PersistentFlags().StringVar(&certFingerprint, "cert-fingerprint", "", "the fingerprint of the certificate to pin, with --tls")
-	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "accept any certificate, with --tls; the traffic is still encrypted, but the peer is not checked")
+	rootCmd.PersistentFlags().StringVar(&certFingerprint, "cert-fingerprint", "", "the fingerprint of the certificate to pin by hand; without one it is pinned on first contact")
+	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "accept any certificate; the traffic is still encrypted, but the peer's certificate is not checked")
 }

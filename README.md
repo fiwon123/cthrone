@@ -57,8 +57,9 @@ installs like any other app. See [Android](#android) below.
 > is readable by whatever sits in the middle, a broker included. Two devices
 > pair on first contact by **device key**, with no value to copy; a **shared
 > secret** stays as the alternative for older peers. There is no anonymous
-> mode. `--tls` adds transport encryption on top and pins the host's
-> certificate. See [Security](#security) for how it works, and
+> mode. The websocket connection is encrypted as well (`wss://`) unless
+> `--no-tls` is given, and the host's certificate is pinned on first contact.
+> See [Security](#security) for how it works, and
 > [issue #125](https://github.com/fiwon123/cthrone/issues/125) for the model.
 
 > **Status**: actively used, pre-1.0, and not yet covered by tests — see
@@ -107,8 +108,9 @@ while the rest of the room stays up. Nothing is silently re-pinned. The way
 back from a reinstall, or from a pairing made by mistake, is:
 
 ```bash
-cthrone peers                # what this device has pinned, and when
-cthrone peers forget bob     # by name, or by the fingerprint it printed
+cthrone peers                     # what this device has pinned, and when
+cthrone peers forget bob          # by name, or by the fingerprint it printed
+cthrone peers forget 192.168.0.42 # a host whose certificate changed
 ```
 
 A device with no `--name` is still pinned by a name — the hostname identity the
@@ -171,38 +173,50 @@ ciphertext**. It sees that two devices are talking on a subject and nothing
 about what they say. Over a websocket the host is your correspondent rather
 than a relay, so the end-to-end layer protects the wire, not the peer.
 
-`--tls` adds **transport** encryption: the host serves `https`, and the client
-connects over `wss://`.
+The websocket connection is **encrypted by default**: the host serves
+`https`, and the client connects over `wss://`. Nothing has to be remembered —
+start `host` on one device and `connect` on the other, and the connection is
+sealed before the first message.
 
-The host's certificate is **self-signed** — there is no certificate
-authority for a chat between two devices on a LAN. So the client does not
-check it against an authority; it checks it against the **fingerprint** the
-host prints:
+`--no-tls` turns that off: the host serves plaintext `ws://` and the client
+expects it. It exists for a peer that still speaks v0.6.0, which has no `wss://`
+path, and for a quick experiment on a network you trust. The payload stays
+sealed end to end either way; what `--no-tls` exposes is the shape of the
+conversation on the wire.
 
-```bash
-cthrone host --tls
-# Its fingerprint is c56e6a600a2398c7f13f14501e85508b9fe42ba050d5f0282c3653ed411821d9
-```
+The host's certificate is **self-signed** — there is no certificate authority
+for a chat between two devices on a LAN — so the client does not check it
+against an authority. It is **pinned on first contact**, beside the device keys
+in `~/.config/cthrone/peers.json`, under the address it dialed:
 
-Give that fingerprint to the other device:
+- the first certificate seen at an address is recorded;
+- every later contact has to present the same one, and a different certificate
+  at the same address is refused with the fingerprint it got;
+- `cthrone peers` lists those pins too, and `cthrone peers forget <address>`
+  is the way back — for a host that reinstalled, or for a certificate rotated
+  on purpose. The next contact pins the new certificate.
 
-```bash
-cthrone connect 192.168.0.42 --tls --cert-fingerprint c56e6a600a2398c7f13f14501e85508b9fe42ba050d5f0282c3653ed411821d9
-```
-
-A certificate that does not match is refused, and the client says what it
-got. The fingerprint is accepted with or without colons in it.
+First contact is therefore the one moment a machine in the middle could insert
+itself, exactly as with the device key. The two pins stand behind each other:
+the certificate keeps a passive listener from seeing the shape of the traffic,
+and the session still needs a device key the peer accepts.
 
 The host generates the certificate the first time it runs and keeps it —
 `~/.config/cthrone/cert.pem` and `~/.config/cthrone/key.pem` (the key is
-`0600`) — so the fingerprint does not change under a client that pinned it.
+`0600`) — so the pin does not change under a client that recorded it. It prints
+the fingerprint on start; nothing needs to be typed from it.
+
+`--cert-fingerprint <hex>` pins the certificate **by hand** instead, for a
+script or a device that should not record the first one it sees. The
+fingerprint is accepted with or without colons in it, and a certificate that
+does not match is refused with the one that arrived.
 
 `--insecure` makes the client accept **any** certificate. The traffic is
 still encrypted; the host is simply not checked, which means anyone who can
 intercept the connection can present their own. It is for a trusted network,
 and it has to be asked for.
 
-Without `--tls` the connection itself is not encrypted: what is said is
+With `--no-tls` the connection itself is not encrypted: what is said is
 sealed, but who is talking to whom, and how much, is visible on the wire.
 
 ## How to use
@@ -252,8 +266,10 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    CTHRONE_TOKEN="$(cat ~/.config/cthrone/token)" cthrone connect 192.168.0.42
    ```
 
-   On a network you do not trust, add `--tls` on both sides and give the
-   client the fingerprint the host printed — see [Security](#security).
+   The connection is already encrypted (`wss://`), and the host's certificate
+   was pinned on first contact, so there is nothing to copy. Only a v0.6.0
+   peer — which speaks plaintext — needs `--no-tls` on both sides; see
+   [Security](#security).
 
 4. Do not know the address? Scan the local subnet for a chat server:
 
@@ -325,9 +341,10 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    path the broker is told nothing about who the devices are; on the
    shared-secret path both devices hold the same value.
 
-   **The connection to the broker can be encrypted** the same way the
-   websocket one is: give the URL the `tls://` scheme and pin the
-   broker's certificate.
+   **The connection to the broker can be encrypted** too: give the URL the
+   `tls://` scheme and pin the broker's certificate with
+   `--cert-fingerprint` (or skip the check with `--insecure`). The scheme
+   decides here rather than a switch, the way a URL does.
 
    ```bash
    cthrone connect --nats --nats-url tls://broker.internal:4222 \
@@ -394,7 +411,8 @@ The app has three tabs:
   copy it; **Copy all** copies the whole conversation.
 - **Setup** — the port, the credential (device key by default, or a shared
   secret), the transport (NATS or websocket) and the TLS options, with **Host**
-  and **Connect**.
+  and **Connect**. Encryption is on unless the box is cleared, and the host's
+  certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the local subnet for a host on the chat
   port; tap a result to fill in its address.
 
@@ -455,7 +473,7 @@ What the Android CLI does and does not give you:
 | `cthrone host` | host the chat server and wait for a client |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
 | `cthrone scan` | scan the local subnet for chat servers (shows device names when discovered) |
-| `cthrone peers` | list the devices this one has pinned, or `cthrone peers forget <name\|fingerprint>` one |
+| `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
 | `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
@@ -469,9 +487,10 @@ What the Android CLI does and does not give you:
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
 | `--name` | device name shown to the peer in an encrypted session; the host also announces it on the network |
-| `--tls` | encrypt the transport: the host serves https, the client expects it |
-| `--cert-fingerprint` | the fingerprint of the certificate to pin, with `--tls` |
-| `--insecure` | accept any certificate, with `--tls` |
+| `--no-tls` | serve and dial plaintext `ws://` instead of the default `wss://`; the payload stays sealed end to end |
+| `--tls` | encrypt the transport — **the default**; kept so a v0.6.0 command line still runs |
+| `--cert-fingerprint` | pin the certificate by hand instead of on first contact; a `tls://` broker needs one (or `--insecure`) |
+| `--insecure` | accept any certificate; the traffic is still encrypted, but the host is not checked |
 | `-v`, `--version` | print the version |
 
 `cthrone connect` needs the address of the machine running `cthrone host`; it
@@ -662,13 +681,23 @@ An address that already carries a port is used as it is:
 - **"e2e: handshake MAC mismatch"** — the handshake reached a device with a
   different secret. The session is refused rather than falling back to
   plaintext; make the two secrets match.
-- **"it is serving TLS, add --tls"** — the host was started with `--tls` and
-  the client was not. Add `--tls` to the client, and give it the
-  `--cert-fingerprint` the host printed.
+- **"tls: first record does not look like a TLS handshake"** — the host is
+  serving plaintext. A v0.6.0 host does, and so does one started with
+  `--no-tls`; retry with `--no-tls`. The payload is still sealed either way.
+- **"the host refused the connection: it is serving TLS (the default)"** — the
+  client is speaking plaintext to a host that serves `wss://`. Connect with a
+  client that speaks TLS (the default), or start the host with `--no-tls` too.
+- **"discovery: the address is pinned to another certificate"** — the host
+  presented a certificate other than the one this device recorded at that
+  address. A host that reinstalled, or whose certificate was rotated on
+  purpose, is expected to. If the change is expected, `cthrone peers forget
+  <address>` and connect again; otherwise it is not the host you paired with.
 - **"the certificate of the host does not match the fingerprint"** — the
-  client pinned a different certificate. The host generates one the first
-  time it runs and keeps it, so this means the client has an old
-  fingerprint, or it is talking to a different host.
+  client was given `--cert-fingerprint` with a different value. Check it
+  against the one the host printed.
+- **"--tls and --no-tls cannot both be given"** — TLS is the default, so
+  `--tls` says nothing; drop `--tls`, or drop `--no-tls` to keep the
+  encryption.
 
 ### `scan` finds nothing
 

@@ -237,3 +237,282 @@ func TestFingerprintIsGroupedHex(t *testing.T) {
 		}
 	}
 }
+
+// newCertStore makes an empty store and returns it with its path, so a test
+// can check what a later run would read.
+func newCertStore(t *testing.T) (*PinStore, string) {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "peers.json")
+
+	store, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return store, path
+}
+
+// A certificate is checked without being written — the check runs during the
+// TLS handshake, and the pin belongs to the moment the certificate arrives —
+// and the first one at an address is then pinned.
+func TestPinCertRecordsOnFirstContact(t *testing.T) {
+	store, path := newCertStore(t)
+	fingerprint := strings.Repeat("ab", 32)
+
+	first, err := store.CheckCert("192.168.1.5:8080", fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !first {
+		t.Fatal("expected the first contact to be reported as one")
+	}
+
+	if got := len(store.Certificates()); got != 0 {
+		t.Fatalf("check recorded %d certificates, want 0", got)
+	}
+
+	if err := store.PinCert("192.168.1.5:8080", fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err = store.CheckCert("192.168.1.5:8080", strings.ToUpper(fingerprint))
+	if err != nil {
+		t.Fatalf("the pinned certificate was refused: %v", err)
+	}
+
+	if first {
+		t.Error("a pinned address was reported as a first contact")
+	}
+
+	// The pin is on disk, in the form the next run reads: the file is public
+	// keys only, but still 0600.
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	certs := reloaded.Certificates()
+	if len(certs) != 1 {
+		t.Fatalf("the next run read %d certificates, want 1", len(certs))
+	}
+
+	if certs[0].Address != "192.168.1.5:8080" || certs[0].Fingerprint != fingerprint {
+		t.Errorf("pinned %+v, want %q with %q", certs[0], "192.168.1.5:8080", fingerprint)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("the pins are %o, want 600", perm)
+	}
+}
+
+// A different certificate at a pinned address is refused rather than trusted,
+// and the pin stays as it was until the user forgets it.
+func TestCheckCertRefusesAChangedCertificate(t *testing.T) {
+	store, _ := newCertStore(t)
+
+	first := strings.Repeat("aa", 32)
+	other := strings.Repeat("bb", 32)
+
+	if err := store.PinCert("192.168.1.5:8080", first); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.CheckCert("192.168.1.5:8080", other); !errors.Is(err, ErrCertificateChanged) {
+		t.Fatalf("a changed certificate = %v, want ErrCertificateChanged", err)
+	}
+
+	if err := store.PinCert("192.168.1.5:8080", other); !errors.Is(err, ErrCertificateChanged) {
+		t.Fatalf("pinning a changed certificate = %v, want ErrCertificateChanged", err)
+	}
+
+	certs := store.Certificates()
+	if len(certs) != 1 || certs[0].Fingerprint != first {
+		t.Errorf("the pin changed to %+v", certs)
+	}
+}
+
+// Forgetting is the way back from a reinstalled host: an address without its
+// port names the pin the client recorded, and a fingerprint works too.
+func TestForgetRemovesACertificateByAddressOrFingerprint(t *testing.T) {
+	store, _ := newCertStore(t)
+
+	laptop := strings.Repeat("aa", 32)
+	phone := strings.Repeat("bb", 32)
+
+	if err := store.PinCert("192.168.1.5:8080", laptop); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PinCert("192.168.1.6:9000", phone); err != nil {
+		t.Fatal(err)
+	}
+
+	forgot, err := store.Forget("192.168.1.5")
+	if err != nil || !forgot {
+		t.Fatalf("forget by address = %v, %v; want the pin removed", forgot, err)
+	}
+
+	if got := store.Certificates(); len(got) != 1 || got[0].Address != "192.168.1.6:9000" {
+		t.Fatalf("certificates after forget = %+v, want only 192.168.1.6:9000", got)
+	}
+
+	forgot, err = store.Forget(strings.ToUpper(phone))
+	if err != nil || !forgot {
+		t.Fatalf("forget by fingerprint = %v, %v; want the pin removed", forgot, err)
+	}
+
+	if got := store.Certificates(); len(got) != 0 {
+		t.Errorf("certificates after forget = %+v, want none", got)
+	}
+
+	forgot, err = store.Forget("192.168.1.5")
+	if err != nil || forgot {
+		t.Errorf("forget of a missing pin = %v, %v; want neither", forgot, err)
+	}
+}
+
+// One host can be reached on more than one port, and each port gets its own
+// pin. Forgetting by host forgets all of them: the user remembers the host,
+// not the port the tool appended, and a pin left behind would keep refusing
+// the certificate the user just said to forget.
+func TestForgetRemovesEveryCertificateUnderAHost(t *testing.T) {
+	store, _ := newCertStore(t)
+
+	for _, address := range []string{"192.168.1.5:8080", "192.168.1.5:9000"} {
+		if err := store.PinCert(address, strings.Repeat("ab", 32)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.PinCert("192.168.1.6:8080", strings.Repeat("cd", 32)); err != nil {
+		t.Fatal(err)
+	}
+
+	forgot, err := store.Forget("192.168.1.5")
+	if err != nil || !forgot {
+		t.Fatalf("forget by host = %v, %v; want the pins removed", forgot, err)
+	}
+
+	got := store.Certificates()
+	if len(got) != 1 || got[0].Address != "192.168.1.6:8080" {
+		t.Errorf("certificates after forget = %+v, want only the other host", got)
+	}
+}
+
+// A store can outlive the pin file it was loaded from — a session lasts, and
+// the host beside it pairs another device — so a write has to start from what
+// is on disk now. Writing the copy a long-running store holds would erase the
+// pins recorded in between, and the next contact with those devices would look
+// like a first contact again.
+func TestPinKeepsAPinAnotherStoreWrote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "peers.json")
+
+	first, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	laptop, phone := newKey(t), newKey(t)
+
+	if err := first.Pin(laptop, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+
+	// second was loaded before anything was pinned; its write must not drop
+	// the pin first recorded.
+	if err := second.Pin(phone, "phone"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pinned := make(map[string]bool, 2)
+	for _, p := range reloaded.List() {
+		pinned[p.Name] = true
+	}
+
+	for _, name := range []string{"laptop", "phone"} {
+		if !pinned[name] {
+			t.Errorf("the pin for %q was lost by the other store's write", name)
+		}
+	}
+}
+
+// A host is reachable by name and the certificate is pinned by address, so
+// forgetting the host has to remove both pins in the same write: leaving the
+// device pin would keep refusing the device the user just said to forget, and
+// a second pass could fail after the first had already been written.
+func TestForgetRemovesADeviceAndACertificateInOnePass(t *testing.T) {
+	store, path := newCertStore(t)
+
+	if err := store.Pin(newKey(t), "192.168.1.5"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PinCert("192.168.1.5:8080", strings.Repeat("ab", 32)); err != nil {
+		t.Fatal(err)
+	}
+
+	forgot, err := store.Forget("192.168.1.5")
+	if err != nil || !forgot {
+		t.Fatalf("forget = %v, %v; want both pins removed", forgot, err)
+	}
+
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(reloaded.List()); got != 0 {
+		t.Errorf("device pins after forget = %d, want 0", got)
+	}
+
+	if got := len(reloaded.Certificates()); got != 0 {
+		t.Errorf("certificate pins after forget = %d, want 0", got)
+	}
+}
+
+func TestDeviceAndCertificatePinsShareTheFile(t *testing.T) {
+	store, path := newCertStore(t)
+
+	pub := newKey(t)
+	if err := store.Pin(pub, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PinCert("192.168.1.5:8080", strings.Repeat("ab", 32)); err != nil {
+		t.Fatal(err)
+	}
+
+	if forgot, err := store.Forget("laptop"); err != nil || !forgot {
+		t.Fatalf("forget by name = %v, %v; want the device pin removed", forgot, err)
+	}
+
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(reloaded.List()); got != 0 {
+		t.Errorf("device pins after forget = %d, want 0", got)
+	}
+
+	if got := len(reloaded.Certificates()); got != 1 {
+		t.Errorf("certificate pins after forget = %d, want 1", got)
+	}
+}

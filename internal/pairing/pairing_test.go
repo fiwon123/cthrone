@@ -128,6 +128,10 @@ func TestLoadUsesTheDeviceKeyWhenThereIsNoSecret(t *testing.T) {
 // The two models are exclusive in the e2e configuration: a device-key
 // credential speaks the identity handshake and leaves Secret empty.
 func TestConfigMatchesTheCredential(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(auth.EnvToken, "")
+
 	secret, err := Load(Options{FlagToken: strings.Repeat("s", 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -245,6 +249,40 @@ func TestFingerprintIsTheStoredKey(t *testing.T) {
 	pub, _ := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
 	if cred.Fingerprint() != discovery.Fingerprint(pub) {
 		t.Fatalf("fingerprint = %q, want the stored key's", cred.Fingerprint())
+	}
+}
+
+// The pins are loaded in both models. The host certificate is trusted on
+// first use before the handshake says which credential the peer speaks, so a
+// session that authenticates with a shared secret still needs them.
+func TestPinsAreLoadedInBothModels(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(auth.EnvToken, "")
+
+	pinsFile := filepath.Join(dir, "peers.json")
+
+	secret, err := Load(Options{FlagToken: strings.Repeat("s", 32), PinsFile: pinsFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if secret.Pins() == nil {
+		t.Error("a shared-secret credential has no pin store")
+	}
+
+	identity, err := Load(Options{
+		TokenFile: filepath.Join(dir, "no-token"),
+		KeyFile:   filepath.Join(dir, "identity.key"),
+		PinsFile:  pinsFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if identity.Pins() == nil {
+		t.Error("a device-key credential has no pin store")
 	}
 }
 

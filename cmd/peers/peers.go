@@ -17,7 +17,7 @@ var peersFileFlag string
 
 // Cmd represents the peers command
 var Cmd = &cobra.Command{
-	Use:   "peers [forget <name|fingerprint>]",
+	Use:   "peers [forget <name|fingerprint|address>]",
 	Short: "list the devices this one has paired with, or forget one",
 	Long: `list the devices this one has paired with, or forget one.
 
@@ -25,9 +25,13 @@ A device is pinned the first time it completes the handshake: its name and key
 are recorded, and every later contact has to present the same key. A peer that
 comes back with a different key is refused rather than re-pinned.
 
-Forgetting is the way to re-pair a device that reinstalled the app, or to undo
-a pairing that was made by mistake. It is also the way to revoke a peer this
-one no longer trusts.`,
+A host certificate is pinned the same way, under the address the client
+reached: the first certificate seen there is recorded, and a different one
+later is refused rather than trusted.
+
+Forgetting is the way to re-pair a device that reinstalled the app, to accept
+a host whose certificate changed, or to undo a pairing that was made by
+mistake. It is also the way to revoke a peer this one no longer trusts.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := pinFile(peersFileFlag)
@@ -60,11 +64,11 @@ func run(args []string, path string, out io.Writer) error {
 	}
 
 	if args[0] != "forget" {
-		return fmt.Errorf("unknown action %q: `peers` lists, `peers forget <name|fingerprint>` forgets", args[0])
+		return fmt.Errorf("unknown action %q: `peers` lists, `peers forget <name|fingerprint|address>` forgets", args[0])
 	}
 
 	if len(args) != 2 {
-		return errors.New("forget needs one name or fingerprint")
+		return errors.New("forget needs one name, fingerprint or address")
 	}
 
 	forgot, err := store.Forget(args[1])
@@ -81,31 +85,55 @@ func run(args []string, path string, out io.Writer) error {
 	return nil
 }
 
-// list prints the pinned devices. The two times are the answer to "when did I
-// pair with this, and when did it last talk to me", which is what tells a
-// forgotten device from one that is simply quiet.
+// list prints the pinned devices and host certificates. The two times are the
+// answer to "when did I pair with this, and when did it last talk to me",
+// which is what tells a forgotten device from one that is simply quiet.
 func list(store *discovery.PinStore, out io.Writer) error {
 	peers := store.List()
-	if len(peers) == 0 {
-		fmt.Fprintln(out, "No pinned devices yet: a device is pinned the first time it completes the handshake.")
+	certs := store.Certificates()
+
+	if len(peers) == 0 && len(certs) == 0 {
+		fmt.Fprintln(out, "No pinned devices yet: a device is pinned the first time it completes the handshake, and a host certificate the first time a client reaches it.")
 
 		return nil
 	}
 
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if len(peers) > 0 {
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 
-	fmt.Fprintln(w, "NAME\tFINGERPRINT\tFIRST SEEN\tLAST SEEN")
+		fmt.Fprintln(w, "NAME\tFINGERPRINT\tFIRST SEEN\tLAST SEEN")
 
-	for _, p := range peers {
-		name := p.Name
-		if name == "" {
-			name = "(unnamed)"
+		for _, p := range peers {
+			name := p.Name
+			if name == "" {
+				name = "(unnamed)"
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, p.Fingerprint, stamp(p.FirstSeen), stamp(p.LastSeen))
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, p.Fingerprint, stamp(p.FirstSeen), stamp(p.LastSeen))
+		if err := w.Flush(); err != nil {
+			return err
+		}
 	}
 
-	return w.Flush()
+	if len(certs) > 0 {
+		if len(peers) > 0 {
+			fmt.Fprintln(out)
+		}
+
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+
+		fmt.Fprintln(w, "ADDRESS\tCERTIFICATE\tFIRST SEEN\tLAST SEEN")
+
+		for _, c := range certs {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", c.Address, c.Fingerprint, stamp(c.FirstSeen), stamp(c.LastSeen))
+		}
+
+		return w.Flush()
+	}
+
+	return nil
 }
 
 // pinFile is the file the pins are kept in.

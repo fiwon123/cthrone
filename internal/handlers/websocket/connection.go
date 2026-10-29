@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/auth"
@@ -53,8 +54,9 @@ func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls
 }
 
 // openConnectionDial dials the host and returns the connection with the URL
-// it reached. The errors that name a missing secret or a missing --tls are
-// produced here so every caller explains a refusal the same way.
+// it reached. The errors that name a missing secret, or a host whose
+// transport is not the one this client speaks, are produced here so every
+// caller explains a refusal the same way.
 func openConnectionDial(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) (*websocket.Conn, string, error) {
 	url := buildURL(address, port, useTLS)
 
@@ -70,8 +72,16 @@ func openConnectionDial(address string, port int, token string, useTLS bool, tls
 			case http.StatusUnauthorized:
 				return nil, url, fmt.Errorf("the host refused the connection: it needs the shared secret")
 			case http.StatusBadRequest:
-				return nil, url, fmt.Errorf("the host refused the connection: it is serving TLS, add --tls")
+				return nil, url, fmt.Errorf("the host refused the connection: it is serving TLS (the default), and plaintext cannot reach it — start the host with --no-tls, or use a client that speaks TLS")
 			}
+		}
+
+		// A TLS handshake that failed against a host which is not speaking
+		// TLS is the one mismatch a user can fix with a flag, so it is worth
+		// naming rather than leaving as a bare "first record does not look
+		// like a TLS handshake".
+		if useTLS && strings.Contains(err.Error(), "tls:") {
+			return nil, url, fmt.Errorf("%w — the host may be serving plaintext: a v0.6.0 host does, and so does one started with --no-tls; retry with --no-tls", err)
 		}
 
 		return nil, url, err

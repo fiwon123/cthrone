@@ -3,9 +3,11 @@ package websocketcore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
 // A host that serves TLS needs a certificate. It generates one the first
@@ -68,23 +70,41 @@ func TestLocalHosts(t *testing.T) {
 	}
 }
 
-// A client that wants TLS has to say how the certificate is checked: either
-// it pins a fingerprint, or it asks to be insecure. A client that says
-// neither would have no way to tell a host from anyone else.
-func TestClientTLSConfigNeedsAFingerprintOrInsecure(t *testing.T) {
-	_, err := clientTLSConfig(auth.TLS{Enabled: true})
+// A client that wants TLS with no fingerprint and no --insecure pins the
+// certificate on first use, so it needs the pin store. Without one there is
+// nowhere to record the trust decision, and the client is refused.
+func TestClientTLSConfigNeedsAPinStoreWithoutAFingerprint(t *testing.T) {
+	_, err := clientTLSConfig(auth.TLS{Enabled: true}, "192.168.1.5:8080", nil)
 	if err == nil {
-		t.Fatal("expected an error when neither a fingerprint nor --insecure is given")
+		t.Fatal("expected an error when neither a fingerprint, --insecure nor pins are given")
 	}
 
-	if err.Error() != "--tls needs --cert-fingerprint to check the certificate, or --insecure to skip the check" {
+	if !strings.Contains(err.Error(), "--cert-fingerprint") || !strings.Contains(err.Error(), "--insecure") {
 		t.Errorf("expected the error to name the flags, got %q", err.Error())
+	}
+}
+
+// With a pin store the certificate is trusted on first use: that is what
+// makes TLS the default without a fingerprint to copy from the other device.
+func TestClientTLSConfigTrustsOnFirstUse(t *testing.T) {
+	store, err := discovery.NewPinStore(filepath.Join(t.TempDir(), "peers.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := clientTLSConfig(auth.TLS{Enabled: true}, "192.168.1.5:8080", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if config == nil {
+		t.Fatal("expected a TLS configuration")
 	}
 }
 
 // A client that pins a fingerprint gets a configuration that checks it.
 func TestClientTLSConfigWithAFingerprint(t *testing.T) {
-	config, err := clientTLSConfig(auth.TLS{Enabled: true, Fingerprint: "ab12"})
+	config, err := clientTLSConfig(auth.TLS{Enabled: true, Fingerprint: "ab12"}, "192.168.1.5:8080", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +117,7 @@ func TestClientTLSConfigWithAFingerprint(t *testing.T) {
 // A client that asks to be insecure gets a configuration that checks
 // nothing.
 func TestClientTLSConfigInsecure(t *testing.T) {
-	config, err := clientTLSConfig(auth.TLS{Enabled: true, Insecure: true})
+	config, err := clientTLSConfig(auth.TLS{Enabled: true, Insecure: true}, "192.168.1.5:8080", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +130,7 @@ func TestClientTLSConfigInsecure(t *testing.T) {
 // A client that does not use TLS gets no TLS configuration: the transport
 // is not encrypted and nothing pretends otherwise.
 func TestClientTLSConfigWithoutTLS(t *testing.T) {
-	config, err := clientTLSConfig(auth.TLS{})
+	config, err := clientTLSConfig(auth.TLS{}, "192.168.1.5:8080", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

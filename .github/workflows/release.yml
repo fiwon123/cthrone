@@ -499,23 +499,35 @@ jobs:
           - **Devices** — **Scan network** walks the local subnet for a host on
             the chat port; tap a result to fill in its address.
 
-          A phone that hosts generates a shared secret and offers it in a dialog,
-          copied to the clipboard — enter it on the other device. The app keeps
-          that secret and its TLS material in its own private data directory;
-          nothing is shared with another app.
+          A phone that hosts shows its own fingerprint in a dialog — the other
+          device connects and the two screens are compared, with nothing to
+          type. The app keeps its device key, its pins, its shared secret (when
+          one is configured) and its TLS material in its own private data
+          directory; nothing is shared with another app.
 
           ### Security
 
-          This tool is **not** encrypted or authenticated by default:
+          Every session is **encrypted and authenticated end to end** — a
+          device that cannot prove its identity cannot join, and a broker
+          carries ciphertext. Two devices pair on first contact by **device
+          key**, with no value to copy; a shared secret remains the alternative
+          for v0.6.0 peers.
 
-          - the **websocket** transport requires a shared secret (a client that
-            does not know it is refused), and `--tls` encrypts the connection,
-            with the host's certificate pinned by `--cert-fingerprint`;
+          - the **websocket** transport is encrypted as well (`wss://`) unless
+            `--no-tls` is given, and the host's certificate is pinned on first
+            contact — a different certificate at the same address is refused,
+            and `cthrone peers forget <address>` is the way back;
           - the **NATS** transport sends the broker's credentials from
             `NATS_USER`/`NATS_PASSWORD`, and a `tls://` broker URL asks for an
             encrypted connection;
           - prefer `--token-file` or the environment over `--token`: a flag value
             is visible in the process list.
+
+          **Compatibility break:** a v0.6.0 peer speaks plaintext `ws://` and
+          will not connect to a v0.7.0 host. Start the v0.7.0 side with
+          `--no-tls` — on both devices — while the older one is in use; the
+          payload stays sealed end to end. `--tls` is still accepted, so an
+          older command line runs unchanged.
 
           ### Changes
 

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -113,5 +114,26 @@ func TestConnectExplainsARefusedConnection(t *testing.T) {
 
 	if err.Error() != "the host refused the connection: it needs the shared secret" {
 		t.Errorf("expected the refusal to name the missing secret, got %q", err.Error())
+	}
+}
+
+// A TLS handshake that fails because the host is serving plaintext is the one
+// mismatch a flag can fix — a v0.6.0 host, or one started with --no-tls — so
+// the error names it instead of leaving the handshake error bare.
+func TestConnectExplainsAPlaintextHost(t *testing.T) {
+	original := dial
+	defer func() { dial = original }()
+
+	dial = func(url string, header http.Header, tlsConfig *tls.Config) (*websocket.Conn, *http.Response, error) {
+		return nil, nil, errors.New("tls: first record does not look like a TLS handshake")
+	}
+
+	_, err := Connect("192.168.1.5", 8080, "", true, &tls.Config{})
+	if err == nil {
+		t.Fatal("expected the connection to fail")
+	}
+
+	if !strings.Contains(err.Error(), "--no-tls") {
+		t.Errorf("expected the error to name the way out, got %q", err.Error())
 	}
 }
