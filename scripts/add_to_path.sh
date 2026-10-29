@@ -13,6 +13,13 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
+# The GUI archive ships these next to the binaries. A launcher, a menu entry or
+# a desktop shortcut reads Icon=cthrone from the desktop file and resolves it in
+# the XDG icon directories — never from the binary — so they have to be
+# installed for the app to show its logo instead of a blank square.
+APP_PNG=cthrone.png
+APP_DESKTOP=cthrone.desktop
+
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
 die() {
@@ -121,6 +128,39 @@ else
     say "  $RC_LINE"
 fi
 
+# Install the desktop entry and its icon so a launcher, a menu entry or a
+# desktop shortcut shows the logo. Both files come from the GUI archive; the
+# CLI-only archive carries the script without them, and then this is skipped
+# silently.
+install_launcher() {
+    DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+    icon_dir=$DATA_HOME/icons/hicolor/512x512/apps
+    apps_dir=$DATA_HOME/applications
+
+    mkdir -p "$icon_dir" "$apps_dir"
+    cp "$SCRIPT_DIR/$APP_PNG" "$icon_dir/$APP_PNG"
+    cp "$SCRIPT_DIR/$APP_DESKTOP" "$apps_dir/$APP_DESKTOP"
+
+    # Refreshing the caches is a nicety, not a requirement: the icon still
+    # resolves on the next login when neither tool is installed.
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -q -t -f "$DATA_HOME/icons/hicolor" 2>/dev/null || true
+    fi
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database -q "$apps_dir" 2>/dev/null || true
+    fi
+
+    say "launcher icon:  $icon_dir/$APP_PNG"
+    say "menu entry:     $apps_dir/$APP_DESKTOP"
+}
+
+if [ -f "$SCRIPT_DIR/$APP_PNG" ] && [ -f "$SCRIPT_DIR/$APP_DESKTOP" ] &&
+    [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
+    install_launcher
+fi
+
 say ""
 say "Apply it now:   . \"$RC_FILE\""
 say "or open a new terminal."
+
+

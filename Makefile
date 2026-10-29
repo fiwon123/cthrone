@@ -54,6 +54,15 @@ FYNE_CLI_VERSION := v1.26.1
 FYNE := $(shell command -v fyne 2>/dev/null)
 ANDROID_ICON := $(CURDIR)/assets/logo-512.png
 
+# The Windows executable icon is a PE resource, not a file next to the exe: only
+# a .syso in the package directory reaches the linker, and only the one named
+# for the target GOOS/GOARCH. go-winres writes rsrc_windows_amd64.syso, so the
+# Linux, macOS and Android builds never see it. The tool is pinned and run with
+# `go run`, so it stays a build-time tool and never enters go.mod.
+WINRES_VERSION := v0.3.3
+WINRES_SRC := winres/winres.json
+WINRES_SYSO := rsrc_windows_amd64.syso
+
 # What every Unix archive carries, in the order it is listed inside the
 # archive. The staging directory holds a copy of each file, so the binaries and
 # the documents sit next to each other with no `../` paths in the recipe.
@@ -64,7 +73,7 @@ WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).ba
 
 
 .PHONY: all windows linux android darwin zip_linux zip_windows zip_android clean release \
-	gui-linux gui-windows gui-darwin gui-android release-gui check assets \
+	gui-linux gui-windows gui-darwin gui-android release-gui check assets winres-icon require-mingw \
 	help dev-up dev-down dev-shell dev-opencode dev-opencode-auto dev-log dev-build reset \
 	preflight require-agent prepare-agent-mounts check-identity opencode-version opencode-upgrade \
 	shell opencode opencode-auto
@@ -110,6 +119,7 @@ zip_android: android
 # Clean build folder
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -f $(WINRES_SYSO)
 
 # Build & compress the CLI for every platform. `VERSION` may be overridden on
 # the command line (`make release VERSION=v0.2.0`) — the release workflow does
@@ -173,11 +183,26 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	cp $(ASSETS_DIR)/logo-512.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || cp $(ASSETS_DIR)/logo-128.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || true
 	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png
 
-gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
+# The Windows GUI needs mingw-w64 for the CGO link, and the icon needs the Go
+# resource tool below. Both are settled before a single file is generated, so a
+# missing tool fails without leaving a stray .syso behind.
+require-mingw:
 	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { \
 	  echo "ERROR: x86_64-w64-mingw32-gcc is missing — the Windows GUI needs mingw-w64." >&2; \
 	  echo "  Debian/Ubuntu: sudo apt-get install gcc-mingw-w64-x86-64" >&2; \
 	  exit 1; }
+
+# Build the Windows icon resource the two exes are linked with, and fail
+# loudly when it cannot be produced: an exe with no icon is exactly the bug this
+# target exists to prevent, so a silent skip is worse than a red build.
+winres-icon: ## generate the Windows exe icon resource (first run needs module proxy access)
+	@go run github.com/tc-hib/go-winres@$(WINRES_VERSION) make --in $(WINRES_SRC) --arch amd64 || { \
+	  echo "ERROR: go-winres $(WINRES_VERSION) did not run — the Windows exe would carry no icon." >&2; \
+	  echo "  It is fetched with 'go run', so the first use needs module proxy access." >&2; \
+	  exit 1; }
+	@test -f $(WINRES_SYSO) || { echo "ERROR: $(WINRES_SYSO) was not created." >&2; exit 1; }
+
+gui-windows: $(BUILD_DIR) require-mingw winres-icon ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
 	@mkdir -p $(GUI_WINDOWS_DIR)
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
@@ -187,6 +212,7 @@ gui-windows: $(BUILD_DIR) ## cross-build the Windows Fyne GUI archive (needs min
 	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/cthrone.ico 2>/dev/null || true
 	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.ico 2>/dev/null || true
 	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico $(APP_NAME)_gui.ico 2>/dev/null || cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico
+	@rm -f $(WINRES_SYSO)
 
 gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	@test "$$(go env GOOS)" = "darwin" || { \
