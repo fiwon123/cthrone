@@ -196,23 +196,39 @@ jobs:
       - name: Install the mingw-w64 cross compiler
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 zip
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 zip unzip
 
       - name: make gui-windows
         run: make gui-windows VERSION="$VERSION"
 
       # The icon is a PE resource, so its absence is invisible until someone
-      # opens Explorer on Windows. Check the section here instead: a build that
-      # lost rsrc_windows_amd64.syso fails the job rather than shipping.
-      - name: Check the exes carry the icon resource
+      # opens Explorer on Windows — and so is its accidental spread to the CLI
+      # exes, which need none. Check both directions here, plus the archive: a
+      # loose .ico is never read by Windows, so shipping one is only bloat.
+      - name: Check the icon reaches cthrone_gui.exe and nothing else
         run: |
           status=0
-          for exe in build/GUI/Windows/cthrone_gui.exe build/GUI/Windows/cthrone.exe; do
-            if x86_64-w64-mingw32-objdump -h "$exe" | grep -q '\.rsrc'; then
-              echo "ok: $exe has a .rsrc section"
-            else
-              echo "error: $exe carries no .rsrc section — the icon is missing" >&2
+          gui=build/GUI/Windows/cthrone_gui.exe
+          if x86_64-w64-mingw32-objdump -h "$gui" | grep -q '\.rsrc'; then
+            echo "ok: $gui carries the icon resource"
+          else
+            echo "error: $gui carries no .rsrc section — the icon is missing" >&2
+            status=1
+          fi
+          for cli in build/GUI/Windows/cthrone.exe build/GUI/Windows/ct.exe; do
+            if x86_64-w64-mingw32-objdump -h "$cli" | grep -q '\.rsrc'; then
+              echo "error: $cli carries a .rsrc section — the CLI needs no icon" >&2
               status=1
+            else
+              echo "ok: $cli carries no icon resource"
+            fi
+          done
+          for archive in build/GUI/Windows/*_windows_gui_amd64.zip; do
+            if unzip -l "$archive" | grep -qi '\.ico$'; then
+              echo "error: $archive ships a loose .ico — Windows never reads it" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose .ico"
             fi
           done
           exit $status
