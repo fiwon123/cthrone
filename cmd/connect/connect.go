@@ -7,6 +7,7 @@ import (
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +35,8 @@ On nats connection only host receive message and only connect device send messag
 
 		app := app.New(port)
 		app.Name = nameFlag
+		// Pairing pins a peer by name, so a run without --name still needs one.
+		app.Name = app.ResolveName()
 
 		tlsConf := auth.TLS{
 			Enabled:     tlsEnabled,
@@ -41,13 +44,15 @@ On nats connection only host receive message and only connect device send messag
 			Insecure:    acceptAny,
 		}
 
+		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
+
 		if natsFlag {
-			natscore.Connect(args, app, secret, secretFile, natsURLFlag, tlsConf)
+			natscore.Connect(args, app, opts, natsURLFlag, tlsConf)
 
 			return
 		}
 
-		if err := websocketcore.Connect(args, app, secret, secretFile, tlsConf); err != nil {
+		if err := websocketcore.Connect(args, app, opts, tlsConf); err != nil {
 			log.Fatal(err)
 		}
 	},

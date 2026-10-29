@@ -1,11 +1,14 @@
-// Package auth holds the shared secret that the websocket transport uses to
-// decide whether a client may join a session.
+// Package auth holds the shared secret a session can authenticate with, and the
+// TLS material that pins a host.
+//
+// The secret is an alternative to the device-key model: this package reads one
+// when it is configured and compares it in constant time. It never makes one —
+// a generated secret used to be the host's default, and now a device pairs by
+// its own key unless a secret is supplied.
 package auth
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -29,7 +32,6 @@ const (
 	SourceFlag        = "flag"
 	SourceEnvironment = "environment"
 	SourceFile        = "file"
-	SourceGenerated   = "generated"
 	SourceNone        = "none"
 )
 
@@ -43,8 +45,8 @@ type Token struct {
 //
 // The flag wins over the environment, and the environment over the file: the
 // more explicit the source, the more it was meant for this run. A file that
-// does not exist is not an error — it means there is no secret yet, which
-// the caller may want to create.
+// does not exist is not an error — it means no secret is configured, which is
+// the ordinary case now that a device pairs by its own key.
 func Resolve(flagValue, filePath string) (Token, error) {
 	if flagValue != "" {
 		return Token{Value: flagValue, Source: SourceFlag}, nil
@@ -75,16 +77,6 @@ func Resolve(flagValue, filePath string) (Token, error) {
 	return Token{Value: secret, Source: SourceFile}, nil
 }
 
-// Generate returns a new random secret.
-func Generate() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generating a token: %w", err)
-	}
-
-	return hex.EncodeToString(buf), nil
-}
-
 // DefaultFile returns the path of the default token file: the token file
 // inside the user's configuration directory.
 func DefaultFile() (string, error) {
@@ -94,22 +86,6 @@ func DefaultFile() (string, error) {
 	}
 
 	return filepath.Join(dir, "cthrone", "token"), nil
-}
-
-// WriteFile stores the secret in the file, creating the directory. The file
-// is written for its owner only: a secret that every process on the machine
-// can read is not a secret.
-func WriteFile(path, value string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
-	}
-
-	if err := os.WriteFile(path, []byte(value+"\n"), 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-
-	return nil
 }
 
 // Equal compares two secrets without leaking how much of them matched.

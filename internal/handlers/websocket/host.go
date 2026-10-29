@@ -115,9 +115,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request, token string) {
 	}
 
 	sess := newConnSession(conn)
-	s.hub.Register(sess)
-	sess.OnClose(func(string) { s.hub.Unregister(sess.ID()) })
 
+	// The session is handed over unregistered: only the sealed wrapper above
+	// this package may enter the hub, because a broadcast through a raw session
+	// would be the one write in the program that is not encrypted.
 	if s.onSession != nil {
 		s.onSession(sess)
 	}
@@ -130,9 +131,15 @@ func listenAddress(bindAddress string, port int) string {
 	return fmt.Sprintf("%s:%d", bindAddress, port)
 }
 
-// allowed checks the shared secret. A client that does not send it, or sends
-// the wrong one, is refused before the upgrade: there is no plaintext way in.
+// allowed checks the shared secret when the host has one. A host with no
+// secret is pairing by device key: nothing is copied to the other device, so
+// there is no header to compare, and the end-to-end handshake behind this
+// connection is what authenticates the peer before any message is accepted.
 func allowed(w http.ResponseWriter, r *http.Request, token string) bool {
+	if token == "" {
+		return true
+	}
+
 	if !auth.Equal(r.Header.Get(auth.HeaderName), token) {
 		http.Error(w, "unauthorized: the shared secret is missing or wrong", http.StatusUnauthorized)
 

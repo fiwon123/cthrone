@@ -3,6 +3,8 @@ package websocketcore
 import (
 	"crypto/tls"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/e2e"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -85,7 +88,7 @@ func TestConnectAddress(t *testing.T) {
 
 // A missing address is an error the command can report, not a panic.
 func TestConnectWithoutAnAddressFails(t *testing.T) {
-	err := Connect(nil, app.New(8080), "", "", auth.TLS{})
+	err := Connect(nil, app.New(8080), pairing.Options{}, auth.TLS{})
 	if err == nil {
 		t.Fatal("expected the missing address to be an error")
 	}
@@ -105,7 +108,13 @@ func TestConnectReturnsTheConnectionError(t *testing.T) {
 		return nil, errors.New("no host in this test")
 	}
 
-	err := Connect([]string{"192.168.1.5"}, app.New(8080), "", "", auth.TLS{})
+	// The connection fails before a session exists, but the credential is
+	// resolved first; no test may read or create the real user's identity.
+	t.Setenv(auth.EnvToken, "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	err := Connect([]string{"192.168.1.5"}, app.New(8080), pairing.Options{}, auth.TLS{})
 	if err == nil {
 		t.Fatal("expected the connection to fail")
 	}
@@ -124,7 +133,7 @@ func TestDialReturnsASealedSession(t *testing.T) {
 
 	t.Setenv(auth.EnvToken, "")
 
-	s, err := Dial([]string{"192.168.1.5"}, app.New(8080), strings.Repeat("s", 32), "", auth.TLS{})
+	s, err := Dial([]string{"192.168.1.5"}, app.New(8080), pairing.Options{FlagToken: strings.Repeat("s", 32)}, auth.TLS{})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -143,7 +152,7 @@ func TestDialSendsTheHandshakeFirst(t *testing.T) {
 
 	t.Setenv(auth.EnvToken, "")
 
-	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), strings.Repeat("s", 32), "", auth.TLS{}); err != nil {
+	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), pairing.Options{FlagToken: strings.Repeat("s", 32)}, auth.TLS{}); err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 
@@ -163,7 +172,8 @@ func TestDialSendsTheHandshakeFirst(t *testing.T) {
 }
 
 // A secret too short to seal with is refused instead of used in the clear.
-// This is the fail-closed rule: there is no plaintext fallback to fall back to.
+// This is the fail-closed rule: there is no plaintext fallback to fall back to,
+// and the refusal happens before the socket is dialled.
 func TestDialRefusesAShortSecret(t *testing.T) {
 	stub := newStub()
 	restore := stubConnection(t, stub)
@@ -171,12 +181,8 @@ func TestDialRefusesAShortSecret(t *testing.T) {
 
 	t.Setenv(auth.EnvToken, "")
 
-	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), "short", "", auth.TLS{}); err == nil {
-		t.Fatal("expected a short secret to be refused")
-	}
-
-	if !stub.IsClosed() {
-		t.Error("expected the transport session to be closed, not left open")
+	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), pairing.Options{FlagToken: "short"}, auth.TLS{}); !errors.Is(err, e2e.ErrSecret) {
+		t.Fatalf("Dial with a short secret = %v, want ErrSecret", err)
 	}
 }
 
@@ -195,7 +201,7 @@ func TestConnectRunsTheTerminalOnASealedSession(t *testing.T) {
 
 	t.Setenv(auth.EnvToken, "")
 
-	if err := Connect([]string{"192.168.1.5"}, app.New(8080), strings.Repeat("s", 32), "", auth.TLS{}); err != nil {
+	if err := Connect([]string{"192.168.1.5"}, app.New(8080), pairing.Options{FlagToken: strings.Repeat("s", 32)}, auth.TLS{}); err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 
@@ -205,15 +211,50 @@ func TestConnectRunsTheTerminalOnASealedSession(t *testing.T) {
 }
 
 // The secret comes from the same places it always did, so a connection that
-// used to work with --token still does.
+// used to work with a token file still does.
 func TestDialUsesTheTokenFile(t *testing.T) {
+	stub := newStub()
+
+	var got string
+
+	original := connect
+	connect = func(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) (session.Session, error) {
+		got = token
+
+		return stub, nil
+	}
+	defer func() { connect = original }()
+
+	t.Setenv(auth.EnvToken, "")
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(strings.Repeat("s", 32)+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the token file: %v", err)
+	}
+
+	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), pairing.Options{TokenFile: path}, auth.TLS{}); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	if got != strings.Repeat("s", 32) {
+		t.Errorf("the connection carried %q, want the secret from the file", got)
+	}
+}
+
+// A token file that is configured but cannot be read is an error, not a reason
+// to pair: the user meant to use the secret.
+func TestDialRefusesAnUnreadableTokenFile(t *testing.T) {
 	stub := newStub()
 	restore := stubConnection(t, stub)
 	defer restore()
 
 	t.Setenv(auth.EnvToken, "")
 
-	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), "", "/nonexistent/cthrone-token", auth.TLS{}); err == nil {
+	// A directory is not a token file, and reading it fails with something
+	// other than "not exist" — which is the case that must not be swallowed.
+	path := t.TempDir()
+
+	if _, err := Dial([]string{"192.168.1.5"}, app.New(8080), pairing.Options{TokenFile: path}, auth.TLS{}); err == nil {
 		t.Fatal("expected an unreadable token file to be an error")
 	}
 }

@@ -19,13 +19,24 @@
 //
 // It does not hide that a conversation happened. Frame sizes, timing and the
 // subject or address are all still visible to whatever carries them; only the
-// payload is sealed. It does not give each device its own identity either: the
-// shared secret is the identity, so three devices holding it are three
-// identities with one name, and there is no revocation.
+// payload is sealed.
 //
-// The secret is now a key. An eavesdropper who recorded the ciphertext and
+// # Two credentials
+//
+// A shared secret keeps the original model: every device that holds it is the
+// same identity, which is fine for a pair and weak for a set. It is what a
+// configured secret speaks, so an older peer still meets a newer one on the
+// secret.
+//
+// With no secret configured a session speaks the device-key model instead: the
+// hello carries this device's public key and its signature, the peer pins the
+// key on first contact, and a key that changes under a pinned name is refused
+// rather than learned. Forgetting a pin is the way to revoke that trust.
+//
+// The secret is a key. An eavesdropper who recorded the ciphertext and
 // later learned the secret could read what they kept, so it belongs in the same
-// category as the token: never a flag, never a screenshot, never a log.
+// category as the token: never a flag, never a screenshot, never a log. A
+// device key is the same kind of material without the sharing.
 //
 // # There is no plaintext mode
 //
@@ -39,6 +50,7 @@ package e2e
 import (
 	"crypto/cipher"
 	"crypto/ecdh"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/subtle"
 	"errors"
@@ -46,6 +58,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fiwon123/cthrone/internal/discovery"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -85,13 +98,30 @@ const (
 )
 
 // Config is what a Conn needs besides the session.
+//
+// There are two credentials and exactly one is used. A secret is the original
+// model — one key shared by everyone who may talk — and it keeps the v1
+// handshake. An Identity with a Pins store is the per-device model: each device
+// signs its hello with its own key and the peer pins it on first contact, and
+// that is what a session with no configured secret runs.
 type Config struct {
 	// Secret is the shared secret. It is the identity of every device that
-	// holds it, and nothing else is needed to be one.
+	// holds it, and nothing else is needed to be one. Leave it empty to use
+	// Identity instead.
 	Secret []byte
 
+	// Identity is this device's long-term signing key. It must come with
+	// Pins: without somewhere to record a first contact there is no point at
+	// which a returning device could be recognized.
+	Identity *Identity
+
+	// Pins decides whether a peer's identity is accepted and records it on
+	// first contact. It is required with Identity and ignored without it.
+	Pins Pins
+
 	// Name is this device's name. It is part of the MAC transcript, so a peer
-	// cannot rename itself mid-handshake, and it is what the peer shows.
+	// cannot rename itself mid-handshake, and it is what the peer shows. It is
+	// also what the pin store keys a device by.
 	Name string
 
 	// Mode is Single (the zero value) or Bus.
@@ -140,9 +170,20 @@ var (
 type peer struct {
 	device string
 	key    []byte
+	nonce  []byte
 	tag    []byte
 	send   cipher.AEAD
 	recv   cipher.AEAD
+
+	// confirm is the key this peer's confirm MAC is computed with: the shared
+	// secret in the v1 handshake, the pairwise derived key in v2.
+	confirm []byte
+
+	// id is the peer's long-term device key in the v2 handshake, empty in v1.
+	// fingerprint and first are what the pin store said when it was seen.
+	id          []byte
+	fingerprint string
+	first       bool
 
 	// sendSeq is the next sequence number used to seal a payload for this
 	// peer; expect is the one the next payload from it must carry.
@@ -167,6 +208,13 @@ type Conn struct {
 	name   string
 	mode   Mode
 
+	// version is the handshake this session speaks, and identity and pins are
+	// the device-key model's half of it. They are empty in a secret session
+	// and never change after New.
+	version  int
+	identity *Identity
+	pins     Pins
+
 	priv  *ecdh.PrivateKey
 	key   []byte
 	tag   []byte
@@ -180,6 +228,45 @@ type Conn struct {
 	onPeer  func(Peer)
 }
 
+// credential decides which handshake the session speaks and checks that the
+// configured credential can actually run it.
+//
+// The two credentials are alternatives, not layers: a session that carries a
+// secret speaks v1, so an older peer still meets it on the secret, and a
+// session with no secret speaks v2 with this device's key. A session with
+// neither is an error rather than one that talks in the clear.
+func credential(cfg Config) (int, error) {
+	hasSecret := len(cfg.Secret) > 0
+	hasIdentity := cfg.Identity != nil
+
+	if hasSecret && hasIdentity {
+		return 0, fmt.Errorf("%w: a secret and a device key are two identities, configure one", ErrSecret)
+	}
+
+	if hasSecret {
+		if len(cfg.Secret) < MinSecret {
+			return 0, fmt.Errorf("%w: %d bytes of secret, at least %d are needed",
+				ErrSecret, len(cfg.Secret), MinSecret)
+		}
+
+		return Version, nil
+	}
+
+	if !hasIdentity {
+		return 0, fmt.Errorf("%w: no shared secret and no device key; set a secret to pair the old way, or leave it unset to pair with a device key", ErrSecret)
+	}
+
+	if len(cfg.Identity.Key) != ed25519.PrivateKeySize {
+		return 0, fmt.Errorf("%w: the device key is %d bytes, want %d", ErrIdentity, len(cfg.Identity.Key), ed25519.PrivateKeySize)
+	}
+
+	if cfg.Pins == nil {
+		return 0, fmt.Errorf("%w: a device key needs somewhere to pin peers", ErrIdentity)
+	}
+
+	return VersionIdentity, nil
+}
+
 // New wraps s and starts the handshake.
 //
 // The first thing it does is send this side's hello, so a session that is
@@ -190,9 +277,9 @@ func New(s session.Session, cfg Config) (*Conn, error) {
 		return nil, fmt.Errorf("%w: no session to wrap", ErrHandshake)
 	}
 
-	if len(cfg.Secret) < MinSecret {
-		return nil, fmt.Errorf("%w: %d bytes of secret, at least %d are needed",
-			ErrSecret, len(cfg.Secret), MinSecret)
+	version, err := credential(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
@@ -206,33 +293,30 @@ func New(s session.Session, cfg Config) (*Conn, error) {
 	}
 
 	c := &Conn{
-		Base:   session.NewBase(s.ID(), s.RemoteAddr()),
-		inner:  s,
-		secret: append([]byte(nil), cfg.Secret...),
-		name:   cfg.Name,
-		mode:   cfg.Mode,
-		priv:   priv,
-		key:    priv.PublicKey().Bytes(),
-		nonce:  nonce,
-		peers:  make(map[string]*peer),
+		Base:     session.NewBase(s.ID(), s.RemoteAddr()),
+		inner:    s,
+		secret:   append([]byte(nil), cfg.Secret...),
+		name:     cfg.Name,
+		mode:     cfg.Mode,
+		version:  version,
+		identity: cfg.Identity,
+		pins:     cfg.Pins,
+		priv:     priv,
+		key:      priv.PublicKey().Bytes(),
+		nonce:    nonce,
+		peers:    make(map[string]*peer),
 	}
 	c.tag = recipientTag(c.key)
 
 	s.OnClose(func(reason string) { c.shutdown(reason) })
 
 	// The hello goes out before the callback is installed, and that order is
-	// deliberate: it is the peer's hello that makes this side answer, so a
-	// callback installed afterwards cannot miss a reply to our own frame. A
-	// frame that somehow arrives first is not lost either — a confirm for a
-	// peer this side has not heard from is treated as one that carries its own
-	// hello.
-	if err := c.sendHandshake(handshake{
-		V:      Version,
-		Step:   stepHello,
-		Key:    c.key,
-		Nonce:  c.nonce,
-		Device: c.name,
-	}); err != nil {
+	// harmless because a transport session holds a frame that arrives before
+	// its OnMessage handler is set (session.Base) and replays it on install.
+	// So a peer's hello that crosses this side's own hello is still delivered,
+	// and a confirm for a peer this side has not heard from is treated as one
+	// that carries its own hello.
+	if err := c.sendHello(); err != nil {
 		return nil, err
 	}
 
@@ -286,7 +370,7 @@ func (c *Conn) OnPeer(fn func(Peer)) {
 			continue
 		}
 
-		known = append(known, Peer{Device: p.device, Key: append([]byte(nil), p.key...)})
+		known = append(known, Peer{Device: p.device, Key: append([]byte(nil), p.key...), Fingerprint: p.fingerprint, First: p.first})
 	}
 	c.mu.Unlock()
 
@@ -305,10 +389,40 @@ func (c *Conn) OnPeer(fn func(Peer)) {
 type Peer struct {
 	Device string
 	Key    []byte
+
+	// Fingerprint is the short, comparable form of the peer's device key in a
+	// device-key session. It is empty in a shared-secret session, which has no
+	// per-device identity to show.
+	Fingerprint string
+
+	// First is set when this was the first contact: the key had not been seen
+	// before and the pin store has just recorded it. It is the moment to ask
+	// the user to compare the fingerprint with the other screen.
+	First bool
 }
 
 // Name is what to call the peer when its device name may be empty.
 func (p Peer) Name() string { return peerName(p.Device) }
+
+// Fingerprint is this device's own fingerprint in the device-key model: the
+// value the other screen shows for it. It is empty in a shared-secret session,
+// which has no per-device identity to show.
+//
+// It is here because the comparison at first contact needs both values on one
+// screen: the peer's fingerprint arrives with the notice, and this is what the
+// user compares it with.
+func (c *Conn) Fingerprint() string {
+	if c.identity == nil {
+		return ""
+	}
+
+	pub := c.identity.Public()
+	if len(pub) != ed25519.PublicKeySize {
+		return ""
+	}
+
+	return discovery.Fingerprint(pub)
+}
 
 // Peers lists the peers whose confirm arrived, in the order they were heard.
 func (c *Conn) Peers() []Peer {
@@ -323,7 +437,7 @@ func (c *Conn) Peers() []Peer {
 			continue
 		}
 
-		out = append(out, Peer{Device: p.device, Key: append([]byte(nil), p.key...)})
+		out = append(out, Peer{Device: p.device, Key: append([]byte(nil), p.key...), Fingerprint: p.fingerprint, First: p.first})
 	}
 
 	return out
@@ -476,7 +590,7 @@ func (c *Conn) receiveFrame(m session.Message) {
 		return
 	}
 
-	h, err := decodeHandshake(frame.Payload)
+	h, err := decodeHandshake(frame.Payload, c.version)
 	if err != nil {
 		c.fail(err, "")
 
@@ -522,10 +636,12 @@ func (c *Conn) receiveHello(h handshake) {
 // rest as forgeries would let ordinary traffic end a room.
 //
 // A confirm for a peer this side has not heard from is a peer that answered our
-// hello before its own arrived — the two frames crossed. It carries the same
-// hello fields, and the MAC covers them, so it is recorded and answered once,
-// exactly as a hello would have been. Holding it back instead would deadlock a
-// peer whose hello was lost on the way.
+// hello before its own arrived — the two frames crossed, or on a bus the peer's
+// hello was broadcast before this side subscribed. In the device-key version it
+// carries the identity and signature its hello would have, so it is recorded,
+// authenticated and pinned exactly as a hello is, and answered once. In the
+// shared-secret version the MAC is proof enough. Holding it back instead would
+// leave a peer that joined a moment late unable to pair.
 func (c *Conn) receiveConfirm(h handshake) {
 	if subtle.ConstantTimeCompare(h.To, c.key) != 1 {
 		return
@@ -533,7 +649,7 @@ func (c *Conn) receiveConfirm(h handshake) {
 
 	p, fresh, err := c.record(h)
 	if err != nil {
-		c.fail(err, "")
+		c.fail(err, string(h.Key))
 
 		return
 	}
@@ -546,14 +662,39 @@ func (c *Conn) receiveConfirm(h handshake) {
 		return
 	}
 
-	want := confirmMAC(c.secret, transcript(c.ours(), h), h.To)
+	// The transcript is rebuilt from what this side recorded — the identity,
+	// the name and the nonce — not from the fields of the step that just
+	// arrived. A confirm that repeats a different name under the same ephemeral
+	// key therefore produces a MAC that does not match, and the name that is
+	// pinned and displayed stays the one the hello introduced.
+	theirs := h
+	if c.identity != nil {
+		theirs.Id = p.id
+		theirs.Device = p.device
+		theirs.Nonce = p.nonce
+	}
+
+	want := confirmMAC(p.confirm, c.transcriptFor(theirs), h.To)
 	if subtle.ConstantTimeCompare(want, h.MAC) != 1 {
-		c.fail(fmt.Errorf("%w: %q did not prove it holds the secret", ErrMAC, peerName(h.Device)), string(h.Key))
+		proof := "the secret"
+		if c.identity != nil {
+			proof = "its device key"
+		}
+
+		// The peer is left recorded rather than dropped: its ephemeral key is
+		// on the wire in the clear, so anyone could name it in a frame with a
+		// bad MAC, and dropping it would let a stranger silence a peer that is
+		// still working. It is unverified either way, so it can send nothing.
+		c.fail(fmt.Errorf("%w: %q did not prove it holds %s", ErrMAC, peerName(h.Device), proof), "")
 
 		return
 	}
 
-	c.markVerified(p)
+	if err := c.markVerified(p); err != nil {
+		c.fail(err, string(p.key))
+
+		return
+	}
 
 	if fresh {
 		if err := c.sendConfirm(h); err != nil {
@@ -563,17 +704,50 @@ func (c *Conn) receiveConfirm(h handshake) {
 }
 
 // sendConfirm answers a peer's hello (or a confirm that arrived in its place).
-// The MAC is addressed to that peer, so it is useless to anyone else.
+// The MAC is addressed to that peer, so it is useless to anyone else. In the
+// device-key version it repeats this side's identity and signature, so a peer
+// that never saw the hello can still authenticate the answer.
 func (c *Conn) sendConfirm(to handshake) error {
-	return c.sendHandshake(handshake{
-		V:      Version,
+	p := c.peerFor(string(to.Key))
+	if p == nil {
+		return fmt.Errorf("%w: no peer %q to answer", ErrHandshake, peerName(to.Device))
+	}
+
+	theirs := to
+	if c.identity != nil {
+		theirs.Id = p.id
+		theirs.Device = p.device
+		theirs.Nonce = p.nonce
+	}
+
+	confirm := handshake{
+		V:      c.version,
 		Step:   stepConfirm,
 		Key:    c.key,
 		Nonce:  c.nonce,
 		Device: c.name,
 		To:     to.Key,
-		MAC:    confirmMAC(c.secret, transcript(c.ours(), to), to.Key),
-	})
+		MAC:    confirmMAC(p.confirm, c.transcriptFor(theirs), to.Key),
+	}
+
+	if c.identity != nil {
+		confirm.Id = c.identity.Public()
+		confirm.Sig = ed25519.Sign(c.identity.Key, helloClaim(confirm))
+	}
+
+	return c.sendHandshake(confirm)
+}
+
+// sendHello opens the exchange. A device-key session signs it, which is what
+// ties the ephemeral exchange to the long-term identity the peer pins.
+func (c *Conn) sendHello() error {
+	h := c.ours()
+
+	if c.identity != nil {
+		h.Sig = ed25519.Sign(c.identity.Key, helloClaim(h))
+	}
+
+	return c.sendHandshake(h)
 }
 
 // sendHandshake writes one step into the session. It is called without the lock
@@ -589,7 +763,68 @@ func (c *Conn) sendHandshake(h handshake) error {
 
 // ours is this side's hello fields, which every transcript includes.
 func (c *Conn) ours() handshake {
-	return handshake{V: Version, Step: stepHello, Key: c.key, Nonce: c.nonce, Device: c.name}
+	h := handshake{V: c.version, Step: stepHello, Key: c.key, Nonce: c.nonce, Device: c.name}
+
+	if c.identity != nil {
+		h.Id = c.identity.Public()
+	}
+
+	return h
+}
+
+// transcriptFor is the version's transcript: the shared-secret one, or the
+// device-key one, which also covers both identities. theirs must carry the
+// identity this side recorded for the peer, which is the one the pin belongs
+// to; the callers copy it in, so a later step cannot substitute another.
+func (c *Conn) transcriptFor(theirs handshake) []byte {
+	ours := c.ours()
+
+	if c.identity == nil {
+		return transcript(ours, theirs)
+	}
+
+	return transcriptIdentity(ours, theirs)
+}
+
+// authenticate checks a peer's device identity.
+//
+// A shared-secret session has nothing to check here: the confirm MAC is the
+// proof, and it is checked when it arrives. A device-key session's hello is
+// itself the proof — the signature over the claim says the peer holds the
+// private half of the key it names — and the pin store says whether that key is
+// the one it had last time.
+//
+// Nothing is pinned here. What arrives at this point could be a hello that is
+// never answered, so the pin is recorded by markVerified, once the exchange has
+// completed.
+func (c *Conn) authenticate(h handshake) (string, bool, error) {
+	if c.identity == nil {
+		return "", false, nil
+	}
+
+	if len(h.Id) != ed25519.PublicKeySize || len(h.Sig) != ed25519.SignatureSize {
+		return "", false, fmt.Errorf("%w: %q presented no device key", ErrIdentity, peerName(h.Device))
+	}
+
+	if !ed25519.Verify(ed25519.PublicKey(h.Id), helloClaim(h), h.Sig) {
+		return "", false, fmt.Errorf("%w: %q did not prove it holds its device key", ErrIdentity, peerName(h.Device))
+	}
+
+	fingerprint, first, err := c.pins.Check(h.Id, h.Device)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: %w", ErrPin, err)
+	}
+
+	return fingerprint, first, nil
+}
+
+// peerFor returns the peer for an ephemeral key, or nil when it is not one this
+// side has recorded.
+func (c *Conn) peerFor(key string) *peer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.peers[key]
 }
 
 // record adds a peer the first time its key is seen and derives both keys from
@@ -598,8 +833,24 @@ func (c *Conn) record(h handshake) (*peer, bool, error) {
 	key := string(h.Key)
 
 	c.mu.Lock()
+	if p := c.peers[key]; p != nil {
+		c.mu.Unlock()
+
+		return p, false, nil
+	}
+	c.mu.Unlock()
+
+	// The identity is checked outside the lock: verifying a signature and
+	// asking the pin store both cost time, and neither needs the peer map.
+	fingerprint, first, err := c.authenticate(h)
+	if err != nil {
+		return nil, false, err
+	}
+
+	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// A peer that spoke while this side was checking is already recorded.
 	if p := c.peers[key]; p != nil {
 		return p, false, nil
 	}
@@ -624,13 +875,26 @@ func (c *Conn) record(h handshake) (*peer, bool, error) {
 	}
 
 	p := &peer{
-		device:  h.Device,
-		key:     append([]byte(nil), h.Key...),
-		tag:     recipientTag(h.Key),
-		send:    send,
-		recv:    recv,
-		sendSeq: firstSequence,
-		expect:  firstSequence,
+		device:      h.Device,
+		key:         append([]byte(nil), h.Key...),
+		nonce:       append([]byte(nil), h.Nonce...),
+		tag:         recipientTag(h.Key),
+		send:        send,
+		recv:        recv,
+		id:          append([]byte(nil), h.Id...),
+		fingerprint: fingerprint,
+		first:       first,
+		sendSeq:     firstSequence,
+		expect:      firstSequence,
+	}
+
+	if c.identity != nil {
+		p.confirm, err = deriveConfirmKey(shared, handshakeSalt(c.ours(), h), c.ours(), h)
+		if err != nil {
+			return nil, false, err
+		}
+	} else {
+		p.confirm = c.secret
 	}
 
 	c.peers[key] = p
@@ -702,8 +966,26 @@ func (c *Conn) fail(err error, key string) {
 	}
 }
 
-// markVerified accepts a peer's traffic and stops waiting for the handshake.
-func (c *Conn) markVerified(p *peer) {
+// markVerified accepts a peer's traffic and, on a device-key session, records
+// its pin. The pin is written before the peer is accepted: a store that cannot
+// be written is a reason to refuse, not something to carry in memory until the
+// process ends.
+//
+// A shared-secret session has nothing to pin — every device holding the secret
+// is the same identity — so it goes straight to accepting the peer.
+func (c *Conn) markVerified(p *peer) error {
+	c.mu.Lock()
+	id, name := p.id, p.device
+	c.mu.Unlock()
+
+	if c.identity != nil {
+		// Outside the lock: writing the pin store is disk I/O, and a callback
+		// that sends must not deadlock on the mutex.
+		if err := c.pins.Pin(id, name); err != nil {
+			return fmt.Errorf("%w: %w", ErrPin, err)
+		}
+	}
+
 	c.mu.Lock()
 
 	p.verified = true
@@ -714,7 +996,7 @@ func (c *Conn) markVerified(p *peer) {
 	}
 
 	handler := c.onPeer
-	info := Peer{Device: p.device, Key: append([]byte(nil), p.key...)}
+	info := Peer{Device: p.device, Key: append([]byte(nil), p.key...), Fingerprint: p.fingerprint, First: p.first}
 
 	c.mu.Unlock()
 
@@ -723,6 +1005,8 @@ func (c *Conn) markVerified(p *peer) {
 	if handler != nil {
 		handler(info)
 	}
+
+	return nil
 }
 
 // handshakeTimedOut closes a single-peer session whose handshake never

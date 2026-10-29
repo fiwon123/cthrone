@@ -42,9 +42,13 @@ internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
 internal/e2e/               the end-to-end layer every session is wrapped in
   ↓
-internal/data/app/          the in-memory configuration (the port, the bind address)
-  ↓
-internal/auth/              the shared secret and the TLS material: where they come from, how they are compared
+internal/chat/ + ui/        the terminal loop and the GUI, over one session.Session
+
+beside that stack:
+  internal/data/app/        the in-memory configuration (the port, the bind address)
+  internal/pairing/         the credential: the shared secret, or this device's key
+  internal/auth/            the shared secret and the TLS material
+  internal/discovery/       the device identity on disk, and the pins trusted on first contact
 ```
 
 The transport is chosen at the command level: `--nats` selects the NATS path,
@@ -61,11 +65,13 @@ in how they read and write.
 ## Project Structure
 
 ```text
-cmd/                 cobra commands: connect, host, scan, ui, recv, exec
+cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec
 internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
+internal/pairing/    the credential a session uses: the shared secret, or this device's key
 internal/auth/       the shared secret and the TLS material: where they come from, how they are compared
+internal/discovery/  the device identity on disk, the beacon, and the pins trusted on first contact
 internal/chat/       the terminal loop both transports run a session on
 internal/e2e/        the end-to-end layer every session is wrapped in
 internal/wire/       the CTH1 envelope and the file chunk arithmetic
@@ -125,18 +131,18 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 24 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 26 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (24 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
-  (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/recv`,
-  `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`, `internal/core/nats`,
-  `internal/core/websocket` (the scanner included), `internal/data/app`,
-  `internal/discovery`, `internal/e2e`, `internal/exec`,
-  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/session`,
-  `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its non-GUI settings
-  logic; the Fyne widgets are still unverified).
+- **Covered (26 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+  (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
+  `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`,
+  `internal/core/nats`, `internal/core/websocket` (the scanner included),
+  `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
+  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
+  `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
+  non-GUI settings logic; the Fyne widgets are still unverified).
 
 So a green `make check` proves:
 
@@ -208,21 +214,40 @@ Linux.
 - **Local testing**: run `make check` before pushing a feature branch. CI is not the gate for feature work; the local gate is.
 - **Version**: the binary reports the tag it was built from, injected with `-X` into `github.com/fiwon123/cthrone/cmd.Version`. A build without that variable reports `vx.x.x`.
 - **Ports**: 8080 by default, for both the websocket and the NATS path (`-p`).
-- **No authentication**: the transports are currently open. See "Security" below.
+- **No anonymous mode**: every session is authenticated and encrypted by one of
+  two credentials. See "Security" below.
 
 ### Security — read this before changing the transport
 
-Every session is authenticated and encrypted end to end with the shared
-secret, on both transports; `--tls` adds transport encryption on top. The
-model is the one issues #11 and #109 decided:
+Every session is authenticated and encrypted end to end, on both transports;
+`--tls` adds transport encryption on top. The model is the one issue #125
+decided, superseding #11/#109:
 
-- both transports require the **shared secret** — a client that does not know
-  it is refused — and `internal/e2e` wraps every session with it: an X25519
-  handshake authenticated by the secret, per-direction AES-256-GCM, and a
-  sequence number that fails a replayed frame. There is **no plaintext mode**
-  and no anonymous mode;
+- **exactly one credential authenticates a session**, and `internal/pairing`
+  chooses it once so the transports cannot disagree:
+  - **the device key**, when no secret is configured — the default. Each
+    device generates an ed25519 key (in the platform user configuration
+    directory: `~/.config/cthrone/identity.key` on Linux, `0600`), signs its
+    handshake hello with it, and the peer pins the key under the device's name
+    on first contact (`peers.json`, beside it). A different key under a pinned
+    name is **refused**, never re-pinned; `cthrone peers forget` is the way
+    back. **The pin is written only after the confirm authenticates the
+    peer** — a hello alone records nothing, or anyone could take a name from a
+    frame it never proved;
+  - **the shared secret**, when a flag, `CTHRONE_TOKEN` or a token file has a
+    value — the compatibility path a v0.6.0 peer speaks. Nothing generates one
+    any more: a minted token file would force every later run on that machine
+    into secret mode, and a fresh device pairing by key could not join it;
+- the handshake **version gates the models**: v1 is the shared secret, v2 is
+  the device key, and a peer that speaks the other one is refused rather than
+  downgraded. `internal/e2e` wraps every session either way: X25519, HKDF per
+  direction, AES-256-GCM, and a sequence number that fails a replayed frame.
+  In v2 the confirm repeats the device's key and signature, so a peer that
+  joins a NATS subject after the hello was broadcast is still authenticated;
 - the **websocket** transport additionally offers `--tls`, which encrypts the
-  connection and pins the host's certificate by its fingerprint;
+  connection and pins the host's certificate by its fingerprint. With a secret
+  configured the handler also compares that secret's header and answers `401`;
+  without one there is no header to compare, and the handshake is the gate;
 - the **NATS** transport sends the broker's credentials from the environment
   (`NATS_USER`, `NATS_PASSWORD`), and a `tls://` broker URL asks for an
   encrypted connection with the same pinning. Even without it, the broker
@@ -239,25 +264,42 @@ The rules that come with it:
   visible, and `--tls` is what encrypts the connection itself. On a websocket
   the host is the correspondent, not a relay, so the end-to-end layer protects
   the wire there and the peer on NATS;
+- **first contact is the only moment a machine in the middle can insert
+  itself**, and the fingerprint comparison is what closes it. Say that plainly
+  wherever pairing is described; a pin is only as good as the comparison. Each
+  screen therefore prints **both** fingerprints — the peer's and its own — so
+  the two values that have to agree are on both screens at once;
 - do not add a credential to a **command-line flag** — a flag value is visible
   in the process list. Use an environment variable or a file;
-- the secret is a key now, not just a password: never log it, print it, or put
-  it in a status line;
+- the secret and the device key are keys, not passwords: never log them, print
+  them, or put them in a status line;
 - the broker reads its password through its own configuration parser, so a
   password with a `#` or a quote in it does not survive the trip;
-- if you touch the transport, read issues #11 and #109 first: the security
-  model is a design decision, not an implementation detail, and it changes the
-  CLI surface.
+- if you touch the transport, read issues #11, #109 and #125 first: the
+  security model is a design decision, not an implementation detail, and it
+  changes the CLI surface.
 
 ## Environment and Secret-File Rules
 
 - The application holds no configuration file in the repository — the port is
   the only setting, and it comes from the command line.
-- The user's configuration directory **does** hold two files: the shared
-  secret (`~/.config/cthrone/token`, `0600`) and the TLS material
-  (`~/.config/cthrone/cert.pem` and `key.pem`, the key `0600`). They are
-  generated on first use, they are never committed, and the secret is the
-  one thing that must not be shared.
+- The user's configuration directory holds what the tool writes for itself:
+  this device's key (`identity.key`, `0600`), the pins it trusts
+  (`peers.json`, `0600` — public keys, but who you talk to is nobody else's
+  business), the TLS material (`cert.pem` and `key.pem`, the key `0600`), and,
+  only when one is configured, the shared secret (`token`, `0600`). They are
+  written on first use and never committed. The secret and the device key are
+  the two things that must not be shared; `peers.json` is the record that makes
+  the second one meaningful.
+- That directory is the one the **platform** provides, not a hard-coded
+  `~/.config`: `internal/discovery.ConfigDir` asks `os.UserConfigDir` and
+  appends `cthrone`, so it is `~/.config/cthrone` on Linux,
+  `~/Library/Application Support/cthrone` on macOS and `%AppData%\cthrone` on
+  Windows. The CLI and the desktop GUI both use it, so one machine is one
+  device; the phone app uses its own private storage, because a phone has no
+  user configuration directory to rely on. Tests isolate it with
+  `XDG_CONFIG_HOME`, which `os.UserConfigDir` honours — setting only `HOME` is
+  not isolation.
 - Never access `.env`, `.env.*`, `.envrc`, or any other environment/secret file without explicit permission.
 - Never open, read, print, summarize, quote, or send the contents of those files. `.env.example` is the one exception: it holds placeholders and is safe to read.
 - Read `.env.example` with the **Read tool**, not with `cat`. Bash denies cover every `.env*` path on purpose.

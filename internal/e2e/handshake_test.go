@@ -218,7 +218,7 @@ func TestDecodeHandshake(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := decodeHandshake(tt.payload)
+			_, err := decodeHandshake(tt.payload, Version)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("decodeHandshake(%s) = %v, wantErr %v", tt.name, err, tt.wantErr)
@@ -248,7 +248,7 @@ func TestEncodeHandshakeCarriesTheStep(t *testing.T) {
 		t.Fatalf("the frame is a %q, want a handshake", parsed.Header.Kind)
 	}
 
-	h, err := decodeHandshake(parsed.Payload)
+	h, err := decodeHandshake(parsed.Payload, Version)
 	if err != nil {
 		t.Fatalf("decoding the step: %v", err)
 	}
