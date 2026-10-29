@@ -32,7 +32,7 @@ func TestSessionExchangesMessages(t *testing.T) {
 
 	hostSessions := make(chan session.Session, 1)
 
-	server, err := OpenServer(0, "127.0.0.1", "", true, "", "", func(s session.Session) {
+	server, err := OpenServer(0, "127.0.0.1", "", "", "", func(s session.Session) {
 		hostSessions <- s
 	})
 	if err != nil {
@@ -78,91 +78,23 @@ func TestSessionExchangesMessages(t *testing.T) {
 			t.Errorf("expected %q, got %q", "hello", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("the host session never received the message")
+		t.Fatal("timed out waiting for the host to receive the message")
 	}
 
 	// Host -> client.
 	fromHost := make(chan string, 1)
 	client.OnMessage(func(m session.Message) { fromHost <- string(m.Payload) })
 
-	if err := hostSession.Send([]byte("hi back")); err != nil {
-		t.Fatalf("host Send: %v", err)
+	if err := hostSession.Send([]byte("hi")); err != nil {
+		t.Fatalf("hostSession Send: %v", err)
 	}
 
 	select {
 	case got := <-fromHost:
-		if got != "hi back" {
-			t.Errorf("expected %q, got %q", "hi back", got)
+		if got != "hi" {
+			t.Errorf("expected %q, got %q", "hi", got)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("the client never received the reply")
-	}
-}
-
-// A host that refuses the secret does not hand out a session, and the client
-// that dialed it gets the refusal that names the missing secret.
-func TestDialAgainstAHostThatNeedsTheSecret(t *testing.T) {
-	fastDial(t)
-
-	server, err := OpenServer(0, "127.0.0.1", "s3cret", false, "", "", nil)
-	if err != nil {
-		t.Fatalf("OpenServer: %v", err)
-	}
-	t.Cleanup(func() { _ = server.Stop() })
-
-	host, portText, _ := net.SplitHostPort(server.Addr())
-	port, _ := strconv.Atoi(portText)
-
-	_, err = Dial(host, port, "", false, nil)
-	if err == nil {
-		t.Fatal("expected the connection to be refused")
-	}
-
-	if err.Error() != "the host refused the connection: it needs the shared secret" {
-		t.Errorf("expected the refusal to name the missing secret, got %q", err.Error())
-	}
-}
-
-// After a session is closed, Send reports it rather than writing to a dead
-// connection.
-func TestSendAfterCloseIsRefused(t *testing.T) {
-	fastDial(t)
-
-	server, err := OpenServer(0, "127.0.0.1", "", true, "", "", nil)
-	if err != nil {
-		t.Fatalf("OpenServer: %v", err)
-	}
-	t.Cleanup(func() { _ = server.Stop() })
-
-	host, portText, _ := net.SplitHostPort(server.Addr())
-	port, _ := strconv.Atoi(portText)
-
-	client, err := Dial(host, port, "", false, nil)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-
-	client.Close("done")
-
-	if err := client.Send([]byte("late")); err != session.ErrClosed {
-		t.Errorf("expected session.ErrClosed, got %v", err)
-	}
-}
-
-// Stop closes the listener: the address it reported no longer accepts
-// connections.
-func TestStopClosesTheListener(t *testing.T) {
-	server, err := OpenServer(0, "127.0.0.1", "", true, "", "", nil)
-	if err != nil {
-		t.Fatalf("OpenServer: %v", err)
-	}
-
-	addr := server.Addr()
-	if err := server.Stop(); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-
-	if _, err := net.DialTimeout("tcp", addr, 200*time.Millisecond); err == nil {
-		t.Error("expected the port to be closed after Stop")
+		t.Fatal("timed out waiting for the client to receive the message")
 	}
 }

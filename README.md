@@ -52,24 +52,27 @@ there are two downloads: a **command-line program** that runs in a terminal app
 on the phone, and an **APK** — the same chat with a touch-friendly GUI, which
 installs like any other app. See [Android](#android) below.
 
-> **Security**: the websocket transport requires a **shared secret** — a
-> client that does not know it is refused — and it can be **encrypted** with
-> `--tls`, which pins the host's certificate. Without `--tls` the messages
-> travel in plaintext: use it on a network you trust. The NATS transport
-> sends the broker's credentials and can encrypt the connection the same
-> way. See
+> **Security**: every session is **end-to-end encrypted** with the shared
+> secret — a device that does not hold it cannot join, and cannot read what
+> passes between the ones that do, including a broker in the middle. The
+> secret is required; there is no anonymous mode. `--tls` adds transport
+> encryption on top and pins the host's certificate. See
 > [Security](#security) for how it is set up, and
-> [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the rest of
-> the work.
+> [issue #11](https://github.com/fiwon123/cthrone/issues/11) for the model.
 
 > **Status**: actively used, pre-1.0, and not yet covered by tests — see
 > [How to develop](#how-to-develop).
 
 ## Security
 
-The websocket transport needs a **shared secret**: a client that does not
-present it is refused with a `401` before any session starts. The secret is
-read from the first of these that has a value:
+Both transports need a **shared secret**: a websocket client that does not
+present it is refused with a `401` before any session starts, and the NATS
+transport reads the same secret. It does two jobs: it is the password that
+lets a device in, and it is the material both devices derive their encryption
+keys from. A device that presents the wrong one cannot complete the handshake,
+and the session ends with a message saying why. There is no anonymous mode.
+
+The secret is read from the first of these that has a value:
 
 | Source | How |
 |---|---|
@@ -82,18 +85,28 @@ token file with `0600` — a secret every process on the machine can read is
 not a secret. It is never replaced afterwards, so two devices that share the
 file keep agreeing.
 
-Two flags change the shape of it:
+One flag changes the shape of it:
 
 - `--host <address>` binds the server to one interface instead of every
   interface. The default is every interface, because the tool is a chat
   between two devices on the same network.
-- `--allow-anonymous` on the host lets clients in without the secret. It is
-  opt-in, it prints a warning, and it is how the tool behaved before the
-  secret existed.
 
 ### Encryption
 
-`--tls` encrypts the transport: the host serves `https`, and the client
+Every session is encrypted end to end with the shared secret, whatever the
+transport. Each pair of devices runs a handshake when they meet — a X25519 key
+exchange, folded into a per-direction key with HKDF — and every message after
+it travels as AES-256-GCM ciphertext with a sequence number that makes a
+replayed or reordered frame fail. The handshake itself is authenticated by the
+secret, so a device without it cannot make a session look encrypted and cannot
+read one.
+
+That is what makes the NATS transport private: **the broker carries
+ciphertext**. It sees that two devices are talking on a subject and nothing
+about what they say. Over a websocket the host is your correspondent rather
+than a relay, so the end-to-end layer protects the wire, not the peer.
+
+`--tls` adds **transport** encryption: the host serves `https`, and the client
 connects over `wss://`.
 
 The host's certificate is **self-signed** — there is no certificate
@@ -124,8 +137,8 @@ still encrypted; the host is simply not checked, which means anyone who can
 intercept the connection can present their own. It is for a trusted network,
 and it has to be asked for.
 
-Without `--tls` the messages travel in plaintext: the secret decides who may
-join, it does not hide what is said.
+Without `--tls` the connection itself is not encrypted: what is said is
+sealed, but who is talking to whom, and how much, is visible on the wire.
 
 ## How to use
 
@@ -225,6 +238,12 @@ join, it does not hide what is said.
    not outlive the session it happened in, and the broker has no messages
    to clean up.
 
+   **The broker cannot read the messages.** Every payload is sealed with the
+   shared secret before it is published, so the broker carries ciphertext:
+   it can tell that something was sent on a subject, not what it said. The
+   `--token`, `--token-file` and `CTHRONE_TOKEN` values are what it needs to
+   be private, and both devices need the same one.
+
    **The connection to the broker can be encrypted** the same way the
    websocket one is: give the URL the `tls://` scheme and pin the
    broker's certificate.
@@ -251,7 +270,7 @@ download before running it.
 | Android (arm64), app | `*_android_gui_arm64.apk` | copy it to the phone and tap it, or `adb install <file>` — see [Android app](#android-app-arm64) |
 | Android (arm64), CLI | `*_android.zip` / `.tar.gz` | **CLI, not an app** — runs in Termux; see [Android CLI](#android-cli-arm64-termux) |
 
-The desktop GUI (`cthrone ui`) ships as its own archive, so a terminal-only
+The desktop GUI (`cthrone_gui`) ships as its own archive, so a terminal-only
 user does not download a window toolkit:
 
 | Platform | Archive | Notes |
@@ -262,6 +281,12 @@ user does not download a window toolkit:
 
 Each archive carries both `cthrone` and the short alias `ct`, so `ct host`
 works the moment the folder is on your PATH.
+
+The GUI archive adds `cthrone_gui` — the binary that opens the window — and, on
+Linux, a menu entry the installer registers with a launcher icon it writes into
+the XDG directories itself. No archive carries an icon file: the window icon is
+embedded in `cthrone_gui`, and the launcher copy only exists once it is
+installed.
 
 ### Android
 
@@ -284,7 +309,8 @@ adb install cthrone_<tag>_android_gui_arm64.apk
 
 The app has three tabs:
 
-- **Chat** — the conversation, a send field and a stop button.
+- **Chat** — the conversation, a send field and a stop button. Tap a message to
+  copy it; **Copy all** copies the whole conversation.
 - **Setup** — the port, the shared secret, the transport (NATS or websocket)
   and the TLS options, with **Host** and **Connect**.
 - **Devices** — **Scan network** walks the local subnet for a host on the chat
@@ -326,7 +352,8 @@ What the Android CLI does and does not give you:
 - the archive carries **no installer script** (Linux, macOS and Windows ship
   one); to type `cthrone` from any directory, add the folder to `PATH` yourself,
   e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
-- `cthrone ui` is desktop-only; the APK above is the phone equivalent.
+- the desktop GUI ships as `cthrone_gui` in its own archive; the APK above is
+  the phone equivalent, and `cthrone ui` in this archive only prints a message.
 - **neither Android download is verified on a device.** Both are cross-compiled
   and published; nothing in this project's CI installs the APK or runs the
   binary on a phone or an emulator, so "built for Android" is a build claim, not
@@ -342,7 +369,7 @@ What the Android CLI does and does not give you:
 | `cthrone host` | host the chat server and wait for a client |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
 | `cthrone scan` | scan the local subnet for chat servers (shows device names when discovered) |
-| `cthrone ui` | launch the Fyne GUI (desktop; build with `-tags gui` and required system libraries) |
+| `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
 | `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
 
@@ -354,8 +381,7 @@ What the Android CLI does and does not give you:
 | `--token` | the shared secret — **visible in the process list**, so prefer the environment or the file |
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
-| `--allow-anonymous` | let clients join without the shared secret |
-| `--name` | device name announced on the network (stored in `~/.config/cthrone/device.json`) |
+| `--name` | device name shown to the peer in an encrypted session; the host also announces it on the network |
 | `--tls` | encrypt the transport: the host serves https, the client expects it |
 | `--cert-fingerprint` | the fingerprint of the certificate to pin, with `--tls` |
 | `--insecure` | accept any certificate, with `--tls` |
@@ -534,6 +560,12 @@ An address that already carries a port is used as it is:
 - **"it needs the shared secret"** — the two devices do not have the same
   secret. Copy `~/.config/cthrone/token` from the host, or set
   `CTHRONE_TOKEN` to the same value on both sides.
+- **"e2e: unusable shared secret"** — the secret on one side is shorter than
+  16 bytes, so it is not used as a key. Point both devices at the generated
+  token file or give them the same long value.
+- **"e2e: handshake MAC mismatch"** — the handshake reached a device with a
+  different secret. The session is refused rather than falling back to
+  plaintext; make the two secrets match.
 - **"it is serving TLS, add --tls"** — the host was started with `--tls` and
   the client was not. Add `--tls` to the client, and give it the
   `--cert-fingerprint` the host printed.

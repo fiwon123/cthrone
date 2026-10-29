@@ -167,6 +167,39 @@ jobs:
       - name: make gui-linux
         run: make gui-linux VERSION="$VERSION"
 
+      # The window icon is embedded in the binary, and the only icon file on
+      # disk is the one add_to_path.sh writes at install time. So the archive
+      # must carry none — a PNG next to the binaries is read by nothing — and
+      # the menu entry must name the GUI binary, because the archive's
+      # `cthrone` is the command-line tool that only prints "GUI not built".
+      - name: Check the archive carries no loose icon files
+        run: |
+          status=0
+          for archive in build/GUI/*_linux_gui_amd64.tar.gz; do
+            listing=$(tar tzf "$archive")
+            if printf '%s\n' "$listing" | grep -Ei '\.(png|ico|icns)$'; then
+              echo "error: $archive ships an icon file — the icon belongs in the binary, and add_to_path.sh writes the launcher copy" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose icon file"
+            fi
+            for member in cthrone_gui add_to_path.sh cthrone.desktop; do
+              if printf '%s\n' "$listing" | grep -qx "$member"; then
+                echo "ok: $archive lists $member"
+              else
+                echo "error: $archive does not list $member" >&2
+                status=1
+              fi
+            done
+            if tar xzOf "$archive" cthrone.desktop | grep -qx 'Exec=cthrone_gui'; then
+              echo "ok: the menu entry runs cthrone_gui"
+            else
+              echo "error: cthrone.desktop does not run cthrone_gui — the menu entry would print \"GUI not built\" and exit 0" >&2
+              status=1
+            fi
+          done
+          exit $status
+
       - name: Upload the Linux GUI archive
         uses: actions/upload-artifact@v7
         with:
@@ -196,23 +229,39 @@ jobs:
       - name: Install the mingw-w64 cross compiler
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 zip
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64 zip unzip
 
       - name: make gui-windows
         run: make gui-windows VERSION="$VERSION"
 
       # The icon is a PE resource, so its absence is invisible until someone
-      # opens Explorer on Windows. Check the section here instead: a build that
-      # lost rsrc_windows_amd64.syso fails the job rather than shipping.
-      - name: Check the exes carry the icon resource
+      # opens Explorer on Windows — and so is its accidental spread to the CLI
+      # exes, which need none. Check both directions here, plus the archive: a
+      # loose .ico is never read by Windows, so shipping one is only bloat.
+      - name: Check the icon reaches cthrone_gui.exe and nothing else
         run: |
           status=0
-          for exe in build/GUI/Windows/cthrone_gui.exe build/GUI/Windows/cthrone.exe; do
-            if x86_64-w64-mingw32-objdump -h "$exe" | grep -q '\.rsrc'; then
-              echo "ok: $exe has a .rsrc section"
-            else
-              echo "error: $exe carries no .rsrc section — the icon is missing" >&2
+          gui=build/GUI/Windows/cthrone_gui.exe
+          if x86_64-w64-mingw32-objdump -h "$gui" | grep -q '\.rsrc'; then
+            echo "ok: $gui carries the icon resource"
+          else
+            echo "error: $gui carries no .rsrc section — the icon is missing" >&2
+            status=1
+          fi
+          for cli in build/GUI/Windows/cthrone.exe build/GUI/Windows/ct.exe; do
+            if x86_64-w64-mingw32-objdump -h "$cli" | grep -q '\.rsrc'; then
+              echo "error: $cli carries a .rsrc section — the CLI needs no icon" >&2
               status=1
+            else
+              echo "ok: $cli carries no icon resource"
+            fi
+          done
+          for archive in build/GUI/Windows/*_windows_gui_amd64.zip; do
+            if unzip -l "$archive" | grep -qi '\.ico$'; then
+              echo "error: $archive ships a loose .ico — Windows never reads it" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose .ico"
             fi
           done
           exit $status
@@ -244,6 +293,22 @@ jobs:
 
       - name: make gui-darwin
         run: make gui-darwin VERSION="$VERSION"
+
+      # Finder reads an .icns inside a .app bundle, never a PNG beside the
+      # binary, and the window icon comes from the embedded copy — so an icon
+      # file in this archive is dead weight.
+      - name: Check the archive carries no loose icon files
+        run: |
+          status=0
+          for archive in build/GUI/*_darwin_gui_arm64.tar.gz; do
+            if tar tzf "$archive" | grep -Ei '\.(png|ico|icns)$'; then
+              echo "error: $archive ships an icon file — nothing on macOS reads it" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose icon file"
+            fi
+          done
+          exit $status
 
       - name: Upload the macOS GUI archive
         uses: actions/upload-artifact@v7

@@ -10,18 +10,11 @@ type Data struct {
 	// the same network needs.
 	Host string
 
-	// AllowAnonymous lets a client join a session without the shared
-	// secret. It is opt-in: a host that requires no credential is the
-	// state the tool was in before, and it should never be the state it
-	// is in by accident.
-	AllowAnonymous bool
-
 	// Name is the device name announced on the network.
 	Name string
 }
 
 func New(port int) *Data {
-
 	return &Data{
 		Port: port,
 	}

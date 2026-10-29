@@ -32,7 +32,7 @@ through a NATS broker.
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
-- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--allow-anonymous`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The only files written are the shared secret and the TLS material, generated on first use: in `~/.config/cthrone` for the CLI and the desktop GUI, and in the app's private storage on Android
+- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The only files written are the shared secret and the TLS material, generated on first use: in `~/.config/cthrone` for the CLI and the desktop GUI, and in the app's private storage on Android
 - **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container. The APK is the exception: it needs the Android SDK, an NDK and the `fyne` CLI, so it is built in CI
 
 ## Architecture
@@ -82,6 +82,10 @@ read and write.
   desktop GUI and the Android APK, and the same code can become an iOS build;
   a second UI in a second language would have duplicated the transports and the
   security model. (2026-10, issue #84; supersedes issue #9)
+- **Encryption is built in, not opt-in** — the shared secret is both the
+  credential and the key, every session is sealed on both transports, and a
+  peer that cannot authenticate is refused rather than downgraded to
+  plaintext. There is no anonymous mode. (2026-10, issues #11/#109)
 
 ## Topology
 
@@ -101,6 +105,9 @@ internal/core/       one package per transport (websocket, nats)
 internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
 internal/auth/       the shared secret and the TLS material
+internal/chat/       the terminal loop both transports run a session on
+internal/e2e/        the end-to-end layer every session is wrapped in
+internal/wire/       the CTH1 envelope and the file chunk arithmetic
 internal/discovery/  the device identity kept on disk
 internal/exec/       the allowlist behind `recv`/`exec`
 internal/session/    the message hub the GUI uses
@@ -129,13 +136,13 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, and a draft-release workflow that builds and attaches them all. `v0.5.0` is the published release.
-- **Defaults, not guarantees**: the websocket transport requires the shared secret unless the host passes `--allow-anonymous`; encryption is **opt-in** — `--tls` on the websocket path, a `tls://` NATS URL (with `--cert-fingerprint`, or `--insecure`) on the NATS path; the websocket host binds **every interface** unless `--host` narrows it; and a NATS deployment is only as protected as its broker. The model behind these is issue #11.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, and a draft-release workflow that builds and attaches them all. `v0.5.6` is the published release.
+- **Encrypted by default**: every session is sealed with the shared secret on both transports — X25519 + HKDF per direction, AES-256-GCM, a sequence number that fails a replay — and there is no plaintext or anonymous mode. `--tls` adds transport encryption (websocket `https`/`wss://`, a `tls://` NATS URL), pinned with `--cert-fingerprint` or skipped with `--insecure`. What stays visible is the shape: frame sizes, timing, and the subject or address. On a websocket the host is the correspondent, so the end-to-end layer protects the wire; on NATS it protects the payload from the broker. The model is issues #11 and #109.
 - **Open**: see Backlog.
 
 ## Backlog
 
-1. Publish the `v0.5.6` draft — it is built from `c83b57f` and waits for a human to press publish.
+1. Publish the `v0.6.0` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
 2. Delete the leftover `feature/*` branches — the branch gate rejects their names.
 3. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
 4. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
@@ -147,13 +154,14 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - The websocket transport defaults to port `8080` on **every interface**; the
   client dials `ws://` (or `wss://` with `--tls`) and the server serves https
   under the same flag. The host generates a shared secret on its first run
-  (`~/.config/cthrone/token`, mode `0600`) and refuses a client that does not
-  send it, unless the host passed `--allow-anonymous`. With `--tls` the host's
+  (`~/.config/cthrone/token`, mode `0600`), refuses a client that does not
+  send it, and seals every session with it. With `--tls` the host's
   certificate is pinned by `--cert-fingerprint`; `--insecure` keeps the
-  encryption but skips that check. See issue #11 for the model.
+  encryption but skips that check. See issues #11 and #109 for the model.
 - The `docker-compose.yml` broker requires the credentials in `NATS_USER` and
   `NATS_PASSWORD` (`nats.conf`), and runs **without** JetStream, so a
-  conversation does not outlive the session it happened in.
+  conversation does not outlive the session it happened in. It carries
+  ciphertext, because every payload is sealed before it is published.
 - `docker-compose.yml` is a convenience for local experiments, not a
   dependency: the build, the gate, and the websocket transport need nothing
   but Go.

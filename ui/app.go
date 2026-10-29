@@ -5,22 +5,27 @@
 // It is built with -tags gui: without that tag ui.Run is the stub in
 // app_nogui.go and the CLI does not need the GUI toolkit. The desktop app and
 // the Android/iOS app share this file; the only differences are the entry
-// point (cmd/ui for the desktop, mobile/main.go for the APK) and the touch
-// adjustments made when CurrentDevice().IsMobile() is true.
+// point (cmd/ui for the desktop, mobile/main.go for the APK) and the layout
+// adjustments made on a narrow screen (see layoutFor in layout.go).
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -29,14 +34,14 @@ import (
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
+	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
-const (
-	// maxMessages bounds the chat log: a window left open for hours must not
-	// grow without limit.
-	maxMessages = 500
-)
+// copyHintDuration is how long the transcript's "Copied" confirmation stays on
+// screen. A tap that shows nothing reads as a tap that did nothing.
+const copyHintDuration = 2 * time.Second
 
 // liveServer is the part of a websocket host the GUI needs. Keeping it an
 // interface means the UI does not import the handler package.
@@ -51,6 +56,12 @@ type gui struct {
 	win    fyne.Window
 	mobile bool
 
+	// lay is how the rows are arranged for this screen. It is decided once,
+	// while the window is built: on a phone the canvas has no size yet, so
+	// layoutFor treats it as narrow, and the rows stay stacked in both
+	// orientations instead of reflowing under the user's finger.
+	lay screenLayout
+
 	// setup
 	portEntry        *widget.Entry
 	bindEntry        *widget.Entry
@@ -63,26 +74,35 @@ type gui struct {
 	tlsCheck         *widget.Check
 	insecureCheck    *widget.Check
 	natsCheck        *widget.Check
-	anonymousCheck   *widget.Check
 
 	// setup layout: the form is rebuilt whenever the mode changes, because a
 	// Fyne Form always renders a label for every item it holds.
 	moreOptions bool
 	moreBtn     *widget.Button
-	securityRow *fyne.Container
 	formHolder  *fyne.Container
 	transport   *widget.Select
 	hint        *widget.Label
 
 	// chat
-	tabs     *container.AppTabs
-	status   *widget.Label
-	chatLog  *widget.Label
-	scroll   *container.Scroll
-	entry    *widget.Entry
-	sendBtn  *widget.Button
-	stopBtn  *widget.Button
-	messages []string
+	tabs      *container.AppTabs
+	status    *widget.Label
+	chatList  *widget.List
+	entry     *widget.Entry
+	sendBtn   *widget.Button
+	stopBtn   *widget.Button
+	attachBtn *widget.Button
+	copyHint  *widget.Label
+	messages  []chatMessage
+
+	// transfers
+	//
+	// outbox is the queue the picker feeds and one worker drains, so two files
+	// picked in a row are two transfers in order rather than two interleaved
+	// streams. cancels is how Stop reaches a transfer that is still running.
+	outbox    chan outgoing
+	cancels   map[string]context.CancelFunc
+	incoming  map[string]*incomingTransfer
+	assembler *wire.Assembler
 
 	// devices
 	beacons    []discovery.Beacon
@@ -173,26 +193,73 @@ func Run() {
 
 // build creates every widget and lays the window out.
 func (g *gui) build() {
+	g.lay = layoutFor(g.mobile, g.canvasWidth())
+
 	// --- chat ---------------------------------------------------------
-	logo := widget.NewIcon(appIcon())
-	title := widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	var header *fyne.Container
-	if logo != nil {
-		header = container.NewHBox(logo, title)
-	} else {
-		header = container.NewHBox(title)
+	// The desktop window already says "cthrone" in its title bar, so the header
+	// carries only what a title bar cannot: the name on a phone, which has no
+	// title bar to show it in, the copy confirmation, and the copy-all action.
+	g.copyHint = widget.NewLabel("")
+
+	copyLabel := "Copy all"
+	if g.lay.Stack {
+		// The icon is enough where width is scarce.
+		copyLabel = ""
 	}
+
+	copyBtn := widget.NewButtonWithIcon(copyLabel, theme.ContentCopyIcon(), g.copyAll)
+
+	// The Files action lives beside the transcript rather than in Setup: it is
+	// about what happens to a received file, which is a chat concern, and Setup
+	// is the connection form.
+	filesLabel := "Files"
+	if g.lay.Stack {
+		filesLabel = ""
+	}
+
+	filesBtn := widget.NewButtonWithIcon(filesLabel, theme.FolderIcon(), g.showFiles)
+
+	header := container.NewHBox()
+	if g.mobile {
+		header.Add(widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	}
+
+	header.Add(layout.NewSpacer())
+	header.Add(g.copyHint)
+	header.Add(filesBtn)
+	header.Add(copyBtn)
 
 	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
 	g.status.Wrapping = fyne.TextWrapWord
 
-	g.chatLog = widget.NewLabel("")
-	g.chatLog.Wrapping = fyne.TextWrapWord
-	g.chatLog.Selectable = true
+	// One row per message, not one label holding the whole log: appending then
+	// costs a row instead of a re-wrap of every line, and a row is a tap target
+	// a finger can hit.
+	//
+	// A row is a container rather than a label because a file transfer needs
+	// more than a sentence: a picture draws itself under the caption, and a
+	// received file offers the Save action the terminal has no room for. Both
+	// parts stay hidden on a text row, so a message costs the same two hidden
+	// objects it did not have before and nothing else.
+	g.chatList = widget.NewList(
+		func() int { return len(g.messages) },
+		func() fyne.CanvasObject {
+			row := widget.NewLabel("")
+			row.Wrapping = fyne.TextWrapWord
 
-	g.scroll = container.NewVScroll(g.chatLog)
-	g.scroll.SetMinSize(fyne.NewSize(320, 180))
+			pic := canvas.NewImageFromResource(nil)
+			pic.FillMode = canvas.ImageFillContain
+			pic.Hide()
+
+			save := widget.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil)
+			save.Hide()
+
+			return container.NewVBox(row, pic, save)
+		},
+		g.updateChatRow,
+	)
+	g.chatList.OnSelected = g.selectChatRow
 
 	g.entry = widget.NewEntry()
 	g.entry.SetPlaceHolder("Type a message…")
@@ -204,25 +271,35 @@ func (g *gui) build() {
 	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
 	g.stopBtn.Disable()
 
-	copyBtn := widget.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), func() {
-		if g.app != nil {
-			g.app.Clipboard().SetContent(strings.Join(g.messages, "\n"))
-		}
-	})
+	attachLabel := "Attach"
+	if g.lay.Stack {
+		// The paperclip says it on a phone, where the row has no width to spare.
+		attachLabel = ""
+	}
+
+	g.attachBtn = widget.NewButtonWithIcon(attachLabel, theme.MailAttachmentIcon(), g.pickFile)
+	g.attachBtn.Disable()
+
+	// The queue starts with the window and outlives any one session: a file
+	// picked while the connection is being replaced still has a worker to hand
+	// it to, and that worker reports the failure if there is nothing to send to.
+	g.outbox = make(chan outgoing, 32)
+	go g.pumpOutbox()
 
 	var input fyne.CanvasObject
-	if g.mobile {
-		// Touch: a full-width field, and two large targets below it.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(3, g.stopBtn, g.sendBtn, copyBtn))
+	if g.lay.Stack {
+		// Touch: a full-width field, and the two actions below it, stacked
+		// one per line when even two do not fit.
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.attachBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, copyBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.attachBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
 		container.NewVBox(container.NewPadded(header), container.NewPadded(g.status), widget.NewSeparator()),
 		container.NewPadded(input),
 		nil, nil,
-		g.scroll,
+		g.chatList,
 	)
 
 	// --- setup --------------------------------------------------------
@@ -257,15 +334,11 @@ func (g *gui) build() {
 	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
-	g.anonymousCheck = widget.NewCheck("Allow anonymous clients (no shared secret)", nil)
-	g.anonymousCheck.SetChecked(true)
 
 	g.moreBtn = widget.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
 		g.rebuildSetupForm()
 	})
-
-	g.securityRow = container.NewHBox(g.anonymousCheck, g.moreBtn)
 
 	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
 		g.natsCheck.SetChecked(s == "NATS")
@@ -316,22 +389,85 @@ func (g *gui) build() {
 	)
 	g.beaconList.OnSelected = g.selectBeacon
 
+	// The beacon hint wraps on a phone, where the button and the sentence do
+	// not share a line without the sentence running off the screen.
+	var beaconHeader fyne.CanvasObject
+	beaconHint := widget.NewLabel("UDP beacons on port 9999")
+	beaconHint.Wrapping = fyne.TextWrapWord
+	if g.lay.Stack {
+		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
+	} else {
+		beaconHeader = container.NewHBox(g.scanBtn, beaconHint)
+	}
+
 	devices := container.NewBorder(
 		container.NewVBox(
-			container.NewPadded(container.NewHBox(g.scanBtn, widget.NewLabel("UDP beacons on port 9999"))),
+			container.NewPadded(beaconHeader),
 			widget.NewSeparator(),
 		),
 		nil, nil, nil,
 		g.beaconList,
 	)
 
+	// On a narrow screen an icon costs the width its label needs, so the tabs
+	// keep the names and drop the icons; the label alone is still the whole
+	// target.
+	tab := func(label string, icon fyne.Resource, content fyne.CanvasObject) *container.TabItem {
+		if g.lay.Stack {
+			return container.NewTabItem(label, content)
+		}
+
+		return container.NewTabItemWithIcon(label, icon, content)
+	}
+
 	g.tabs = container.NewAppTabs(
-		container.NewTabItemWithIcon("Chat", theme.MailComposeIcon(), chat),
-		container.NewTabItemWithIcon("Setup", theme.SettingsIcon(), setup),
-		container.NewTabItemWithIcon("Devices", theme.ComputerIcon(), devices),
+		tab("Chat", theme.MailComposeIcon(), chat),
+		tab("Setup", theme.SettingsIcon(), setup),
+		tab("Devices", theme.ComputerIcon(), devices),
 	)
 
 	g.win.SetContent(g.tabs)
+	g.registerTabShortcuts()
+}
+
+// registerTabShortcuts makes the tab bar reachable without the pointer.
+//
+// Plain Tab is deliberately left alone: inside a form it moves focus between
+// widgets, and the Setup tab is a form. Ctrl+Tab is the page-switch gesture
+// browsers and editors already teach, and Ctrl+←/→ is the arrow-key spelling of
+// the same move. None of the four is taken by Fyne: the driver only routes
+// Tab+Shift to focus traversal.
+func (g *gui) registerTabShortcuts() {
+	canvas := g.win.Canvas()
+	if canvas == nil {
+		return
+	}
+
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift},
+		func(fyne.Shortcut) { g.cycleTab(-1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyRight, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyLeft, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(-1) },
+	)
+}
+
+// cycleTab moves delta tabs along the ring, wrapping at both ends.
+func (g *gui) cycleTab(delta int) {
+	if g.tabs == nil {
+		return
+	}
+
+	g.tabs.SelectIndex(nextTabIndex(g.tabs.SelectedIndex(), len(g.tabs.Items), delta))
 }
 
 // rebuildSetupForm lays out the rows the current configuration uses.
@@ -356,8 +492,8 @@ func (g *gui) rebuildSetupForm() {
 		{Text: "Port", Widget: g.portEntry},
 		{Text: "Transport", Widget: g.transport},
 	}
-	if view.Security {
-		items = append(items, &widget.FormItem{Text: "Security", Widget: g.securityRow})
+	if view.Options {
+		items = append(items, &widget.FormItem{Text: "Options", Widget: g.moreBtn})
 	}
 	if view.SharedSecret {
 		items = append(items, &widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry})
@@ -424,7 +560,7 @@ func (g *gui) connect() {
 		)
 
 		if useNATS {
-			sess, err = natscore.OpenSession([]string{subject}, data, broker, tlsConf)
+			sess, err = natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
 		} else {
 			sess, err = websocketcore.Dial([]string{host}, data, token, tokenFile, tlsConf)
 		}
@@ -436,13 +572,13 @@ func (g *gui) connect() {
 			return
 		}
 
-		g.attach(sess)
-
 		if useNATS {
 			g.setStatus("Connected through NATS on " + broker)
 		} else {
 			g.setStatus("Connected to " + host + " — chatting")
 		}
+
+		g.attach(sess)
 	}()
 }
 
@@ -461,7 +597,7 @@ func (g *gui) host() {
 
 	go func() {
 		if useNATS {
-			sess, err := natscore.OpenSession([]string{subject}, data, broker, tlsConf)
+			sess, err := natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
 			if err != nil {
 				g.setStatus("Host failed")
 				g.showError(err)
@@ -469,16 +605,16 @@ func (g *gui) host() {
 				return
 			}
 
-			g.attach(sess)
 			g.setStatus("Hosting through NATS on " + broker)
+			g.attach(sess)
 			g.tabs.SelectIndex(0)
 
 			return
 		}
 
 		handle, err := websocketcore.OpenServer(data, token, tokenFile, tlsConf, func(sess session.Session) {
-			g.attach(sess)
 			g.setStatus("A device joined — chatting")
+			g.attach(sess)
 		})
 		if err != nil {
 			g.setStatus("Host failed")
@@ -535,11 +671,18 @@ func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
 }
 
 // stop closes the live session and stops the host, if any.
+//
+// A transfer in flight is cancelled first: it is the one action whose value is
+// a half-written file, and leaving it running would leave one behind.
 func (g *gui) stop() {
+	g.cancelTransfers()
+
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server = nil, nil
 	g.mu.Unlock()
+
+	g.finishReceive()
 
 	g.updateButtons()
 	g.setStatus("Disconnected")
@@ -572,11 +715,23 @@ func (g *gui) send(text string) {
 		return
 	}
 
+	// Text goes through the envelope so the one string the receiver would
+	// misread — a message beginning with the magic — is refused here, where the
+	// user can be told, instead of arriving as a damaged frame. For every other
+	// message Encode hands the bytes back unchanged, so a peer that predates the
+	// envelope still reads it.
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(text))
+	if err != nil {
+		g.setStatus("Not sent: " + err.Error())
+
+		return
+	}
+
 	g.entry.SetText("")
-	g.appendLine("You: " + text)
+	g.addMessage(chatMessage{text: text})
 
 	go func() {
-		if err := sess.Send([]byte(text)); err != nil {
+		if err := sess.Send(payload); err != nil {
 			g.setStatus("Send failed: " + err.Error())
 		}
 	}()
@@ -632,27 +787,55 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 
 // attach makes sess the live session and renders what it carries.
 func (g *gui) attach(sess session.Session) {
+	// A session owns its assembler: a half-received file belongs to the
+	// connection that was carrying it, and the next connection starts clean.
+	g.prepareReceive()
+
 	g.mu.Lock()
 	g.sess = sess
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
 
+	// A sealed session reports a peer the moment its handshake authenticates,
+	// and a bus refusal that dropped one peer without ending the room. Both
+	// belong on the status line: a silent drop looks like a peer that never
+	// sent anything, and "connected" is not the same as "encrypted".
+	if sealed, ok := sess.(*e2e.Conn); ok {
+		sealed.OnPeer(func(p e2e.Peer) {
+			g.setStatus("Encrypted with " + p.Name())
+			g.addMessage(chatMessage{from: "system", text: "encrypted with " + p.Name()})
+		})
+		sealed.OnError(func(err error) {
+			g.setStatus("Refused a peer: " + err.Error())
+			g.addMessage(chatMessage{from: "system", text: "refused a peer: " + err.Error()})
+		})
+	}
+
 	sess.OnMessage(func(m session.Message) {
 		from := m.From
 		if from == "" {
+			// An unnamed peer is still a peer: without this it would render as
+			// "You", which is the one sender it is not.
 			from = "peer"
 		}
 
-		g.appendLine(fmt.Sprintf("%s: %s", from, string(m.Payload)))
+		// A payload is a chat message or a piece of a file: the envelope says
+		// which, and text that predates it still arrives as text.
+		g.receiveFrame(from, m.Payload)
 	})
 
 	sess.OnClose(func(reason string) {
 		g.mu.Lock()
-		if g.sess == sess {
+		closed := g.sess == sess
+		if closed {
 			g.sess = nil
 		}
 		g.mu.Unlock()
+
+		if closed {
+			g.finishReceive()
+		}
 
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
@@ -669,8 +852,10 @@ func (g *gui) updateButtons() {
 
 	if hasSession {
 		g.sendBtn.Enable()
+		g.attachBtn.Enable()
 	} else {
 		g.sendBtn.Disable()
+		g.attachBtn.Disable()
 	}
 
 	if hasSession || hasServer {
@@ -680,21 +865,123 @@ func (g *gui) updateButtons() {
 	}
 }
 
+// canvasWidth reports the width of the window, or 0 when the canvas has not
+// been measured yet — which is the case while build runs, because the window is
+// shown afterwards.
+func (g *gui) canvasWidth() int {
+	if g.win == nil {
+		return 0
+	}
+	canvas := g.win.Canvas()
+	if canvas == nil {
+		return 0
+	}
+
+	return int(canvas.Size().Width)
+}
+
 // --- rendering --------------------------------------------------------
 
 func (g *gui) setStatus(text string) {
 	fyne.Do(func() { g.status.SetText(text) })
 }
 
-func (g *gui) appendLine(line string) {
+// addMessage appends a line to the transcript and scrolls to it.
+//
+// The list reads g.messages by index, so one Refresh is enough: the row count,
+// the rows' text and the drop that keeps the log at maxMessages all follow from
+// the slice.
+func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
-		g.messages = append(g.messages, line)
-		if len(g.messages) > maxMessages {
-			g.messages = g.messages[len(g.messages)-maxMessages:]
-		}
+		g.messages = appendMessage(g.messages, m)
+		g.chatList.Refresh()
+		g.chatList.ScrollToBottom()
+	})
+}
 
-		g.chatLog.SetText(strings.Join(g.messages, "\n"))
-		g.scroll.ScrollToBottom()
+// updateChatRow paints one row of the transcript.
+//
+// A wrapping label's height depends on the width it is given, and the list asks
+// for a row's height before laying that row out at its width. Measuring at the
+// width the list just supplied and handing the height back is the supported way
+// to let a row be taller than the template — List.SetItemHeight exists for
+// exactly this, and it stops as soon as the height stops changing.
+//
+// A row is a container: the label says what happened, the picture is an inline
+// image on a file row, and the button is the Save action a received file
+// offers. The picture and the button are laid out for every row and shown only
+// when that row has one, so a text row's height stays what the label needs.
+func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
+	if id < 0 || id >= len(g.messages) {
+		return
+	}
+
+	row, ok := obj.(*fyne.Container)
+	if !ok || len(row.Objects) < 3 {
+		return
+	}
+
+	label, _ := row.Objects[0].(*widget.Label)
+	pic, _ := row.Objects[1].(*canvas.Image)
+	save, _ := row.Objects[2].(*widget.Button)
+
+	if label == nil || pic == nil || save == nil {
+		return
+	}
+
+	m := g.messages[id]
+	label.SetText(m.line())
+	g.fillFileRow(m, pic, save)
+
+	width := row.Size().Width
+	if g.chatList == nil || width <= 0 {
+		return
+	}
+
+	row.Resize(fyne.NewSize(width, row.MinSize().Height))
+	g.chatList.SetItemHeight(id, row.MinSize().Height)
+}
+
+// selectChatRow copies the message that was tapped, or opens a picture.
+//
+// This is the copy gesture a chat app teaches: tap the line and the line is on
+// the clipboard, instead of asking a finger to drag a selection handle through
+// a tall, wrapping label. A picture row is the exception — tapping it opens the
+// file the way tapping an image everywhere else does.
+func (g *gui) selectChatRow(id widget.ListItemID) {
+	if id < 0 || id >= len(g.messages) {
+		return
+	}
+
+	message := g.messages[id]
+
+	g.chatList.Unselect(id)
+
+	if message.file != nil && message.file.inline && message.file.path != "" {
+		g.showImage(message.file.path)
+
+		return
+	}
+
+	g.copyToClipboard(message.line())
+}
+
+// copyAll copies the whole transcript.
+func (g *gui) copyAll() {
+	g.copyToClipboard(transcript(g.messages))
+}
+
+// copyToClipboard puts text on the clipboard and confirms it on screen.
+func (g *gui) copyToClipboard(text string) {
+	if g.app == nil || text == "" {
+		return
+	}
+
+	g.app.Clipboard().SetContent(text)
+
+	fyne.Do(func() { g.copyHint.SetText("Copied") })
+	time.AfterFunc(copyHintDuration, func() {
+		fyne.Do(func() { g.copyHint.SetText("") })
 	})
 }
 
@@ -747,7 +1034,6 @@ func (g *gui) data() *appdata.Data {
 	data := appdata.New(g.port())
 	data.Name = strings.TrimSpace(g.nameEntry.Text)
 	data.Host = strings.TrimSpace(g.bindEntry.Text)
-	data.AllowAnonymous = g.anonymousCheck.Checked
 
 	return data
 }

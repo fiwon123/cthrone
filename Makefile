@@ -180,8 +180,10 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/cthrone.desktop $(GUI_LINUX_DIR)/ 2>/dev/null || true
-	cp $(ASSETS_DIR)/logo-512.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || cp $(ASSETS_DIR)/logo-128.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png
+	# No icon file goes into the archive: add_to_path.sh writes the launcher
+	# icon from the data it carries, and the window icon is embedded in the
+	# binary. A PNG next to the binaries would be read by nothing.
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop
 
 # The Windows GUI needs mingw-w64 for the CGO link, and the icon needs the Go
 # resource tool below. Both are settled before a single file is generated, so a
@@ -192,27 +194,31 @@ require-mingw:
 	  echo "  Debian/Ubuntu: sudo apt-get install gcc-mingw-w64-x86-64" >&2; \
 	  exit 1; }
 
-# Build the Windows icon resource the two exes are linked with, and fail
-# loudly when it cannot be produced: an exe with no icon is exactly the bug this
-# target exists to prevent, so a silent skip is worse than a red build.
-winres-icon: ## generate the Windows exe icon resource (first run needs module proxy access)
+# Build the Windows icon resource the GUI exe is linked with, and fail loudly
+# when it cannot be produced: an exe with no icon is exactly the bug this target
+# exists to prevent, so a silent skip is worse than a red build.
+winres-icon: ## generate the Windows GUI exe icon resource (first run needs module proxy access)
 	@go run github.com/tc-hib/go-winres@$(WINRES_VERSION) make --in $(WINRES_SRC) --arch amd64 || { \
 	  echo "ERROR: go-winres $(WINRES_VERSION) did not run — the Windows exe would carry no icon." >&2; \
 	  echo "  It is fetched with 'go run', so the first use needs module proxy access." >&2; \
 	  exit 1; }
 	@test -f $(WINRES_SYSO) || { echo "ERROR: $(WINRES_SYSO) was not created." >&2; exit 1; }
 
-gui-windows: $(BUILD_DIR) require-mingw winres-icon ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
+# Windows reads an exe's icon from its PE resource, so the icon has to be linked
+# in — a loose .ico beside the exe is never consulted, and shipping one only
+# bloats the archive. The resource is created *after* the two CLI exes are built
+# and removed right after the GUI exe: cthrone.exe and ct.exe are the
+# command-line tool, and only the exe the user clicks carries the logo.
+gui-windows: $(BUILD_DIR) require-mingw ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
 	@mkdir -p $(GUI_WINDOWS_DIR)
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
+	@$(MAKE) --no-print-directory winres-icon || { rm -f $(WINRES_SYSO); exit 1; }
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }
+	@rm -f $(WINRES_SYSO)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
-	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/cthrone.ico 2>/dev/null || true
-	cp $(ASSETS_DIR)/logo.ico $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.ico 2>/dev/null || true
-	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico $(APP_NAME)_gui.ico 2>/dev/null || cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat cthrone.ico
-	@rm -f $(WINRES_SYSO)
+	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat
 
 gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	@test "$$(go env GOOS)" = "darwin" || { \
@@ -225,8 +231,9 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
-	cp $(ASSETS_DIR)/logo-512.png $(GUI_DARWIN_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png 2>/dev/null || tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png
+	# No cthrone.png: Finder reads an .icns inside a .app bundle, never a PNG
+	# beside the binary, and the window icon comes from the embedded copy.
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh
 
 # Build the Android APK. Everything the packager needs is checked first: a
 # missing SDK, NDK or fyne CLI fails the target with what to install, instead
@@ -471,6 +478,11 @@ dev-opencode-auto: OPENCODE_ARGS = --auto
 dev-opencode-auto: dev-opencode
 
 # Generate logo assets from SVG master
+#
+# ui/logo.png is the copy the GUI embeds (//go:embed cannot reach outside its
+# own package), so it is refreshed here instead of being left to drift: the test
+# in cmd/assets fails when the two differ.
 assets: ## generate logo assets from SVG
 	@go run ./cmd/assets
-	@echo "Assets generated in assets/"
+	@cp $(ASSETS_DIR)/logo-512.png ui/logo.png
+	@echo "Assets generated in assets/ (and ui/logo.png refreshed)"

@@ -3,6 +3,7 @@ package websocketcore
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"time"
@@ -14,10 +15,10 @@ import (
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
-// host is the function that serves the chat endpoint. It is a variable so a
-// test can replace it: serving means listening on a port, and a test cannot
+// server is the function that starts the web socket host. It is a variable so
+// a test can replace it: serving means listening on a port, and a test cannot
 // do that.
-var host = websockethandler.Host
+var server = websockethandler.OpenServer
 
 // HostHandle is a running host. It carries the two values the other device
 // needs to pair — the shared secret and, with TLS, the certificate
@@ -25,8 +26,8 @@ var host = websockethandler.Host
 type HostHandle struct {
 	server *websockethandler.Server
 
-	// Token is the secret the host requires. It is empty when the host
-	// allows anonymous clients.
+	// Token is the secret the host requires. It is never empty: a client
+	// without it is refused.
 	Token string
 
 	// Fingerprint is the certificate the other device must pin. It is empty
@@ -40,46 +41,34 @@ type HostHandle struct {
 // Addr is the address the host is listening on.
 func (h *HostHandle) Addr() string { return h.server.Addr() }
 
+// Wait blocks until the host stops serving.
+func (h *HostHandle) Wait() error { return h.server.Wait() }
+
 // Stop closes the listener and drops the connections it holds.
 func (h *HostHandle) Stop() error {
 	if h.announcer != nil {
 		h.announcer.Stop()
 	}
+
 	return h.server.Stop()
 }
 
-// Host open connection
+// Host serves the chat endpoint with the terminal as its consumer.
+//
+// The bind address is empty by default, which means every interface: the tool
+// is a chat between two devices on the same network, and a host that only
+// listens on the loopback cannot be reached by the other device.
 func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
-	token := ""
-	if !app.AllowAnonymous {
-		var err error
-
-		token, err = hostToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
-		if err != nil {
-			return err
-		}
-	}
-
-	certFile, keyFile := "", ""
-	if tlsConf.Enabled {
-		var err error
-
-		certFile, keyFile, err = hostCertificate(tlsConf.CertFile, tlsConf.KeyFile)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := host(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile); err != nil {
+	handle, err := OpenServer(app, flagToken, tokenFile, tlsConf, func(s session.Session) {
+		go runTerminal(s)
+	})
+	if err != nil {
 		return err
 	}
-	name := app.Name
-	if name == "" {
-		name = "cthrone"
-	}
-	ann := discovery.NewAnnouncer(name, app.Port)
-	ann.Start(2 * time.Second)
-	return nil
+
+	log.Println("WebSocket server listening on", handle.Addr(), "-", describeBind(app.Host))
+
+	return handle.Wait()
 }
 
 // OpenServer starts a host and returns a handle for a caller that is not the
@@ -87,24 +76,20 @@ func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 // returns, so Addr reports the port that is actually open, and the caller can
 // Stop it without ending the process.
 //
+// Every client that is let in arrives at onSession already sealed: the
+// wrapper is installed here, so a caller cannot forget it and cannot opt out.
+//
 // The handle also reports the shared secret and the certificate fingerprint:
 // the terminal prints them, and a GUI has nowhere to print them to.
 func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, onSession func(session.Session)) (*HostHandle, error) {
-	token := ""
-	if !app.AllowAnonymous {
-		var err error
-
-		token, err = hostToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
-		if err != nil {
-			return nil, err
-		}
+	token, err := hostToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
+	if err != nil {
+		return nil, err
 	}
 
 	certFile, keyFile := "", ""
 	fingerprint := ""
 	if tlsConf.Enabled {
-		var err error
-
 		certFile, keyFile, err = hostCertificate(tlsConf.CertFile, tlsConf.KeyFile)
 		if err != nil {
 			return nil, err
@@ -117,7 +102,14 @@ func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, on
 		}
 	}
 
-	server, err := websockethandler.OpenServer(app.Port, app.Host, token, app.AllowAnonymous, certFile, keyFile, onSession)
+	srv, err := server(app.Port, app.Host, token, certFile, keyFile, func(raw session.Session) {
+		sealed, err := seal(raw, token, app.Name)
+		if err != nil {
+			return
+		}
+
+		onSession(sealed)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +121,20 @@ func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, on
 	ann := discovery.NewAnnouncer(name, app.Port)
 	ann.Start(2 * time.Second)
 
-	return &HostHandle{server: server, Token: token, Fingerprint: fingerprint, announcer: ann}, nil
+	return &HostHandle{server: srv, Token: token, Fingerprint: fingerprint, announcer: ann}, nil
+}
+
+// describeBind says what the bind address means, so a host status is not just
+// a colon and a port.
+func describeBind(bindAddress string) string {
+	if bindAddress == "" {
+		return "every interface — reachable from the local network"
+	}
+	if bindAddress == "127.0.0.1" || bindAddress == "localhost" {
+		return "loopback only — this machine alone"
+	}
+
+	return bindAddress + " — a specific interface"
 }
 
 // hostCertificate returns the certificate and the key the server uses. It

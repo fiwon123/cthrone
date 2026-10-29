@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/gorilla/websocket"
 )
 
@@ -36,37 +36,20 @@ func dialerFor(tlsConfig *tls.Config) *websocket.Dialer {
 	return &dialer
 }
 
-// Connect to websocket host, then run the terminal chat loop. It returns when
-// the peer disconnects or the user presses Ctrl-C.
-func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) error {
+// Connect dials the host and returns the live session.
+//
+// It is the transport step only: what the session carries and how the caller
+// consumes it — sealed or not, terminal or GUI — belongs to the caller. The
+// terminal loop lives in internal/chat, and the end-to-end wrapper above that.
+func Connect(address string, port int, token string, useTLS bool, tlsConfig *tls.Config) (session.Session, error) {
 	conn, url, err := openConnectionDial(address, port, token, useTLS, tlsConfig)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	fmt.Println("Connected to", url)
 
-	s := newConnSession(conn)
-	defer s.Close("goodbye")
-
-	// The read loop may already have failed before OnClose was registered, so
-	// close the channel from whichever side gets there first.
-	var once sync.Once
-	done := make(chan struct{})
-	finished := func() { once.Do(func() { close(done) }) }
-
-	s.OnClose(func(string) { finished() })
-	if s.IsClosed() {
-		finished()
-	}
-
-	currentInput := []rune{}
-	go receiveMsgLoop(s, &currentInput)
-	go sendMsgLoop(s, &currentInput)
-
-	<-done
-
-	return nil
+	return newConnSession(conn), nil
 }
 
 // openConnectionDial dials the host and returns the connection with the URL

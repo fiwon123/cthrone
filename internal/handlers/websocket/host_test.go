@@ -13,7 +13,7 @@ func TestAllowedRefusesAMissingSecret(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 
-	if allowed(recorder, request, "s3cret", false) {
+	if allowed(recorder, request, "s3cret") {
 		t.Fatal("expected a client without the secret to be refused")
 	}
 
@@ -28,7 +28,7 @@ func TestAllowedAcceptsTheRightSecret(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	request.Header.Set("X-Cthrone-Token", "s3cret")
 
-	if !allowed(recorder, request, "s3cret", false) {
+	if !allowed(recorder, request, "s3cret") {
 		t.Errorf("expected the client to be let in, got %d", recorder.Code)
 	}
 }
@@ -40,20 +40,8 @@ func TestAllowedRefusesTheWrongSecret(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	request.Header.Set("X-Cthrone-Token", "s3cre")
 
-	if allowed(recorder, request, "s3cret", false) {
+	if allowed(recorder, request, "s3cret") {
 		t.Fatal("expected a client with the wrong secret to be refused")
-	}
-}
-
-// A host that allows anonymous connections lets every client in. It is the
-// state the tool was in before the secret existed, and it has to be asked
-// for.
-func TestAllowedAcceptsAnyClientWhenAnonymous(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/ws", nil)
-
-	if !allowed(recorder, request, "s3cret", true) {
-		t.Errorf("expected an anonymous client to be let in, got %d", recorder.Code)
 	}
 }
 
