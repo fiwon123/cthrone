@@ -39,7 +39,7 @@ On nats connection only host receive message and only connect device send messag
 		}
 
 		if natsFlag {
-			natscore.Connect(args, app, natsURLFlag, tlsConf)
+			natscore.Connect(args, app, secret, secretFile, natsURLFlag, tlsConf)
 
 			return
 		}

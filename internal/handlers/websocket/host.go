@@ -30,7 +30,7 @@ type Server struct {
 // The listener is bound before it returns, so Addr reports the port that is
 // actually open — a "hosting" status that named a port the server never bound
 // would be a lie. onSession is called for every client that is let in.
-func OpenServer(port int, bindAddress, token string, allowAnonymous bool, certFile, keyFile string, onSession func(session.Session)) (*Server, error) {
+func OpenServer(port int, bindAddress, token string, certFile, keyFile string, onSession func(session.Session)) (*Server, error) {
 	mux := http.NewServeMux()
 
 	s := &Server{
@@ -40,7 +40,7 @@ func OpenServer(port int, bindAddress, token string, allowAnonymous bool, certFi
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		s.handle(w, r, token, allowAnonymous)
+		s.handle(w, r, token)
 	})
 
 	listener, err := net.Listen("tcp", listenAddress(bindAddress, port))
@@ -102,8 +102,8 @@ func (s *Server) Stop() error {
 
 // handle upgrades the request when the client is allowed in and hands the
 // session to the caller.
-func (s *Server) handle(w http.ResponseWriter, r *http.Request, token string, allowAnonymous bool) {
-	if !allowed(w, r, token, allowAnonymous) {
+func (s *Server) handle(w http.ResponseWriter, r *http.Request, token string) {
+	if !allowed(w, r, token) {
 		return
 	}
 
@@ -123,33 +123,6 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request, token string, al
 	}
 }
 
-// Host serves the chat endpoint with the terminal as its consumer.
-//
-// The bind address is empty by default, which means every interface: the tool
-// is a chat between two devices on the same network, and a host that only
-// listens on the loopback cannot be reached by the other device.
-func Host(port int, bindAddress, token string, allowAnonymous bool, certFile, keyFile string) error {
-	server, err := OpenServer(port, bindAddress, token, allowAnonymous, certFile, keyFile, runTerminalSession)
-	if err != nil {
-		return err
-	}
-
-	log.Println("WebSocket server listening on", server.Addr(), "-", describeBind(bindAddress))
-
-	if allowAnonymous {
-		log.Println("WARNING: anonymous connections are allowed, anyone who can reach this port can join the chat")
-	}
-
-	return server.Wait()
-}
-
-// runTerminalSession bridges a session to the terminal.
-func runTerminalSession(s session.Session) {
-	currentInput := []rune{}
-	receiveMsgLoop(s, &currentInput)
-	go sendMsgLoop(s, &currentInput)
-}
-
 // listenAddress returns the address the server listens on. An empty bind
 // address means every interface, which is the default: the tool is a chat
 // between two devices on the same network.
@@ -157,23 +130,9 @@ func listenAddress(bindAddress string, port int) string {
 	return fmt.Sprintf("%s:%d", bindAddress, port)
 }
 
-func describeBind(bindAddress string) string {
-	if bindAddress == "" {
-		return "every interface — reachable from the local network"
-	}
-	if bindAddress == "127.0.0.1" || bindAddress == "localhost" {
-		return "loopback only — this machine alone"
-	}
-	return bindAddress + " — a specific interface"
-}
-
-// allowed checks the shared secret. A host that allows anonymous connections
-// lets every client in.
-func allowed(w http.ResponseWriter, r *http.Request, token string, allowAnonymous bool) bool {
-	if allowAnonymous {
-		return true
-	}
-
+// allowed checks the shared secret. A client that does not send it, or sends
+// the wrong one, is refused before the upgrade: there is no plaintext way in.
+func allowed(w http.ResponseWriter, r *http.Request, token string) bool {
 	if !auth.Equal(r.Header.Get(auth.HeaderName), token) {
 		http.Error(w, "unauthorized: the shared secret is missing or wrong", http.StatusUnauthorized)
 
