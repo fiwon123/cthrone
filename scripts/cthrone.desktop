@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=cthrone
 Comment=Chat between devices
-Exec=cthrone ui
+Exec=cthrone_gui
 Icon=cthrone
 Type=Application
 Categories=Network;Chat;Utility;
