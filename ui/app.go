@@ -10,6 +10,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
@@ -33,6 +35,7 @@ import (
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
 // copyHintDuration is how long the transcript's "Copied" confirmation stays on
@@ -82,14 +85,25 @@ type gui struct {
 	hint        *widget.Label
 
 	// chat
-	tabs     *container.AppTabs
-	status   *widget.Label
-	chatList *widget.List
-	entry    *widget.Entry
-	sendBtn  *widget.Button
-	stopBtn  *widget.Button
-	copyHint *widget.Label
-	messages []chatMessage
+	tabs      *container.AppTabs
+	status    *widget.Label
+	chatList  *widget.List
+	entry     *widget.Entry
+	sendBtn   *widget.Button
+	stopBtn   *widget.Button
+	attachBtn *widget.Button
+	copyHint  *widget.Label
+	messages  []chatMessage
+
+	// transfers
+	//
+	// outbox is the queue the picker feeds and one worker drains, so two files
+	// picked in a row are two transfers in order rather than two interleaved
+	// streams. cancels is how Stop reaches a transfer that is still running.
+	outbox    chan outgoing
+	cancels   map[string]context.CancelFunc
+	incoming  map[string]*incomingTransfer
+	assembler *wire.Assembler
 
 	// devices
 	beacons    []discovery.Beacon
@@ -212,13 +226,26 @@ func (g *gui) build() {
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
 	// a finger can hit.
+	//
+	// A row is a container rather than a label because a file transfer needs
+	// more than a sentence: a picture draws itself under the caption, and a
+	// received file offers the Save action the terminal has no room for. Both
+	// parts stay hidden on a text row, so a message costs the same two hidden
+	// objects it did not have before and nothing else.
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
 			row := widget.NewLabel("")
 			row.Wrapping = fyne.TextWrapWord
 
-			return row
+			pic := canvas.NewImageFromResource(nil)
+			pic.FillMode = canvas.ImageFillContain
+			pic.Hide()
+
+			save := widget.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil)
+			save.Hide()
+
+			return container.NewVBox(row, pic, save)
 		},
 		g.updateChatRow,
 	)
@@ -234,13 +261,28 @@ func (g *gui) build() {
 	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
 	g.stopBtn.Disable()
 
+	attachLabel := "Attach"
+	if g.lay.Stack {
+		// The paperclip says it on a phone, where the row has no width to spare.
+		attachLabel = ""
+	}
+
+	g.attachBtn = widget.NewButtonWithIcon(attachLabel, theme.MailAttachmentIcon(), g.pickFile)
+	g.attachBtn.Disable()
+
+	// The queue starts with the window and outlives any one session: a file
+	// picked while the connection is being replaced still has a worker to hand
+	// it to, and that worker reports the failure if there is nothing to send to.
+	g.outbox = make(chan outgoing, 32)
+	go g.pumpOutbox()
+
 	var input fyne.CanvasObject
 	if g.lay.Stack {
 		// Touch: a full-width field, and the two actions below it, stacked
 		// one per line when even two do not fit.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.sendBtn))
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.attachBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.attachBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
@@ -629,11 +671,18 @@ func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
 }
 
 // stop closes the live session and stops the host, if any.
+//
+// A transfer in flight is cancelled first: it is the one action whose value is
+// a half-written file, and leaving it running would leave one behind.
 func (g *gui) stop() {
+	g.cancelTransfers()
+
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server = nil, nil
 	g.mu.Unlock()
+
+	g.finishReceive()
 
 	g.updateButtons()
 	g.setStatus("Disconnected")
@@ -666,11 +715,23 @@ func (g *gui) send(text string) {
 		return
 	}
 
+	// Text goes through the envelope so the one string the receiver would
+	// misread — a message beginning with the magic — is refused here, where the
+	// user can be told, instead of arriving as a damaged frame. For every other
+	// message Encode hands the bytes back unchanged, so a peer that predates the
+	// envelope still reads it.
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(text))
+	if err != nil {
+		g.setStatus("Not sent: " + err.Error())
+
+		return
+	}
+
 	g.entry.SetText("")
 	g.addMessage(chatMessage{text: text})
 
 	go func() {
-		if err := sess.Send([]byte(text)); err != nil {
+		if err := sess.Send(payload); err != nil {
 			g.setStatus("Send failed: " + err.Error())
 		}
 	}()
@@ -726,6 +787,10 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 
 // attach makes sess the live session and renders what it carries.
 func (g *gui) attach(sess session.Session) {
+	// A session owns its assembler: a half-received file belongs to the
+	// connection that was carrying it, and the next connection starts clean.
+	g.prepareReceive()
+
 	g.mu.Lock()
 	g.sess = sess
 	g.mu.Unlock()
@@ -740,15 +805,22 @@ func (g *gui) attach(sess session.Session) {
 			from = "peer"
 		}
 
-		g.addMessage(chatMessage{from: from, text: string(m.Payload)})
+		// A payload is a chat message or a piece of a file: the envelope says
+		// which, and text that predates it still arrives as text.
+		g.receiveFrame(from, m.Payload)
 	})
 
 	sess.OnClose(func(reason string) {
 		g.mu.Lock()
-		if g.sess == sess {
+		closed := g.sess == sess
+		if closed {
 			g.sess = nil
 		}
 		g.mu.Unlock()
+
+		if closed {
+			g.finishReceive()
+		}
 
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
@@ -765,8 +837,10 @@ func (g *gui) updateButtons() {
 
 	if hasSession {
 		g.sendBtn.Enable()
+		g.attachBtn.Enable()
 	} else {
 		g.sendBtn.Disable()
+		g.attachBtn.Disable()
 	}
 
 	if hasSession || hasServer {
@@ -817,17 +891,32 @@ func (g *gui) addMessage(m chatMessage) {
 // width the list just supplied and handing the height back is the supported way
 // to let a row be taller than the template — List.SetItemHeight exists for
 // exactly this, and it stops as soon as the height stops changing.
+//
+// A row is a container: the label says what happened, the picture is an inline
+// image on a file row, and the button is the Save action a received file
+// offers. The picture and the button are laid out for every row and shown only
+// when that row has one, so a text row's height stays what the label needs.
 func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	if id < 0 || id >= len(g.messages) {
 		return
 	}
 
-	row, ok := obj.(*widget.Label)
-	if !ok {
+	row, ok := obj.(*fyne.Container)
+	if !ok || len(row.Objects) < 3 {
 		return
 	}
 
-	row.SetText(g.messages[id].line())
+	label, _ := row.Objects[0].(*widget.Label)
+	pic, _ := row.Objects[1].(*canvas.Image)
+	save, _ := row.Objects[2].(*widget.Button)
+
+	if label == nil || pic == nil || save == nil {
+		return
+	}
+
+	m := g.messages[id]
+	label.SetText(m.line())
+	g.fillFileRow(m, pic, save)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {
@@ -838,18 +927,28 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	g.chatList.SetItemHeight(id, row.MinSize().Height)
 }
 
-// selectChatRow copies the message that was tapped.
+// selectChatRow copies the message that was tapped, or opens a picture.
 //
 // This is the copy gesture a chat app teaches: tap the line and the line is on
 // the clipboard, instead of asking a finger to drag a selection handle through
-// a tall, wrapping label.
+// a tall, wrapping label. A picture row is the exception — tapping it opens the
+// file the way tapping an image everywhere else does.
 func (g *gui) selectChatRow(id widget.ListItemID) {
 	if id < 0 || id >= len(g.messages) {
 		return
 	}
 
-	g.copyToClipboard(g.messages[id].line())
+	message := g.messages[id]
+
 	g.chatList.Unselect(id)
+
+	if message.file != nil && message.file.inline && message.file.path != "" {
+		g.showImage(message.file.path)
+
+		return
+	}
+
+	g.copyToClipboard(message.line())
 }
 
 // copyAll copies the whole transcript.
