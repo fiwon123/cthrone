@@ -16,11 +16,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -32,11 +34,9 @@ import (
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
-const (
-	// maxMessages bounds the chat log: a window left open for hours must not
-	// grow without limit.
-	maxMessages = 500
-)
+// copyHintDuration is how long the transcript's "Copied" confirmation stays on
+// screen. A tap that shows nothing reads as a tap that did nothing.
+const copyHintDuration = 2 * time.Second
 
 // liveServer is the part of a websocket host the GUI needs. Keeping it an
 // interface means the UI does not import the handler package.
@@ -77,12 +77,12 @@ type gui struct {
 	// chat
 	tabs     *container.AppTabs
 	status   *widget.Label
-	chatLog  *widget.Label
-	scroll   *container.Scroll
+	chatList *widget.List
 	entry    *widget.Entry
 	sendBtn  *widget.Button
 	stopBtn  *widget.Button
-	messages []string
+	copyHint *widget.Label
+	messages []chatMessage
 
 	// devices
 	beacons    []discovery.Beacon
@@ -174,25 +174,46 @@ func Run() {
 // build creates every widget and lays the window out.
 func (g *gui) build() {
 	// --- chat ---------------------------------------------------------
-	logo := widget.NewIcon(appIcon())
-	title := widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	var header *fyne.Container
-	if logo != nil {
-		header = container.NewHBox(logo, title)
-	} else {
-		header = container.NewHBox(title)
+	// The desktop window already says "cthrone" in its title bar, so the header
+	// carries only what a title bar cannot: the name on a phone, which has no
+	// title bar to show it in, the copy confirmation, and the copy-all action.
+	g.copyHint = widget.NewLabel("")
+
+	copyLabel := "Copy all"
+	if g.mobile {
+		// The icon is enough where width is scarce.
+		copyLabel = ""
 	}
+
+	copyBtn := widget.NewButtonWithIcon(copyLabel, theme.ContentCopyIcon(), g.copyAll)
+
+	header := container.NewHBox()
+	if g.mobile {
+		header.Add(widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	}
+
+	header.Add(layout.NewSpacer())
+	header.Add(g.copyHint)
+	header.Add(copyBtn)
 
 	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
 	g.status.Wrapping = fyne.TextWrapWord
 
-	g.chatLog = widget.NewLabel("")
-	g.chatLog.Wrapping = fyne.TextWrapWord
-	g.chatLog.Selectable = true
+	// One row per message, not one label holding the whole log: appending then
+	// costs a row instead of a re-wrap of every line, and a row is a tap target
+	// a finger can hit.
+	g.chatList = widget.NewList(
+		func() int { return len(g.messages) },
+		func() fyne.CanvasObject {
+			row := widget.NewLabel("")
+			row.Wrapping = fyne.TextWrapWord
 
-	g.scroll = container.NewVScroll(g.chatLog)
-	g.scroll.SetMinSize(fyne.NewSize(320, 180))
+			return row
+		},
+		g.updateChatRow,
+	)
+	g.chatList.OnSelected = g.selectChatRow
 
 	g.entry = widget.NewEntry()
 	g.entry.SetPlaceHolder("Type a message…")
@@ -203,12 +224,6 @@ func (g *gui) build() {
 
 	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
 	g.stopBtn.Disable()
-
-	copyBtn := widget.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), func() {
-		if g.app != nil {
-			g.app.Clipboard().SetContent(strings.Join(g.messages, "\n"))
-		}
-	})
 
 	var input fyne.CanvasObject
 	if g.mobile {
@@ -222,7 +237,7 @@ func (g *gui) build() {
 		container.NewVBox(container.NewPadded(header), container.NewPadded(g.status), widget.NewSeparator()),
 		container.NewPadded(input),
 		nil, nil,
-		g.scroll,
+		g.chatList,
 	)
 
 	// --- setup --------------------------------------------------------
@@ -573,7 +588,7 @@ func (g *gui) send(text string) {
 	}
 
 	g.entry.SetText("")
-	g.appendLine("You: " + text)
+	g.addMessage(chatMessage{text: text})
 
 	go func() {
 		if err := sess.Send([]byte(text)); err != nil {
@@ -641,10 +656,12 @@ func (g *gui) attach(sess session.Session) {
 	sess.OnMessage(func(m session.Message) {
 		from := m.From
 		if from == "" {
+			// An unnamed peer is still a peer: without this it would render as
+			// "You", which is the one sender it is not.
 			from = "peer"
 		}
 
-		g.appendLine(fmt.Sprintf("%s: %s", from, string(m.Payload)))
+		g.addMessage(chatMessage{from: from, text: string(m.Payload)})
 	})
 
 	sess.OnClose(func(reason string) {
@@ -686,15 +703,77 @@ func (g *gui) setStatus(text string) {
 	fyne.Do(func() { g.status.SetText(text) })
 }
 
-func (g *gui) appendLine(line string) {
+// addMessage appends a line to the transcript and scrolls to it.
+//
+// The list reads g.messages by index, so one Refresh is enough: the row count,
+// the rows' text and the drop that keeps the log at maxMessages all follow from
+// the slice.
+func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
-		g.messages = append(g.messages, line)
-		if len(g.messages) > maxMessages {
-			g.messages = g.messages[len(g.messages)-maxMessages:]
-		}
+		g.messages = appendMessage(g.messages, m)
+		g.chatList.Refresh()
+		g.chatList.ScrollToBottom()
+	})
+}
 
-		g.chatLog.SetText(strings.Join(g.messages, "\n"))
-		g.scroll.ScrollToBottom()
+// updateChatRow paints one row of the transcript.
+//
+// A wrapping label's height depends on the width it is given, and the list asks
+// for a row's height before laying that row out at its width. Measuring at the
+// width the list just supplied and handing the height back is the supported way
+// to let a row be taller than the template — List.SetItemHeight exists for
+// exactly this, and it stops as soon as the height stops changing.
+func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
+	if id < 0 || id >= len(g.messages) {
+		return
+	}
+
+	row, ok := obj.(*widget.Label)
+	if !ok {
+		return
+	}
+
+	row.SetText(g.messages[id].line())
+
+	width := row.Size().Width
+	if g.chatList == nil || width <= 0 {
+		return
+	}
+
+	row.Resize(fyne.NewSize(width, row.MinSize().Height))
+	g.chatList.SetItemHeight(id, row.MinSize().Height)
+}
+
+// selectChatRow copies the message that was tapped.
+//
+// This is the copy gesture a chat app teaches: tap the line and the line is on
+// the clipboard, instead of asking a finger to drag a selection handle through
+// a tall, wrapping label.
+func (g *gui) selectChatRow(id widget.ListItemID) {
+	if id < 0 || id >= len(g.messages) {
+		return
+	}
+
+	g.copyToClipboard(g.messages[id].line())
+	g.chatList.Unselect(id)
+}
+
+// copyAll copies the whole transcript.
+func (g *gui) copyAll() {
+	g.copyToClipboard(transcript(g.messages))
+}
+
+// copyToClipboard puts text on the clipboard and confirms it on screen.
+func (g *gui) copyToClipboard(text string) {
+	if g.app == nil || text == "" {
+		return
+	}
+
+	g.app.Clipboard().SetContent(text)
+
+	fyne.Do(func() { g.copyHint.SetText("Copied") })
+	time.AfterFunc(copyHintDuration, func() {
+		fyne.Do(func() { g.copyHint.SetText("") })
 	})
 }
 
