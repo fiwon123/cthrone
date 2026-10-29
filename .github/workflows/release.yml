@@ -167,6 +167,39 @@ jobs:
       - name: make gui-linux
         run: make gui-linux VERSION="$VERSION"
 
+      # The window icon is embedded in the binary, and the only icon file on
+      # disk is the one add_to_path.sh writes at install time. So the archive
+      # must carry none — a PNG next to the binaries is read by nothing — and
+      # the menu entry must name the GUI binary, because the archive's
+      # `cthrone` is the command-line tool that only prints "GUI not built".
+      - name: Check the archive carries no loose icon files
+        run: |
+          status=0
+          for archive in build/GUI/*_linux_gui_amd64.tar.gz; do
+            listing=$(tar tzf "$archive")
+            if printf '%s\n' "$listing" | grep -Ei '\.(png|ico|icns)$'; then
+              echo "error: $archive ships an icon file — the icon belongs in the binary, and add_to_path.sh writes the launcher copy" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose icon file"
+            fi
+            for member in cthrone_gui add_to_path.sh cthrone.desktop; do
+              if printf '%s\n' "$listing" | grep -qx "$member"; then
+                echo "ok: $archive lists $member"
+              else
+                echo "error: $archive does not list $member" >&2
+                status=1
+              fi
+            done
+            if tar xzOf "$archive" cthrone.desktop | grep -qx 'Exec=cthrone_gui'; then
+              echo "ok: the menu entry runs cthrone_gui"
+            else
+              echo "error: cthrone.desktop does not run cthrone_gui — the menu entry would print \"GUI not built\" and exit 0" >&2
+              status=1
+            fi
+          done
+          exit $status
+
       - name: Upload the Linux GUI archive
         uses: actions/upload-artifact@v7
         with:
@@ -260,6 +293,22 @@ jobs:
 
       - name: make gui-darwin
         run: make gui-darwin VERSION="$VERSION"
+
+      # Finder reads an .icns inside a .app bundle, never a PNG beside the
+      # binary, and the window icon comes from the embedded copy — so an icon
+      # file in this archive is dead weight.
+      - name: Check the archive carries no loose icon files
+        run: |
+          status=0
+          for archive in build/GUI/*_darwin_gui_arm64.tar.gz; do
+            if tar tzf "$archive" | grep -Ei '\.(png|ico|icns)$'; then
+              echo "error: $archive ships an icon file — nothing on macOS reads it" >&2
+              status=1
+            else
+              echo "ok: $archive ships no loose icon file"
+            fi
+          done
+          exit $status
 
       - name: Upload the macOS GUI archive
         uses: actions/upload-artifact@v7

@@ -5,8 +5,8 @@
 // It is built with -tags gui: without that tag ui.Run is the stub in
 // app_nogui.go and the CLI does not need the GUI toolkit. The desktop app and
 // the Android/iOS app share this file; the only differences are the entry
-// point (cmd/ui for the desktop, mobile/main.go for the APK) and the touch
-// adjustments made when CurrentDevice().IsMobile() is true.
+// point (cmd/ui for the desktop, mobile/main.go for the APK) and the layout
+// adjustments made on a narrow screen (see layoutFor in layout.go).
 package ui
 
 import (
@@ -50,6 +50,12 @@ type gui struct {
 	app    fyne.App
 	win    fyne.Window
 	mobile bool
+
+	// lay is how the rows are arranged for this screen. It is decided once,
+	// while the window is built: on a phone the canvas has no size yet, so
+	// layoutFor treats it as narrow, and the rows stay stacked in both
+	// orientations instead of reflowing under the user's finger.
+	lay screenLayout
 
 	// setup
 	portEntry        *widget.Entry
@@ -173,6 +179,8 @@ func Run() {
 
 // build creates every widget and lays the window out.
 func (g *gui) build() {
+	g.lay = layoutFor(g.mobile, g.canvasWidth())
+
 	// --- chat ---------------------------------------------------------
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
@@ -180,7 +188,7 @@ func (g *gui) build() {
 	g.copyHint = widget.NewLabel("")
 
 	copyLabel := "Copy all"
-	if g.mobile {
+	if g.lay.Stack {
 		// The icon is enough where width is scarce.
 		copyLabel = ""
 	}
@@ -226,11 +234,12 @@ func (g *gui) build() {
 	g.stopBtn.Disable()
 
 	var input fyne.CanvasObject
-	if g.mobile {
-		// Touch: a full-width field, and two large targets below it.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(3, g.stopBtn, g.sendBtn, copyBtn))
+	if g.lay.Stack {
+		// Touch: a full-width field, and the two actions below it, stacked
+		// one per line when even two do not fit.
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, copyBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
@@ -280,7 +289,13 @@ func (g *gui) build() {
 		g.rebuildSetupForm()
 	})
 
-	g.securityRow = container.NewHBox(g.anonymousCheck, g.moreBtn)
+	// A check carries its own label, so a row that is too narrow for the label
+	// and the button on one line puts the button underneath instead.
+	if g.lay.Stack {
+		g.securityRow = container.NewVBox(g.anonymousCheck, g.moreBtn)
+	} else {
+		g.securityRow = container.NewHBox(g.anonymousCheck, g.moreBtn)
+	}
 
 	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
 		g.natsCheck.SetChecked(s == "NATS")
@@ -331,19 +346,41 @@ func (g *gui) build() {
 	)
 	g.beaconList.OnSelected = g.selectBeacon
 
+	// The beacon hint wraps on a phone, where the button and the sentence do
+	// not share a line without the sentence running off the screen.
+	var beaconHeader fyne.CanvasObject
+	beaconHint := widget.NewLabel("UDP beacons on port 9999")
+	beaconHint.Wrapping = fyne.TextWrapWord
+	if g.lay.Stack {
+		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
+	} else {
+		beaconHeader = container.NewHBox(g.scanBtn, beaconHint)
+	}
+
 	devices := container.NewBorder(
 		container.NewVBox(
-			container.NewPadded(container.NewHBox(g.scanBtn, widget.NewLabel("UDP beacons on port 9999"))),
+			container.NewPadded(beaconHeader),
 			widget.NewSeparator(),
 		),
 		nil, nil, nil,
 		g.beaconList,
 	)
 
+	// On a narrow screen an icon costs the width its label needs, so the tabs
+	// keep the names and drop the icons; the label alone is still the whole
+	// target.
+	tab := func(label string, icon fyne.Resource, content fyne.CanvasObject) *container.TabItem {
+		if g.lay.Stack {
+			return container.NewTabItem(label, content)
+		}
+
+		return container.NewTabItemWithIcon(label, icon, content)
+	}
+
 	g.tabs = container.NewAppTabs(
-		container.NewTabItemWithIcon("Chat", theme.MailComposeIcon(), chat),
-		container.NewTabItemWithIcon("Setup", theme.SettingsIcon(), setup),
-		container.NewTabItemWithIcon("Devices", theme.ComputerIcon(), devices),
+		tab("Chat", theme.MailComposeIcon(), chat),
+		tab("Setup", theme.SettingsIcon(), setup),
+		tab("Devices", theme.ComputerIcon(), devices),
 	)
 
 	g.win.SetContent(g.tabs)
@@ -695,6 +732,21 @@ func (g *gui) updateButtons() {
 	} else {
 		g.stopBtn.Disable()
 	}
+}
+
+// canvasWidth reports the width of the window, or 0 when the canvas has not
+// been measured yet — which is the case while build runs, because the window is
+// shown afterwards.
+func (g *gui) canvasWidth() int {
+	if g.win == nil {
+		return 0
+	}
+	canvas := g.win.Canvas()
+	if canvas == nil {
+		return 0
+	}
+
+	return int(canvas.Size().Width)
 }
 
 // --- rendering --------------------------------------------------------

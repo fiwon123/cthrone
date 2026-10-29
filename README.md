@@ -251,7 +251,7 @@ download before running it.
 | Android (arm64), app | `*_android_gui_arm64.apk` | copy it to the phone and tap it, or `adb install <file>` — see [Android app](#android-app-arm64) |
 | Android (arm64), CLI | `*_android.zip` / `.tar.gz` | **CLI, not an app** — runs in Termux; see [Android CLI](#android-cli-arm64-termux) |
 
-The desktop GUI (`cthrone ui`) ships as its own archive, so a terminal-only
+The desktop GUI (`cthrone_gui`) ships as its own archive, so a terminal-only
 user does not download a window toolkit:
 
 | Platform | Archive | Notes |
@@ -262,6 +262,12 @@ user does not download a window toolkit:
 
 Each archive carries both `cthrone` and the short alias `ct`, so `ct host`
 works the moment the folder is on your PATH.
+
+The GUI archive adds `cthrone_gui` — the binary that opens the window — and, on
+Linux, a menu entry the installer registers with a launcher icon it writes into
+the XDG directories itself. No archive carries an icon file: the window icon is
+embedded in `cthrone_gui`, and the launcher copy only exists once it is
+installed.
 
 ### Android
 
@@ -327,7 +333,8 @@ What the Android CLI does and does not give you:
 - the archive carries **no installer script** (Linux, macOS and Windows ship
   one); to type `cthrone` from any directory, add the folder to `PATH` yourself,
   e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
-- `cthrone ui` is desktop-only; the APK above is the phone equivalent.
+- the desktop GUI ships as `cthrone_gui` in its own archive; the APK above is
+  the phone equivalent, and `cthrone ui` in this archive only prints a message.
 - **neither Android download is verified on a device.** Both are cross-compiled
   and published; nothing in this project's CI installs the APK or runs the
   binary on a phone or an emulator, so "built for Android" is a build claim, not
@@ -343,7 +350,7 @@ What the Android CLI does and does not give you:
 | `cthrone host` | host the chat server and wait for a client |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
 | `cthrone scan` | scan the local subnet for chat servers (shows device names when discovered) |
-| `cthrone ui` | launch the Fyne GUI (desktop; build with `-tags gui` and required system libraries) |
+| `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
 | `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
 
