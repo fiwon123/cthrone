@@ -103,7 +103,13 @@ func send(s session.Session, input *line, in *os.File, out io.Writer) {
 			msg := input.take()
 
 			if err := s.Send([]byte(msg)); err != nil {
-				return
+				// The handshake may not have finished yet, and a send that
+				// fails must not take the terminal with it: keep the text so
+				// the user can press Enter again, and say why nothing went.
+				input.put(msg)
+				notice(out, input, "Not sent: "+err.Error())
+
+				break
 			}
 
 			fmt.Fprintf(out, "\rYou: %s\n", msg)
@@ -153,6 +159,15 @@ func (l *line) take() string {
 	l.text = nil
 
 	return out
+}
+
+// put restores text that was taken but not sent, so a failed send does not
+// lose what was typed.
+func (l *line) put(text string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.text = []rune(text)
 }
 
 func (l *line) append(r rune) {

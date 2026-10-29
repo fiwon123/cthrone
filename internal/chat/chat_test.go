@@ -2,6 +2,7 @@ package chat
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -203,6 +204,75 @@ func TestRunReturnsWhenTheSessionCloses(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not return after the session closed")
 	}
+}
+
+// A send that fails — the handshake has not finished, so the wrapper refuses to
+// put anything in the clear — must not swallow the line or end the input loop.
+// The text stays so Enter can be pressed again once the peer is verified.
+func TestSendKeepsTheLineWhenTheSessionRefuses(t *testing.T) {
+	in, w, out := pipeTerminal(t)
+	f := &flakySession{fakeSession: newFake("alice"), fails: 1, attempted: make(chan struct{}, 1)}
+
+	done := make(chan struct{})
+	go func() {
+		send(f, &line{}, in, out)
+		close(done)
+	}()
+
+	fmt.Fprint(w, "hi\r")
+
+	select {
+	case <-f.attempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first send was not attempted")
+	}
+
+	// The text is still there, so a second Enter sends it now that it is allowed.
+	fmt.Fprint(w, "\r")
+	_ = w.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send did not return when the input ended")
+	}
+
+	sent := f.outgoing()
+	if len(sent) != 1 || string(sent[0]) != "hi" {
+		t.Fatalf("sent %q, want the line sent once after the refusal", sent)
+	}
+
+	if got := out.String(); !strings.Contains(got, "Not sent:") {
+		t.Errorf("expected the refusal on the terminal, got %q", got)
+	}
+}
+
+// errNotYet stands in for the wrapper's refusal before the handshake finishes.
+var errNotYet = errors.New("e2e: handshake refused")
+
+// flakySession fails a number of sends before behaving, so a test can hold the
+// session in the state a handshake creates.
+type flakySession struct {
+	*fakeSession
+
+	mu        sync.Mutex
+	fails     int
+	attempted chan struct{}
+}
+
+func (f *flakySession) Send(payload []byte) error {
+	f.mu.Lock()
+	fails := f.fails
+	f.fails--
+	f.mu.Unlock()
+
+	if fails > 0 {
+		f.attempted <- struct{}{}
+
+		return errNotYet
+	}
+
+	return f.fakeSession.Send(payload)
 }
 
 // The line is written by the reader and read by the printer, so it has to be
