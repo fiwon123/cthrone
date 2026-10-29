@@ -23,18 +23,23 @@ func IdentityKeyFile() (string, error) {
 
 // LoadKey returns this device's long-term signing key, generating it on first
 // use.
-//
-// The key is the device's identity: a peer that has seen it once pins it, and
-// a different key under the same name is refused. So the file is written for
-// its owner only, and a corrupt file is an error rather than a reason to make
-// a new identity quietly — a new key is a new device to everyone who pinned
-// the old one.
 func LoadKey() (ed25519.PrivateKey, error) {
 	path, err := IdentityKeyFile()
 	if err != nil {
 		return nil, err
 	}
 
+	return LoadKeyFrom(path)
+}
+
+// LoadKeyFrom returns the key stored in path, generating it on first use.
+//
+// The key is the device's identity: a peer that has seen it once pins it, and
+// a different key under the same name is refused. So the file is written for
+// its owner only, and a corrupt file is an error rather than a reason to make
+// a new identity quietly — a new key is a new device to everyone who pinned
+// the old one.
+func LoadKeyFrom(path string) (ed25519.PrivateKey, error) {
 	stored, err := os.ReadFile(path)
 	if err == nil {
 		return parseKey(path, stored)

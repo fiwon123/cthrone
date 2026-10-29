@@ -9,6 +9,7 @@ import (
 
 func TestLoadKeyCreatesThenKeepsTheKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	first, err := LoadKey()
 	if err != nil {
@@ -45,6 +46,7 @@ func TestLoadKeyCreatesThenKeepsTheKey(t *testing.T) {
 
 func TestLoadKeyRefusesACorruptFile(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	path, err := IdentityKeyFile()
 	if err != nil {

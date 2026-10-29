@@ -8,6 +8,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/e2e"
 	natshandler "github.com/fiwon123/cthrone/internal/handlers/nats"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
@@ -16,14 +17,10 @@ import (
 var runTerminal = chat.Run
 
 // seal wraps a transport session and refuses to hand out one that is not
-// sealed. A secret too short for the handshake closes the session here rather
+// sealed. A credential the handshake cannot use closes the session here rather
 // than letting the caller use it in the clear.
-func seal(raw session.Session, secret, name string) (session.Session, error) {
-	sealed, err := e2e.New(raw, e2e.Config{
-		Secret: []byte(secret),
-		Name:   name,
-		Mode:   e2e.Bus,
-	})
+func seal(raw session.Session, cred pairing.Credential, name string) (session.Session, error) {
+	sealed, err := e2e.New(raw, cred.Config(e2e.Bus, name))
 	if err != nil {
 		raw.Close(err.Error())
 
@@ -38,9 +35,10 @@ func seal(raw session.Session, secret, name string) (session.Session, error) {
 // credentials, the shared secret and the TLS configuration are resolved
 // exactly as Connect resolves them.
 //
-// The session is sealed with the shared secret before it is returned: a caller
-// that has a NATS session has an encrypted one, or an error saying why not.
-func OpenSession(args []string, app *app.Data, flagToken, tokenFile, broker string, tlsConf auth.TLS) (session.Session, error) {
+// The session is sealed before it is returned — with the shared secret when one
+// is configured, otherwise with this device's key — so a caller that has a NATS
+// session has an encrypted one, or an error saying why not.
+func OpenSession(args []string, app *app.Data, opts pairing.Options, broker string, tlsConf auth.TLS) (session.Session, error) {
 	subject := subjectFrom(args)
 
 	url := brokerURL(broker)
@@ -63,19 +61,19 @@ func OpenSession(args []string, app *app.Data, flagToken, tokenFile, broker stri
 		return nil, err
 	}
 
-	secret, err := sharedSecret(flagToken, tokenFile)
+	cred, err := pairing.Load(opts)
 	if err != nil {
 		raw.Close(err.Error())
 		return nil, err
 	}
 
-	return seal(raw, secret, app.Name)
+	return seal(raw, cred, app.Name)
 }
 
 // Connect connects to the broker and runs the terminal chat loop until the peer
 // disconnects or the user presses Ctrl-C.
-func Connect(args []string, app *app.Data, flagToken, tokenFile string, broker string, tlsConf auth.TLS) {
-	s, err := OpenSession(args, app, flagToken, tokenFile, broker, tlsConf)
+func Connect(args []string, app *app.Data, opts pairing.Options, broker string, tlsConf auth.TLS) {
+	s, err := OpenSession(args, app, opts, broker, tlsConf)
 	if err != nil {
 		log.Fatal(err)
 	}

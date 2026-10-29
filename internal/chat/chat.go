@@ -56,7 +56,14 @@ func run(s session.Session, in *os.File, out io.Writer) {
 	// A sealed session says when a peer authenticated and when it refused one;
 	// both belong on the terminal, above the input line.
 	if sealed, ok := s.(*e2e.Conn); ok {
-		sealed.OnPeer(func(p e2e.Peer) { notice(out, input, "Encrypted with "+p.Name()) })
+		// The two fingerprints are compared at first contact, so this device's
+		// own must be on screen as well: the peer's arrives with the notice,
+		// and a value nobody printed cannot be compared with anything.
+		if own := sealed.Fingerprint(); own != "" {
+			notice(out, input, "This device's fingerprint is "+own+" — the other screen shows the same value for this device")
+		}
+
+		sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
 		sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
 	}
 
@@ -67,6 +74,26 @@ func run(s session.Session, in *os.File, out io.Writer) {
 	go send(s, input, in, out)
 
 	<-done
+}
+
+// peerNotice is what the terminal says when a peer completes the handshake.
+//
+// A first contact in the device-key model carries a fingerprint to compare
+// with the other screen: the pin was just recorded, and this is the only moment
+// at which the user can tell the right device from a device that got there
+// first. Both values are printed, because each screen shows the other's under a
+// different label — "its fingerprint" here is "this device" there.
+func peerNotice(p e2e.Peer, own string) string {
+	if !p.First || p.Fingerprint == "" {
+		return "Encrypted with " + p.Name()
+	}
+
+	notice := "Encrypted with " + p.Name() + " — new device; its fingerprint is " + p.Fingerprint
+	if own != "" {
+		notice += ", this device's is " + own
+	}
+
+	return notice + ". Compare both with the other screen."
 }
 
 // receive prints the messages of a session to the terminal. The session does

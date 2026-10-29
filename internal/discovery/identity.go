@@ -11,16 +11,24 @@ type Identity struct {
 	Name string `json:"name"`
 }
 
-// ConfigDir returns the cthrone config directory.
+// ConfigDir returns the directory this device keeps its own state in.
+//
+// It is the user configuration directory the platform defines — os.UserConfigDir
+// honours XDG_CONFIG_HOME on Linux, and picks the platform's own place on macOS
+// and Windows — with a cthrone subdirectory. The GUI resolves the same function,
+// so one machine that runs the terminal and the app has one device key and one
+// pin store, not two identities that refuse each other.
 func ConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
+	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".config", "cthrone")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+
+	dir := filepath.Join(base, "cthrone")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+
 	return dir, nil
 }
 

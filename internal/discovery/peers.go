@@ -93,57 +93,106 @@ func NewPinStore(path string) (*PinStore, error) {
 	return s, nil
 }
 
-// Accept decides whether a peer's key is trusted, and records it on first
-// contact.
+// Check answers whether a peer's key is trusted for its name.
 //
 // The identity is the key, so a known key under a known name is accepted
 // without a question. A known name with a different key is refused: that is
 // what pinning means, and the user clears it with Forget. A name that is new —
-// or a peer that has none, which is keyed by its fingerprint — is pinned now,
-// and first says so, so the caller can ask the user to compare the
-// fingerprint with the other screen.
-func (s *PinStore) Accept(pub []byte, name string) (string, bool, error) {
-	if len(pub) != ed25519.PublicKeySize {
-		return "", false, fmt.Errorf("discovery: a device key is %d bytes, want %d", len(pub), ed25519.PublicKeySize)
-	}
-
-	fingerprint := Fingerprint(pub)
-	key := hex.EncodeToString(pub)
-
-	id := name
-	if id == "" {
-		// An unnamed peer is still an identity: the fingerprint is what names
-		// it, and two unnamed devices stay two pins.
-		id = fingerprint
+// or a peer that has none, which is keyed by its fingerprint — is reported as
+// first, so the caller can ask the user to compare the fingerprint with the
+// other screen.
+//
+// Nothing is written here, and that is deliberate: a hello can name any device
+// and sign it with a key of its own, so a pin recorded from one would let
+// anyone who can reach the port or the subject claim a name and lock its owner
+// out. The pin belongs to Pin, which is called only after the exchange proved
+// the peer holds the key.
+func (s *PinStore) Check(pub []byte, name string) (fingerprint string, first bool, err error) {
+	fingerprint, key, id, err := pinOf(pub, name)
+	if err != nil {
+		return "", false, err
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	pinned, ok := s.peers[id]
+	if !ok {
+		return fingerprint, true, nil
+	}
+
+	if pinned.Key != key {
+		return fingerprint, false, fmt.Errorf("%w: %q", ErrIdentityChanged, displayName(pinned, name))
+	}
+
+	return fingerprint, false, nil
+}
+
+// Pin records a peer whose handshake has completed: the first contact creates
+// the entry, and every later one refreshes the time it was last seen.
+//
+// A write that fails is reported rather than kept in memory alone: the caller
+// refuses the peer, because a pin the next run cannot read is a peer the user
+// would be asked to compare again.
+func (s *PinStore) Pin(pub []byte, name string) error {
+	_, key, id, err := pinOf(pub, name)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+
 	if pinned, ok := s.peers[id]; ok {
 		if pinned.Key != key {
-			return fingerprint, false, fmt.Errorf("%w: %q", ErrIdentityChanged, displayName(pinned, name))
+			return fmt.Errorf("%w: %q", ErrIdentityChanged, displayName(pinned, name))
 		}
 
-		pinned.LastSeen = time.Now()
+		pinned.LastSeen = now
 		if name != "" {
 			pinned.Name = name
 		}
 		s.peers[id] = pinned
 
-		return fingerprint, false, s.save()
+		return s.save()
 	}
 
-	now := time.Now()
 	s.peers[id] = PinnedPeer{
 		Name:        name,
 		Key:         key,
-		Fingerprint: fingerprint,
+		Fingerprint: Fingerprint(pub),
 		FirstSeen:   now,
 		LastSeen:    now,
 	}
 
-	return fingerprint, true, s.save()
+	if err := s.save(); err != nil {
+		delete(s.peers, id)
+
+		return err
+	}
+
+	return nil
+}
+
+// pinOf validates a device key and names the entry it belongs to: the device's
+// name, or its fingerprint when it has none — an unnamed peer is still an
+// identity, and two unnamed devices stay two pins.
+func pinOf(pub []byte, name string) (fingerprint, key, id string, err error) {
+	if len(pub) != ed25519.PublicKeySize {
+		return "", "", "", fmt.Errorf("discovery: a device key is %d bytes, want %d", len(pub), ed25519.PublicKeySize)
+	}
+
+	fingerprint = Fingerprint(pub)
+	key = hex.EncodeToString(pub)
+	id = name
+
+	if id == "" {
+		id = fingerprint
+	}
+
+	return fingerprint, key, id, nil
 }
 
 // List returns the pinned devices, ordered by name then fingerprint.
@@ -169,8 +218,10 @@ func (s *PinStore) List() []PinnedPeer {
 
 // Forget removes a pin by name or fingerprint and reports whether one was
 // there. It is the way back from a reinstalled device, or from a name that was
-// paired by mistake.
-func (s *PinStore) Forget(id string) bool {
+// paired by mistake. A store that cannot be written keeps the pin and reports
+// why: reporting "not found" for a failed save would send the user looking for
+// the wrong problem.
+func (s *PinStore) Forget(id string) (bool, error) {
 	want := normalizePinID(id)
 
 	s.mu.Lock()
@@ -180,20 +231,32 @@ func (s *PinStore) Forget(id string) bool {
 		if normalizePinID(key) == want || normalizePinID(p.Name) == want || normalizePinID(p.Fingerprint) == want {
 			delete(s.peers, key)
 
-			return s.save() == nil
+			if err := s.save(); err != nil {
+				s.peers[key] = p
+
+				return false, err
+			}
+
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // save writes the pins in a form a person can read and a future version can
 // extend. The file holds public keys only, so it is not a secret — but it is
 // still written 0600, because who this device talks to is nobody else's
 // business.
+//
+// The write goes to a temporary file beside the real one and is renamed into
+// place, so a crash or a full disk cannot leave half a document where the pins
+// were: the next run would fail to parse it, and every command refuses to start
+// until someone deleted the file by hand.
 func (s *PinStore) save() error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return fmt.Errorf("creating %s: %w", filepath.Dir(s.path), err)
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
 	content, err := json.MarshalIndent(pinFile{Version: 1, Peers: s.peers}, "", "  ")
@@ -201,7 +264,33 @@ func (s *PinStore) save() error {
 		return fmt.Errorf("encoding the pins: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, append(content, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, ".peers-*.json")
+	if err != nil {
+		return fmt.Errorf("writing the pins: %w", err)
+	}
+
+	name := tmp.Name()
+
+	// A successful rename leaves nothing to remove; every other way out does.
+	defer os.Remove(name)
+
+	if _, err := tmp.Write(append(content, '\n')); err != nil {
+		_ = tmp.Close()
+
+		return fmt.Errorf("writing the pins: %w", err)
+	}
+
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+
+		return fmt.Errorf("writing the pins: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing the pins: %w", err)
+	}
+
+	if err := os.Rename(name, s.path); err != nil {
 		return fmt.Errorf("writing %s: %w", s.path, err)
 	}
 

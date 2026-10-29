@@ -6,12 +6,15 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
+	"github.com/fiwon123/cthrone/internal/e2e"
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
@@ -21,14 +24,21 @@ import (
 var server = websockethandler.OpenServer
 
 // HostHandle is a running host. It carries the two values the other device
-// needs to pair — the shared secret and, with TLS, the certificate
-// fingerprint — because the caller may have no terminal to print them to.
+// needs to pair — the shared secret, or this device's fingerprint in the
+// device-key model, and, with TLS, the certificate fingerprint — because the
+// caller may have no terminal to print them to.
 type HostHandle struct {
 	server *websockethandler.Server
 
-	// Token is the secret the host requires. It is never empty: a client
-	// without it is refused.
+	// Token is the secret the host requires. It is empty when the host is
+	// pairing by device key: there is then nothing to copy to the other
+	// device, and the end-to-end handshake is what lets a peer in.
 	Token string
+
+	// DeviceFingerprint is this host's own device key in the device-key model:
+	// what the other device shows when the two meet, for comparison. It is
+	// empty when a shared secret is used.
+	DeviceFingerprint string
 
 	// Fingerprint is the certificate the other device must pin. It is empty
 	// when TLS is off.
@@ -58,8 +68,8 @@ func (h *HostHandle) Stop() error {
 // The bind address is empty by default, which means every interface: the tool
 // is a chat between two devices on the same network, and a host that only
 // listens on the loopback cannot be reached by the other device.
-func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
-	handle, err := OpenServer(app, flagToken, tokenFile, tlsConf, func(s session.Session) {
+func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS) error {
+	handle, err := OpenServer(app, opts, tlsConf, func(s session.Session) {
 		go runTerminal(s)
 	})
 	if err != nil {
@@ -79,13 +89,17 @@ func Host(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
 // Every client that is let in arrives at onSession already sealed: the
 // wrapper is installed here, so a caller cannot forget it and cannot opt out.
 //
-// The handle also reports the shared secret and the certificate fingerprint:
-// the terminal prints them, and a GUI has nowhere to print them to.
-func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, onSession func(session.Session)) (*HostHandle, error) {
-	token, err := hostToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
+// The handle also reports what the other device needs to pair — the shared
+// secret, or this device's fingerprint in the device-key model — and the
+// certificate fingerprint: the terminal prints them, and a GUI has nowhere to
+// print them to.
+func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession func(session.Session)) (*HostHandle, error) {
+	cred, err := pairing.Load(opts)
 	if err != nil {
 		return nil, err
 	}
+
+	token := cred.Secret()
 
 	certFile, keyFile := "", ""
 	fingerprint := ""
@@ -102,17 +116,56 @@ func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, on
 		}
 	}
 
+	// hub is filled in once the server exists: admit runs per connection, and
+	// the handle it belongs to is only returned below. ready closes at the same
+	// moment, and the close is what makes the write to hub visible to an
+	// admission that started before it — so a client that connects the instant
+	// the listener opens still lands in the hub.
+	var (
+		hub   *session.Hub
+		ready = make(chan struct{})
+	)
+
+	// admit hands an authenticated session to the caller and records it in the
+	// hub. Only a sealed session ever reaches it, so a broadcast cannot write
+	// to the transport in the clear.
+	admit := func(sealed session.Session) {
+		<-ready
+
+		if hub != nil {
+			hub.Register(sealed)
+			sealed.OnClose(func(string) { hub.Unregister(sealed.ID()) })
+		}
+
+		onSession(sealed)
+	}
+
 	srv, err := server(app.Port, app.Host, token, certFile, keyFile, func(raw session.Session) {
-		sealed, err := seal(raw, token, app.Name)
+		sealed, err := seal(raw, cred, app.Name)
 		if err != nil {
 			return
 		}
 
-		onSession(sealed)
+		// The consumer starts on the first peer that proves its identity, not
+		// on the socket. A visitor that never authenticates therefore cannot
+		// take over the terminal — which puts it in raw mode — or open a chat
+		// in the app without holding a key this device accepts.
+		conn, ok := sealed.(*e2e.Conn)
+		if !ok {
+			admit(sealed)
+
+			return
+		}
+
+		var once sync.Once
+		conn.OnPeer(func(e2e.Peer) { once.Do(func() { admit(sealed) }) })
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	hub = srv.Hub()
+	close(ready)
 
 	name := app.Name
 	if name == "" {
@@ -121,7 +174,13 @@ func OpenServer(app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS, on
 	ann := discovery.NewAnnouncer(name, app.Port)
 	ann.Start(2 * time.Second)
 
-	return &HostHandle{server: srv, Token: token, Fingerprint: fingerprint, announcer: ann}, nil
+	return &HostHandle{
+		server:            srv,
+		Token:             token,
+		DeviceFingerprint: cred.Fingerprint(),
+		Fingerprint:       fingerprint,
+		announcer:         ann,
+	}, nil
 }
 
 // describeBind says what the bind address means, so a host status is not just

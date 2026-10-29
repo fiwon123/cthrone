@@ -35,6 +35,7 @@ import (
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
 	"github.com/fiwon123/cthrone/internal/e2e"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -321,7 +322,7 @@ func (g *gui) build() {
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
-	g.tokenEntry.SetPlaceHolder("empty uses the token file")
+	g.tokenEntry.SetPlaceHolder("empty: token file, else device-key pairing")
 
 	g.fingerprintEntry = widget.NewEntry()
 	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (needed with TLS)")
@@ -546,8 +547,7 @@ func (g *gui) connect() {
 
 	data := g.data()
 	tlsConf := g.tls()
-	token := g.tokenEntry.Text
-	tokenFile := g.tokenFile()
+	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
 
@@ -561,9 +561,9 @@ func (g *gui) connect() {
 		)
 
 		if useNATS {
-			sess, err = natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
+			sess, err = natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 		} else {
-			sess, err = websocketcore.Dial([]string{host}, data, token, tokenFile, tlsConf)
+			sess, err = websocketcore.Dial([]string{host}, data, opts, tlsConf)
 		}
 
 		if err != nil {
@@ -587,18 +587,17 @@ func (g *gui) connect() {
 func (g *gui) host() {
 	data := g.data()
 	tlsConf := g.tls()
-	token := g.tokenEntry.Text
-	tokenFile := g.tokenFile()
+	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
 	useNATS := g.natsCheck.Checked
-	typedToken := strings.TrimSpace(token) != ""
+	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
 	g.setStatus("Starting…")
 
 	go func() {
 		if useNATS {
-			sess, err := natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
+			sess, err := natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 			if err != nil {
 				g.setStatus("Host failed")
 				g.showError(err)
@@ -613,7 +612,7 @@ func (g *gui) host() {
 			return
 		}
 
-		handle, err := websocketcore.OpenServer(data, token, tokenFile, tlsConf, func(sess session.Session) {
+		handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
 			g.setStatus("A device joined — chatting")
 			g.attach(sess)
 		})
@@ -631,29 +630,45 @@ func (g *gui) host() {
 		fyne.Do(g.updateButtons)
 		g.setStatus("Hosting on " + handle.Addr() + " — waiting for connection")
 		g.tabs.SelectIndex(0)
-		g.offerPairing(handle.Token, handle.Fingerprint, !typedToken)
+		g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, !typedToken)
 	}()
 }
 
 // offerPairing shows the values the other device needs. The terminal host
 // prints them; a GUI has no terminal, and on Android there is no file to open,
 // so this dialog is the only way to pair a phone that hosts.
-func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
+//
+// There are two models and the host uses exactly one: with a shared secret the
+// other device types it, and with TLS it pins the certificate; without a
+// secret nothing is copied at all, and the two devices compare the fingerprint
+// each shows on first contact.
+func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint string, showToken bool) {
 	var message strings.Builder
 
 	if showToken && token != "" {
 		fmt.Fprintf(&message, "Shared secret:\n%s\n\n", token)
 	}
 
-	if fingerprint != "" {
-		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", fingerprint)
+	if token == "" && deviceFingerprint != "" {
+		fmt.Fprintf(&message, "This device's fingerprint:\n%s\n\n", deviceFingerprint)
+		message.WriteString("Nothing to copy: on the other device, connect to this one and compare the fingerprint it shows. It is remembered, and a different key under this name is refused.\n\n")
+	}
+
+	if certificateFingerprint != "" {
+		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", certificateFingerprint)
 	}
 
 	if message.Len() == 0 {
 		return
 	}
 
-	message.WriteString("Enter the shared secret on the other device; with TLS, its fingerprint too.")
+	if token != "" {
+		message.WriteString("Enter the shared secret on the other device")
+		if certificateFingerprint != "" {
+			message.WriteString(", with this certificate fingerprint")
+		}
+		message.WriteString(".\n")
+	}
 
 	text := message.String()
 
@@ -663,8 +678,8 @@ func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
 			g.app.Clipboard().SetContent(token)
 		}
 
-		if fingerprint != "" {
-			g.fingerprintEntry.SetText(fingerprint)
+		if certificateFingerprint != "" {
+			g.fingerprintEntry.SetText(certificateFingerprint)
 		}
 
 		dialog.ShowInformation("Pairing", text, g.win)
@@ -813,6 +828,21 @@ func (g *gui) attach(sess session.Session) {
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			if p.First && p.Fingerprint != "" {
+				// First contact is the one moment the fingerprint can be
+				// compared, so it goes on screen and in the transcript; a
+				// later contact only says who it is. Both values are shown,
+				// because the other screen has them under the opposite labels.
+				g.setStatus("Paired with " + p.Name())
+				g.addMessage(chatMessage{
+					from: "system",
+					text: "paired with " + p.Name() + " — first contact; its fingerprint is " + p.Fingerprint +
+						", this device's is " + sealed.Fingerprint() + ". Compare both with the other screen.",
+				})
+
+				return
+			}
+
 			g.setStatus("Encrypted with " + p.Name())
 			g.addMessage(chatMessage{from: "system", text: "encrypted with " + p.Name()})
 		})
@@ -1065,6 +1095,9 @@ func (g *gui) data() *appdata.Data {
 	data.Name = strings.TrimSpace(g.nameEntry.Text)
 	data.Host = strings.TrimSpace(g.bindEntry.Text)
 
+	// Pairing pins a peer by name, so an empty field still needs one.
+	data.Name = data.ResolveName()
+
 	return data
 }
 
@@ -1085,6 +1118,22 @@ func (g *gui) tls() auth.TLS {
 
 func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
+}
+
+// pairingOptions names the files the app keeps its credential in.
+//
+// They live in configDir rather than at the CLI's default, because a phone has
+// no ~/.config to rely on; on the desktop configDir is that same directory, so
+// the GUI and the CLI share one identity and one pin store.
+func (g *gui) pairingOptions() pairing.Options {
+	dir := g.configDir()
+
+	return pairing.Options{
+		FlagToken: strings.TrimSpace(g.tokenEntry.Text),
+		TokenFile: g.tokenFile(),
+		KeyFile:   filepath.Join(dir, "identity.key"),
+		PinsFile:  filepath.Join(dir, "peers.json"),
+	}
 }
 
 // configDir returns the directory the app keeps its token and TLS material in.

@@ -27,6 +27,13 @@ type Session interface {
 // ErrClosed is returned when writing to a closed session.
 var ErrClosed = errors.New("session closed")
 
+// maxPending bounds the messages a session holds before a message handler is
+// installed. The window is short — a transport delivers a frame the moment it
+// is open, while the wrapper around it is still being installed — but the peer
+// decides what it sends in that window, so the buffer has a ceiling rather than
+// growing without one.
+const maxPending = 256
+
 // Base provides common functionality for session implementations.
 type Base struct {
 	mu        sync.RWMutex
@@ -36,6 +43,15 @@ type Base struct {
 	reason    string
 	id        string
 	remote    string
+
+	// pending holds messages that arrived before a handler was installed, and
+	// draining says one goroutine is delivering them. A frame can be read by
+	// the transport before the layer above it has hooked OnMessage — the
+	// handshake hello is exactly that frame — and dropping it would lose the
+	// start of the exchange. Holding it until the handler arrives is what makes
+	// that gap harmless.
+	pending  []Message
+	draining bool
 }
 
 func NewBase(id, remote string) *Base {
@@ -47,8 +63,50 @@ func (b *Base) RemoteAddr() string { return b.remote }
 
 func (b *Base) OnMessage(fn func(Message)) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.onMessage = fn
+
+	// Nothing held, or a delivery is already running (it will pick this up):
+	// there is nothing for this call to do.
+	if fn == nil || b.draining {
+		b.mu.Unlock()
+
+		return
+	}
+
+	b.draining = true
+	b.mu.Unlock()
+
+	b.drain()
+}
+
+// drain delivers held messages in arrival order, and anything that arrives while
+// it runs, until nothing is left. It is the only place a handler is called for
+// a held message, so a handler that sends on its own session cannot start a
+// second delivery.
+func (b *Base) drain() {
+	for {
+		b.mu.Lock()
+
+		if len(b.pending) == 0 {
+			b.pending = nil
+			b.draining = false
+
+			b.mu.Unlock()
+
+			return
+		}
+
+		m := b.pending[0]
+		b.pending = b.pending[1:]
+		fn := b.onMessage
+		b.mu.Unlock()
+
+		if fn == nil {
+			continue
+		}
+
+		fn(m)
+	}
 }
 
 func (b *Base) OnClose(fn func(string)) {
@@ -70,12 +128,30 @@ func (b *Base) Reason() string {
 }
 
 func (b *Base) NotifyMessage(m Message) {
-	b.mu.RLock()
-	fn := b.onMessage
-	b.mu.RUnlock()
-	if fn != nil {
-		fn(m)
+	b.mu.Lock()
+
+	// No handler yet, or one is busy delivering: hold the message so the
+	// handler sees it in order once it is ready. A handler is never called
+	// here while another delivery is running.
+	if b.onMessage == nil || b.draining {
+		// The oldest are what is kept: the first frames of a session are its
+		// handshake, and a peer that floods the window before a handler exists
+		// has nothing in the overflow that is worth holding.
+		if len(b.pending) < maxPending {
+			b.pending = append(b.pending, m)
+		}
+
+		b.mu.Unlock()
+
+		return
 	}
+
+	b.draining = true
+	fn := b.onMessage
+	b.mu.Unlock()
+
+	fn(m)
+	b.drain()
 }
 
 func (b *Base) NotifyClose(reason string) {

@@ -7,6 +7,7 @@ import (
 	connectcmd "github.com/fiwon123/cthrone/cmd/connect"
 	execcmd "github.com/fiwon123/cthrone/cmd/exec"
 	hostcmd "github.com/fiwon123/cthrone/cmd/host"
+	peerscmd "github.com/fiwon123/cthrone/cmd/peers"
 	recvcmd "github.com/fiwon123/cthrone/cmd/recv"
 	scancmd "github.com/fiwon123/cthrone/cmd/scan"
 	uicmd "github.com/fiwon123/cthrone/cmd/ui"
@@ -58,6 +59,7 @@ func Execute() {
 func init() {
 	rootCmd.AddCommand(connectcmd.Cmd)
 	rootCmd.AddCommand(hostcmd.Cmd)
+	rootCmd.AddCommand(peerscmd.Cmd)
 	rootCmd.AddCommand(scancmd.Cmd)
 	rootCmd.AddCommand(uicmd.Cmd)
 	rootCmd.AddCommand(recvcmd.Cmd)
