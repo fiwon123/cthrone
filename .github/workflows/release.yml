@@ -378,7 +378,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # The draft. Every archive in one flat directory (release asset names are
   # flat), a checksum file over all of them, a curated description followed by
-  # GitHub's generated notes, and `gh release create --draft`.
+  # a changelog built from the merged pull requests, and
+  # `gh release create --draft`.
   # ---------------------------------------------------------------------------
   draft:
     name: Draft release
@@ -419,8 +420,9 @@ jobs:
 
       - name: Compose the release description
         env:
-          # `gh` refuses to authenticate without this, and the compose step calls
-          # `releases/generate-notes`. Without it the step still succeeds — it
+          # `gh` refuses to authenticate without this, and the compose step
+          # calls the releases and pull-request APIs through
+          # `scripts/release-notes.sh`. Without it the step still succeeds — it
           # falls back to a pointer at the commit list — so the loss is silent
           # unless the token is set here.
           GH_TOKEN: ${{ github.token }}
@@ -535,20 +537,20 @@ jobs:
 
           sed -i "s|@VERSION@|$VERSION|g; s|@COMMIT@|$COMMIT|g; s|@RUN@|$RUN_URL|g" header.md
 
-          # GitHub's generated notes, from the previous release to this commit.
-          if gh api "repos/$REPO/releases/generate-notes" \
-               -f tag_name="$VERSION" \
-               -f target_commitish="$COMMIT" \
-               --jq .body > generated.md 2>generate-notes.err; then
+          # `releases/generate-notes` walks the commit graph from the previous
+          # release tag to this commit, so a squash-merged release PR leaves
+          # every feature commit on `dev` and the notes list only that PR.
+          # `scripts/release-notes.sh` lists the pull requests instead (#130).
+          if ./scripts/release-notes.sh "$REPO" "$VERSION" "$COMMIT" > changes.md 2>release-notes.err; then
             :
           else
-            echo "::warning::generate-notes failed; shipping the curated header only"
-            sed 's/^/  /' generate-notes.err >&2
+            echo "::warning::release-notes.sh failed; shipping the curated header only"
+            sed 's/^/  /' release-notes.err >&2
             printf '_Automatic release notes were unavailable for %s. See the full commit list:\n%s/commits/%s_\n' \
-              "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > generated.md
+              "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > changes.md
           fi
 
-          { cat header.md; echo; cat generated.md; } > release-notes.md
+          { cat header.md; cat changes.md; } > release-notes.md
           wc -l release-notes.md
 
       - name: Create or update the draft release
