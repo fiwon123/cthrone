@@ -381,7 +381,7 @@ What the Android CLI does and does not give you:
 | `--token` | the shared secret — **visible in the process list**, so prefer the environment or the file |
 | `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
-| `--name` | device name announced on the network (stored in `~/.config/cthrone/device.json`) |
+| `--name` | device name shown to the peer in an encrypted session; the host also announces it on the network |
 | `--tls` | encrypt the transport: the host serves https, the client expects it |
 | `--cert-fingerprint` | the fingerprint of the certificate to pin, with `--tls` |
 | `--insecure` | accept any certificate, with `--tls` |

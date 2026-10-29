@@ -14,6 +14,8 @@ var natsFlag bool
 
 var natsURLFlag string
 
+var nameFlag string
+
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
 	Use:   "connect",
@@ -31,6 +33,7 @@ On nats connection only host receive message and only connect device send messag
 		acceptAny, _ := cmd.Flags().GetBool("insecure")
 
 		app := app.New(port)
+		app.Name = nameFlag
 
 		tlsConf := auth.TLS{
 			Enabled:     tlsEnabled,
@@ -53,4 +56,5 @@ On nats connection only host receive message and only connect device send messag
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
+	Cmd.Flags().StringVar(&nameFlag, "name", "", "device name the host shows for this device")
 }
