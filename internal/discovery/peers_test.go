@@ -406,8 +406,87 @@ func TestForgetRemovesEveryCertificateUnderAHost(t *testing.T) {
 	}
 }
 
-// A pin of each kind lives in one file, and forgetting one leaves the other:
-// the device pin and the certificate pin answer different questions.
+// A store can outlive the pin file it was loaded from — a session lasts, and
+// the host beside it pairs another device — so a write has to start from what
+// is on disk now. Writing the copy a long-running store holds would erase the
+// pins recorded in between, and the next contact with those devices would look
+// like a first contact again.
+func TestPinKeepsAPinAnotherStoreWrote(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "peers.json")
+
+	first, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	laptop, phone := newKey(t), newKey(t)
+
+	if err := first.Pin(laptop, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+
+	// second was loaded before anything was pinned; its write must not drop
+	// the pin first recorded.
+	if err := second.Pin(phone, "phone"); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pinned := make(map[string]bool, 2)
+	for _, p := range reloaded.List() {
+		pinned[p.Name] = true
+	}
+
+	for _, name := range []string{"laptop", "phone"} {
+		if !pinned[name] {
+			t.Errorf("the pin for %q was lost by the other store's write", name)
+		}
+	}
+}
+
+// A host is reachable by name and the certificate is pinned by address, so
+// forgetting the host has to remove both pins in the same write: leaving the
+// device pin would keep refusing the device the user just said to forget, and
+// a second pass could fail after the first had already been written.
+func TestForgetRemovesADeviceAndACertificateInOnePass(t *testing.T) {
+	store, path := newCertStore(t)
+
+	if err := store.Pin(newKey(t), "192.168.1.5"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.PinCert("192.168.1.5:8080", strings.Repeat("ab", 32)); err != nil {
+		t.Fatal(err)
+	}
+
+	forgot, err := store.Forget("192.168.1.5")
+	if err != nil || !forgot {
+		t.Fatalf("forget = %v, %v; want both pins removed", forgot, err)
+	}
+
+	reloaded, err := NewPinStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(reloaded.List()); got != 0 {
+		t.Errorf("device pins after forget = %d, want 0", got)
+	}
+
+	if got := len(reloaded.Certificates()); got != 0 {
+		t.Errorf("certificate pins after forget = %d, want 0", got)
+	}
+}
+
 func TestDeviceAndCertificatePinsShareTheFile(t *testing.T) {
 	store, path := newCertStore(t)
 
