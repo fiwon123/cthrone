@@ -356,9 +356,11 @@ func (a *Assembler) drop(id string) {
 // one: two files called photo.jpg are two files, and the second becomes
 // "photo (1).jpg".
 //
-// The naming policy is provisional until the save-policy issue decides whether
-// a collision should ask instead; the rule this type must keep either way is
-// that a file already in the folder is never overwritten silently.
+// #114 settled the policy: a collision is suffixed here and when the finished
+// file is moved out of staging into the folder the user chose, and only the save
+// dialog asks — where overwriting is the user's explicit choice. The rule this
+// type must keep is that a file already in the folder is never replaced
+// silently.
 func (a *Assembler) uniquePath(name string) (string, error) {
 	for i := 0; i <= maxCollisions; i++ {
 		candidate := filepath.Join(a.Dir, numbered(name, i))

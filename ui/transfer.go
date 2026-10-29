@@ -236,8 +236,8 @@ func showsInline(mime string, size int64) bool {
 // file next to the one thing the user must not share. On a phone the app's own
 // storage is the only folder that exists, so downloads live under it.
 //
-// The choice of folder is the save policy's to change (#114); this is the
-// default it starts from.
+// It is the default a fresh install starts from: #114 added the preference that
+// replaces it, and this is the fallback that preference falls back to.
 func resolveDownloadDir(mobile bool, storageRoot string) string {
 	if mobile {
 		if storageRoot != "" {
@@ -264,8 +264,14 @@ const (
 	// transferSent is an outgoing file the transport accepted in full.
 	transferSent
 
-	// transferSaved is an incoming file that arrived intact and is on disk.
+	// transferSaved is an incoming file that arrived intact and is in the
+	// folder the user chose.
 	transferSaved
+
+	// transferPending is an incoming file that arrived intact and is waiting
+	// for the user to say where to put it. It is in the app's own storage, not
+	// in a folder the user will find on their own.
+	transferPending
 
 	// transferFailed stopped on an error; the row says so instead of
 	// pretending the file went anywhere.
@@ -297,6 +303,9 @@ func (n fileNote) line() string {
 		}
 
 		return fmt.Sprintf("%s (%s) — saved", n.name, humanBytes(n.size))
+
+	case transferPending:
+		return fmt.Sprintf("%s (%s) — waiting to be saved", n.name, humanBytes(n.size))
 
 	case transferFailed:
 		return n.name + " — failed"

@@ -393,6 +393,11 @@ func TestFileNoteLines(t *testing.T) {
 			want: "notes.txt (12 B) — saved",
 		},
 		{
+			name: "waiting for the user",
+			note: fileNote{name: "photo.jpg", size: 1024, state: transferPending},
+			want: "photo.jpg (1.0 KB) — waiting to be saved",
+		},
+		{
 			name: "failed",
 			note: fileNote{name: "movie.mp4", size: 10, state: transferFailed},
 			want: "movie.mp4 — failed",

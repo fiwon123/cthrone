@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/wire"
@@ -251,16 +251,193 @@ func (g *gui) updateProgress(note *fileNote, sent int64) {
 	})
 }
 
-// finishTransfer turns a receiving row into the finished one.
+// finishTransfer turns a receiving row into the finished one, and hands the file
+// to the save policy.
+//
+// The row is updated from the staged copy first, so a picture can be drawn while
+// ask mode waits for an answer: the verified bytes are all there, only their
+// final home is undecided.
 func (g *gui) finishTransfer(note *fileNote, file *wire.File) {
+	settings := g.fileSettings()
+
+	state := transferSaved
+	if settings.policy == saveAsk {
+		state = transferPending
+	}
+
 	fyne.Do(func() {
 		note.name = file.Name
 		note.path = file.Path
 		note.sent = file.Size
 		note.inline = showsInline(file.MIME, file.Size)
+		note.state = state
+		g.refreshTransfer(note)
+	})
+
+	if settings.policy == saveAsk {
+		g.askWhereToSave(note, file.Name, file.Path)
+
+		return
+	}
+
+	g.saveTo(note, file, settings.folder)
+}
+
+// saveTo moves an arrival into folder and points its row at the result.
+//
+// The move is off the UI goroutine: renaming is cheap, but the copy a folder on
+// another filesystem forces is not, and a 200 MB video must not freeze the page
+// while it is put away.
+func (g *gui) saveTo(note *fileNote, file *wire.File, folder string) {
+	target, err := moveInto(file.Path, folder, file.Name)
+	if err != nil {
+		fyne.Do(func() {
+			note.path = ""
+			note.sent = 0
+			note.inline = false
+			note.state = transferFailed
+			g.refreshTransfer(note)
+		})
+		g.setStatus("Saving " + file.Name + " failed: " + err.Error())
+
+		return
+	}
+
+	fyne.Do(func() {
+		note.path = target
 		note.state = transferSaved
 		g.refreshTransfer(note)
 	})
+}
+
+// askWhereToSave shows the one dialog ask mode costs per transfer.
+//
+// Cancelling it is not a refusal: the file stays in the app's own storage and
+// the row keeps a Save action, so a file whose dialog was dismissed by accident
+// is one click from being saved rather than gone.
+func (g *gui) askWhereToSave(note *fileNote, name, staged string) {
+	fyne.Do(func() {
+		save := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				g.showError(err)
+				g.setStatus(name + " is still waiting to be saved")
+
+				return
+			}
+
+			if writer == nil {
+				g.setStatus(name + " is still waiting to be saved")
+
+				return
+			}
+
+			go g.writeStaged(note, name, staged, writer)
+		}, g.win)
+
+		save.SetFileName(name)
+		save.Resize(g.dialogSize())
+		save.Show()
+	})
+}
+
+// writeStaged copies a staged file into the place the user picked, and drops the
+// staged copy once the bytes are there.
+func (g *gui) writeStaged(note *fileNote, name, staged string, writer fyne.URIWriteCloser) {
+	defer writer.Close()
+
+	if err := copyInto(writer, staged); err != nil {
+		g.showError(err)
+		g.setStatus("Saving " + name + " failed: " + err.Error())
+
+		return
+	}
+
+	os.Remove(staged)
+
+	target := name
+	if uri := writer.URI(); uri != nil && uri.Path() != "" {
+		target = uri.Path()
+	}
+
+	fyne.Do(func() {
+		note.path = target
+		note.state = transferSaved
+		g.refreshTransfer(note)
+	})
+}
+
+// showFiles is the Files dialog: where received files go, and whether the user
+// wants to be asked first.
+func (g *gui) showFiles() {
+	settings := g.fileSettings()
+
+	folder := widget.NewEntry()
+	folder.SetText(settings.folder)
+
+	ask := widget.NewCheck("Ask before saving each file", nil)
+	ask.SetChecked(settings.policy == saveAsk)
+
+	choose := widget.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
+		picker := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil {
+				g.showError(err)
+
+				return
+			}
+
+			if uri == nil {
+				return
+			}
+
+			folder.SetText(uri.Path())
+		}, g.win)
+		picker.Resize(g.dialogSize())
+		picker.Show()
+	})
+
+	items := []*widget.FormItem{
+		// The picker is the normal way in on a phone, where typing a path is
+		// close to impossible; the field stays for a path pasted from a desktop.
+		widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, choose, folder)),
+		widget.NewFormItem("", ask),
+	}
+
+	form := dialog.NewForm("Files", "Save", "Cancel", items, func(ok bool) {
+		if !ok {
+			return
+		}
+
+		g.storeFileSettings(folder.Text, ask.Checked)
+	}, g.win)
+	form.Resize(g.dialogSize())
+	form.Show()
+}
+
+// storeFileSettings validates and remembers the choice, so it survives a
+// restart. A folder that is not a path is refused rather than silently replaced
+// by the fallback, because the user meant to change it.
+func (g *gui) storeFileSettings(folder string, ask bool) {
+	dir := expandFolder(folder)
+	if dir == "" {
+		g.setStatus("Not saved: " + folder + " is not an absolute path")
+
+		return
+	}
+
+	settings := fileSettings{folder: dir, policy: saveAuto}
+	if ask {
+		settings.policy = saveAsk
+	}
+
+	writeFileSettings(g.preferences(), settings)
+
+	if ask {
+		g.setStatus("Files will be saved in " + dir + " — asking first")
+
+		return
+	}
+
+	g.setStatus("Files will be saved in " + dir)
 }
 
 // refreshTransfer repaints the row a note belongs to.
@@ -387,10 +564,14 @@ func (g *gui) takeIncoming() []*fileNote {
 
 // prepareReceive installs a fresh assembler for a new session and closes the
 // one the previous session used, which drops any half-received file with it.
+//
+// The assembler writes into the staging folder, not the download folder: the
+// save policy decides where a file ends up, and ask mode must be able to leave
+// one unsaved without it landing somewhere the user did not choose.
 func (g *gui) prepareReceive() {
 	var assembler *wire.Assembler
 
-	if dir, err := g.ensureDownloadDir(); err == nil {
+	if dir, err := g.ensureStagingDir(); err == nil {
 		assembler = wire.NewAssembler(dir, wire.DefaultTimeout)
 	} else {
 		g.setStatus("Received files cannot be saved: " + err.Error())
@@ -457,10 +638,18 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widget.Button)
 		pic.Hide()
 	}
 
-	if m.file.state == transferSaved {
+	switch m.file.state {
+	case transferSaved:
 		save.OnTapped = func() { g.saveAs(path) }
 		save.Show()
-	} else {
+
+	case transferPending:
+		name := filepath.Base(path)
+		note := m.file
+		save.OnTapped = func() { g.askWhereToSave(note, name, path) }
+		save.Show()
+
+	default:
 		save.Hide()
 	}
 }
@@ -506,15 +695,7 @@ func (g *gui) saveAs(path string) {
 		go func() {
 			defer writer.Close()
 
-			src, err := os.Open(path)
-			if err != nil {
-				g.showError(err)
-
-				return
-			}
-			defer src.Close()
-
-			if _, err := io.Copy(writer, src); err != nil {
+			if err := copyInto(writer, path); err != nil {
 				g.showError(err)
 
 				return
@@ -529,21 +710,46 @@ func (g *gui) saveAs(path string) {
 	save.Show()
 }
 
-// downloadDir is where received files land: the user's Downloads folder on a
-// desktop, the app's own storage on a phone.
+// downloadDir is where received files land by default: the user's Downloads
+// folder on a desktop, the app's own storage on a phone. A folder chosen in the
+// Files dialog replaces it.
 func (g *gui) downloadDir() string {
-	storage := ""
-	if g.app != nil {
-		if root := g.app.Storage().RootURI(); root != nil {
-			storage = root.Path()
-		}
-	}
-
-	return resolveDownloadDir(g.mobile, storage)
+	return resolveDownloadDir(g.mobile, g.storageRoot())
 }
 
-// ensureDownloadDir makes the download folder, so the first chunk of a
-// transfer does not fail on a folder that does not exist yet.
+// stagingDir is where a file is assembled before it is saved.
+func (g *gui) stagingDir() string {
+	return defaultStagingDir(g.storageRoot())
+}
+
+// storageRoot is the app's own directory, or "" when the toolkit has not
+// provided one, in which case the defaults fall back to the temporary dir.
+func (g *gui) storageRoot() string {
+	if g.app == nil {
+		return ""
+	}
+
+	if root := g.app.Storage().RootURI(); root != nil {
+		return root.Path()
+	}
+
+	return ""
+}
+
+// ensureStagingDir makes the staging folder, so the first chunk of a transfer
+// does not fail on a folder that does not exist yet.
+func (g *gui) ensureStagingDir() (string, error) {
+	dir := g.stagingDir()
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating the staging folder: %w", err)
+	}
+
+	return dir, nil
+}
+
+// ensureDownloadDir makes the download folder before a picked file is staged
+// beside it, which keeps the staging copy on the same filesystem as the files.
 func (g *gui) ensureDownloadDir() (string, error) {
 	dir := g.downloadDir()
 
@@ -552,6 +758,20 @@ func (g *gui) ensureDownloadDir() (string, error) {
 	}
 
 	return dir, nil
+}
+
+// preferences is the toolkit's key/value store, or nil when there is no app.
+func (g *gui) preferences() preferenceStore {
+	if g.app == nil {
+		return nil
+	}
+
+	return g.app.Preferences()
+}
+
+// fileSettings is where received files go, and whether the user is asked first.
+func (g *gui) fileSettings() fileSettings {
+	return readFileSettings(g.preferences(), g.downloadDir())
 }
 
 // mimeOf names a picked file's type from its extension. The receiver uses it to
