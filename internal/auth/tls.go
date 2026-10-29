@@ -28,9 +28,9 @@ import (
 // no certificate authority.
 type TLS struct {
 	// Enabled makes the transport encrypted. The websocket host serves
-	// https and the websocket client expects it. The NATS transport
-	// decides from the scheme of the broker URL instead, the way a URL
-	// does.
+	// https and the websocket client expects it; both are the default, and
+	// --no-tls turns them off. The NATS transport decides from the scheme of
+	// the broker URL instead, the way a URL does.
 	Enabled bool
 
 	// CertFile and KeyFile are where the host keeps its certificate. They
@@ -39,9 +39,10 @@ type TLS struct {
 	CertFile string
 	KeyFile  string
 
-	// Fingerprint is the certificate the client pins. It is checked
+	// Fingerprint is the certificate the client pins by hand. It is checked
 	// instead of a certificate authority: the host's certificate is
-	// self-signed, so there is no authority to check it against.
+	// self-signed, so there is no authority to check it against. An empty
+	// fingerprint means the certificate is pinned on first contact.
 	Fingerprint string
 
 	// Insecure makes the client accept any certificate. It is what the
@@ -49,22 +50,95 @@ type TLS struct {
 	Insecure bool
 }
 
-// TLSConfig returns the configuration a client uses to check the
-// certificate of its peer, or nil when the transport is not encrypted.
+// CertPins is the record of the host certificates this device trusts on first
+// contact. The websocket client keeps it beside the device pins, in
+// peers.json, because both answer the same question: is this the peer I met
+// last time? discovery.PinStore is the implementation.
+type CertPins interface {
+	// CheckCert reports whether the certificate presented at address is the
+	// one pinned there, and reports first when nothing is pinned yet.
+	CheckCert(address, fingerprint string) (first bool, err error)
+
+	// PinCert records the certificate presented at address.
+	PinCert(address, fingerprint string) error
+}
+
+// TransportTLS resolves the pair of switches into the setting the websocket
+// transport uses. TLS is the default, so a run that passes neither is still
+// encrypted: --no-tls is the opt-out, and --tls is kept only so a v0.6.0
+// command line still runs. Asking for both is a contradiction, not a
+// preference.
+func TransportTLS(tlsFlag, noTLSFlag bool) (bool, error) {
+	if tlsFlag && noTLSFlag {
+		return false, errors.New("--tls and --no-tls cannot both be given: TLS is the default, --no-tls turns it off")
+	}
+
+	return !noTLSFlag, nil
+}
+
+// TLSConfig returns the configuration a client uses to check the certificate
+// of its peer, or nil when the transport is not encrypted.
 //
-// A client that is told to expect TLS and names neither a fingerprint nor
-// --insecure is refused: connecting to whatever answers is not what was
-// asked for.
-func TLSConfig(tlsConf TLS) (*tls.Config, error) {
+// A fingerprint pins the certificate by hand, and insecure accepts any of
+// them. With neither, the certificate is trusted on first use: the one the
+// host presents is recorded in pins under address, and a different one at the
+// same address later is refused. That is what lets TLS be the default with no
+// value to copy from the other device.
+func TLSConfig(tlsConf TLS, address string, pins CertPins) (*tls.Config, error) {
 	if !tlsConf.Enabled {
 		return nil, nil
 	}
 
-	if tlsConf.Fingerprint == "" && !tlsConf.Insecure {
-		return nil, errors.New("--tls needs --cert-fingerprint to check the certificate, or --insecure to skip the check")
+	if tlsConf.Fingerprint != "" {
+		return ClientTLSConfig(tlsConf.Fingerprint, false)
 	}
 
-	return ClientTLSConfig(tlsConf.Fingerprint, tlsConf.Insecure)
+	if tlsConf.Insecure {
+		return ClientTLSConfig("", true)
+	}
+
+	return trustOnFirstUse(address, pins)
+}
+
+// trustOnFirstUse returns the configuration that records the certificate the
+// host presents, and refuses a different one under the same address.
+//
+// The first contact is the only moment a machine in the middle can insert
+// itself: the pin is written from what arrives, so the address has to name the
+// host the user meant. The device key is the stronger gate behind it — the
+// session is refused unless the peer proves the key it was pinned by.
+func trustOnFirstUse(address string, pins CertPins) (*tls.Config, error) {
+	if pins == nil {
+		return nil, errors.New("the certificate of the host is pinned on first contact, and there is nowhere to record it: give --cert-fingerprint or --insecure")
+	}
+
+	if strings.TrimSpace(address) == "" {
+		return nil, errors.New("the certificate of the host is pinned by address, and the address is empty")
+	}
+
+	return &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // the pin below is the check
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return errors.New("the host presented no certificate")
+			}
+
+			got := FingerprintOfDER(rawCerts[0])
+
+			if _, err := pins.CheckCert(address, got); err != nil {
+				return err
+			}
+
+			// Recording refreshes "last seen" after the first contact, the
+			// way a device pin does: the listing answers when this host was
+			// last reached, not only when it was first trusted.
+			if err := pins.PinCert(address, got); err != nil {
+				return fmt.Errorf("recording the certificate of %s: %w", address, err)
+			}
+
+			return nil
+		},
+	}, nil
 }
 
 // Certificate is a key pair and the fingerprint of its certificate.

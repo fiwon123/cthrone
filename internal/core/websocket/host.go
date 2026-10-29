@@ -40,8 +40,8 @@ type HostHandle struct {
 	// empty when a shared secret is used.
 	DeviceFingerprint string
 
-	// Fingerprint is the certificate the other device must pin. It is empty
-	// when TLS is off.
+	// Fingerprint is the certificate the other device pins on first contact.
+	// It is empty when TLS is off.
 	Fingerprint string
 
 	// Announcer is optional; stop it when closing.
@@ -236,7 +236,7 @@ func hostCertificate(configuredCert, configuredKey string) (string, string, erro
 
 	fmt.Println("Generated a certificate in", certFile)
 	fmt.Println("Its fingerprint is", cert.Fingerprint)
-	fmt.Println("Give that fingerprint to the other device with --cert-fingerprint.")
+	fmt.Println("The other device pins it on first contact; --cert-fingerprint pins it by hand instead.")
 
 	return certFile, keyFile, nil
 }
@@ -273,7 +273,8 @@ func fileExists(path string) bool {
 }
 
 // clientTLSConfig returns the configuration the client uses to check the
-// certificate of the host.
-func clientTLSConfig(tlsConf auth.TLS) (*tls.Config, error) {
-	return auth.TLSConfig(tlsConf)
+// certificate of the host. The address is what a certificate with no
+// fingerprint is pinned under, and pins is where it is recorded.
+func clientTLSConfig(tlsConf auth.TLS, address string, pins auth.CertPins) (*tls.Config, error) {
+	return auth.TLSConfig(tlsConf, address, pins)
 }

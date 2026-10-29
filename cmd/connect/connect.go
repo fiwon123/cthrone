@@ -29,9 +29,17 @@ On nats connection only host receive message and only connect device send messag
 		port, _ := cmd.Flags().GetInt("port")
 		secret, _ := cmd.Flags().GetString("token")
 		secretFile, _ := cmd.Flags().GetString("token-file")
-		tlsEnabled, _ := cmd.Flags().GetBool("tls")
+		tlsFlag, _ := cmd.Flags().GetBool("tls")
+		noTLSFlag, _ := cmd.Flags().GetBool("no-tls")
 		fingerprint, _ := cmd.Flags().GetString("cert-fingerprint")
 		acceptAny, _ := cmd.Flags().GetBool("insecure")
+
+		// The websocket transport is encrypted unless --no-tls says
+		// otherwise; the NATS one is decided by its broker URL.
+		tlsEnabled, err := auth.TransportTLS(tlsFlag, noTLSFlag)
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		app := app.New(port)
 		app.Name = nameFlag

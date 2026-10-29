@@ -2,6 +2,9 @@ package websocketcore
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"strings"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/chat"
@@ -57,7 +60,14 @@ func open(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) 
 		return nil, err
 	}
 
-	tlsConfig, err := clientTLSConfig(tlsConf)
+	// A nil store is passed as a nil interface: a typed nil would be non-nil
+	// to the TLS configuration, which would then try to record a pin in it.
+	var pins auth.CertPins
+	if store := cred.Pins(); store != nil {
+		pins = store
+	}
+
+	tlsConfig, err := clientTLSConfig(tlsConf, pinAddress(address, app.Port), pins)
 	if err != nil {
 		return nil, err
 	}
@@ -92,4 +102,16 @@ func connectAddress(args []string) string {
 	}
 
 	return args[0]
+}
+
+// pinAddress is the key a host's certificate is pinned under: the address the
+// client dialed, with the port the dial actually uses. It is the same form
+// that goes into the URL, so the pin names the host the user asked for rather
+// than a second spelling of it.
+func pinAddress(address string, port int) string {
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return strings.ToLower(address)
+	}
+
+	return strings.ToLower(fmt.Sprintf("%s:%d", address, port))
 }

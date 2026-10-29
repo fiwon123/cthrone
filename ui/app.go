@@ -325,7 +325,7 @@ func (g *gui) build() {
 	g.tokenEntry.SetPlaceHolder("empty: token file, else device-key pairing")
 
 	g.fingerprintEntry = widget.NewEntry()
-	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (needed with TLS)")
+	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
 
 	g.subjectEntry = widget.NewEntry()
 	g.subjectEntry.SetText(natscore.DefaultSubject)
@@ -334,6 +334,9 @@ func (g *gui) build() {
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
 	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
+	// Encrypted is the default on the CLI, so the app starts the same way: a
+	// phone that has to find a switch before it is protected is not protected.
+	g.tlsCheck.SetChecked(true)
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
 
@@ -639,9 +642,10 @@ func (g *gui) host() {
 // so this dialog is the only way to pair a phone that hosts.
 //
 // There are two models and the host uses exactly one: with a shared secret the
-// other device types it, and with TLS it pins the certificate; without a
-// secret nothing is copied at all, and the two devices compare the fingerprint
-// each shows on first contact.
+// other device types it; without a secret nothing is copied at all, and the
+// two devices compare the fingerprint each shows on first contact. The
+// transport is encrypted either way, and the client pins the host's
+// certificate on first contact unless one is typed into the fingerprint field.
 func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint string, showToken bool) {
 	var message strings.Builder
 
@@ -656,6 +660,7 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint stri
 
 	if certificateFingerprint != "" {
 		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", certificateFingerprint)
+		message.WriteString("The other device pins this certificate on first contact: compare the two values there if you want to be sure.\n\n")
 	}
 
 	if message.Len() == 0 {
@@ -663,11 +668,7 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint stri
 	}
 
 	if token != "" {
-		message.WriteString("Enter the shared secret on the other device")
-		if certificateFingerprint != "" {
-			message.WriteString(", with this certificate fingerprint")
-		}
-		message.WriteString(".\n")
+		message.WriteString("Enter the shared secret on the other device.\n")
 	}
 
 	text := message.String()
@@ -676,10 +677,6 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint stri
 		if showToken && token != "" {
 			g.tokenEntry.SetText(token)
 			g.app.Clipboard().SetContent(token)
-		}
-
-		if certificateFingerprint != "" {
-			g.fingerprintEntry.SetText(certificateFingerprint)
 		}
 
 		dialog.ShowInformation("Pairing", text, g.win)

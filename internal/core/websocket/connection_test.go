@@ -86,6 +86,45 @@ func TestConnectAddress(t *testing.T) {
 	}
 }
 
+// A certificate is pinned under the address that was dialed, in the same form
+// that goes into the URL: the pin names the host the user asked for, not a
+// second spelling of it.
+func TestPinAddress(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+		port    int
+		want    string
+	}{
+		{
+			name:    "an address without a port gets the port that is dialed",
+			address: "192.168.1.5",
+			port:    8080,
+			want:    "192.168.1.5:8080",
+		},
+		{
+			name:    "an address with a port keeps the port in the URL",
+			address: "192.168.1.5:9000",
+			port:    8080,
+			want:    "192.168.1.5:9000",
+		},
+		{
+			name:    "a host name is compared in one case",
+			address: "Laptop.local",
+			port:    8080,
+			want:    "laptop.local:8080",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pinAddress(tc.address, tc.port); got != tc.want {
+				t.Errorf("pinAddress(%q, %d) = %q, want %q", tc.address, tc.port, got, tc.want)
+			}
+		})
+	}
+}
+
 // A missing address is an error the command can report, not a panic.
 func TestConnectWithoutAnAddressFails(t *testing.T) {
 	err := Connect(nil, app.New(8080), pairing.Options{}, auth.TLS{})

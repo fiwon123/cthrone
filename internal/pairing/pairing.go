@@ -29,7 +29,10 @@ import (
 const SourceDeviceKey = "device key"
 
 // Credential is what a session authenticates with: a shared secret, or this
-// device's key and its pin store. It is never empty.
+// device's key. Both carry the pin store — the device pins in the key model,
+// and the host certificate pinned on first contact in both — because the
+// websocket transport contacts a host before the handshake that says which
+// model the peer speaks. It is never empty.
 type Credential struct {
 	secret   string
 	identity *e2e.Identity
@@ -48,6 +51,12 @@ func (c Credential) Secret() string { return c.secret }
 
 // Source says where the credential came from, for a status line.
 func (c Credential) Source() string { return c.source }
+
+// Pins is the trust-on-first-use record of the devices and host certificates
+// this device has met, or nil for a credential that was never loaded. It is
+// set in both models: the websocket client pins its host's certificate
+// through it before the handshake says which credential the peer speaks.
+func (c Credential) Pins() *discovery.PinStore { return c.pins }
 
 // Fingerprint is this device's own fingerprint in the device-key model: what
 // the other screen shows when the two devices first meet. It is empty when a
@@ -91,6 +100,10 @@ type Options struct {
 // Load resolves the credential: the shared secret if one is configured, and
 // this device's key with its pins otherwise.
 //
+// The pins are loaded in both cases. The device key needs them to pin peers,
+// and the certificate of the host is trusted on first use through them, which
+// happens before the handshake says which model the peer speaks.
+//
 // A secret that is configured but unreadable is an error rather than a reason
 // to fall back to pairing: the user meant to use the secret, and a device that
 // quietly paired instead would have a pin store nobody asked for.
@@ -105,6 +118,16 @@ func Load(opts Options) (Credential, error) {
 		return Credential{}, err
 	}
 
+	pinsFile, err := pinsPath(opts.PinsFile)
+	if err != nil {
+		return Credential{}, err
+	}
+
+	pins, err := discovery.NewPinStore(pinsFile)
+	if err != nil {
+		return Credential{}, err
+	}
+
 	if token.Value != "" {
 		// The secret is checked here, not when the first peer arrives: a
 		// secret too short to derive a key from would otherwise fail inside
@@ -115,7 +138,7 @@ func Load(opts Options) (Credential, error) {
 				e2e.ErrSecret, len(token.Value), e2e.MinSecret)
 		}
 
-		return Credential{secret: token.Value, source: token.Source}, nil
+		return Credential{secret: token.Value, pins: pins, source: token.Source}, nil
 	}
 
 	keyFile, err := keyPath(opts.KeyFile)
@@ -124,16 +147,6 @@ func Load(opts Options) (Credential, error) {
 	}
 
 	key, err := discovery.LoadKeyFrom(keyFile)
-	if err != nil {
-		return Credential{}, err
-	}
-
-	pinsFile, err := pinsPath(opts.PinsFile)
-	if err != nil {
-		return Credential{}, err
-	}
-
-	pins, err := discovery.NewPinStore(pinsFile)
 	if err != nil {
 		return Credential{}, err
 	}
