@@ -22,6 +22,7 @@ import (
 	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -384,6 +385,47 @@ func (g *gui) build() {
 	)
 
 	g.win.SetContent(g.tabs)
+	g.registerTabShortcuts()
+}
+
+// registerTabShortcuts makes the tab bar reachable without the pointer.
+//
+// Plain Tab is deliberately left alone: inside a form it moves focus between
+// widgets, and the Setup tab is a form. Ctrl+Tab is the page-switch gesture
+// browsers and editors already teach, and Ctrl+←/→ is the arrow-key spelling of
+// the same move. None of the four is taken by Fyne: the driver only routes
+// Tab+Shift to focus traversal.
+func (g *gui) registerTabShortcuts() {
+	canvas := g.win.Canvas()
+	if canvas == nil {
+		return
+	}
+
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyTab, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift},
+		func(fyne.Shortcut) { g.cycleTab(-1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyRight, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(1) },
+	)
+	canvas.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyLeft, Modifier: fyne.KeyModifierControl},
+		func(fyne.Shortcut) { g.cycleTab(-1) },
+	)
+}
+
+// cycleTab moves delta tabs along the ring, wrapping at both ends.
+func (g *gui) cycleTab(delta int) {
+	if g.tabs == nil {
+		return
+	}
+
+	g.tabs.SelectIndex(nextTabIndex(g.tabs.SelectedIndex(), len(g.tabs.Items), delta))
 }
 
 // rebuildSetupForm lays out the rows the current configuration uses.
