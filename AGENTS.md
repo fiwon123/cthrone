@@ -220,8 +220,8 @@ Linux.
 ### Security — read this before changing the transport
 
 Every session is authenticated and encrypted end to end, on both transports;
-`--tls` adds transport encryption on top. The model is the one issue #125
-decided, superseding #11/#109:
+the websocket connection is encrypted as well (`wss://`) unless `--no-tls` is
+given. The model is the one issue #125 decided, superseding #11/#109:
 
 - **exactly one credential authenticates a session**, and `internal/pairing`
   chooses it once so the transports cannot disagree:
@@ -244,10 +244,17 @@ decided, superseding #11/#109:
   direction, AES-256-GCM, and a sequence number that fails a replayed frame.
   In v2 the confirm repeats the device's key and signature, so a peer that
   joins a NATS subject after the hello was broadcast is still authenticated;
-- the **websocket** transport additionally offers `--tls`, which encrypts the
-  connection and pins the host's certificate by its fingerprint. With a secret
-  configured the handler also compares that secret's header and answers `401`;
-  without one there is no header to compare, and the handshake is the gate;
+- the **websocket** transport is encrypted by default: the host serves
+  `https` and the client dials `wss://`, and `--no-tls` is the opt-out kept for
+  a v0.6.0 peer and for a network the user trusts. The host's certificate is
+  self-signed, so the client **pins it on first contact** in `peers.json`,
+  beside the device pins, keyed by the dialed `host:port`; a different
+  certificate at a pinned address is **refused**, never trusted, and
+  `cthrone peers forget <address>` is the way back. `--cert-fingerprint` pins
+  by hand instead (and records nothing), `--insecure` skips the check. With a
+  secret configured the handler also compares that secret's header and answers
+  `401`; without one there is no header to compare, and the handshake is the
+  gate;
 - the **NATS** transport sends the broker's credentials from the environment
   (`NATS_USER`, `NATS_PASSWORD`), and a `tls://` broker URL asks for an
   encrypted connection with the same pinning. Even without it, the broker
@@ -259,16 +266,19 @@ decided, superseding #11/#109:
 
 The rules that come with it:
 
-- "encrypted by default" means the **payload** is sealed; it does not mean the
-  transport is hidden. Frame sizes, timing and the subject or address stay
-  visible, and `--tls` is what encrypts the connection itself. On a websocket
-  the host is the correspondent, not a relay, so the end-to-end layer protects
-  the wire there and the peer on NATS;
+- "encrypted by default" means the **payload** is sealed, and the websocket
+  connection is encrypted too. It does not mean the conversation is hidden: on
+  NATS the subject and the timing stay visible, and `--no-tls` puts the
+  websocket's shape back on the wire. On a websocket the host is the
+  correspondent, not a relay, so the transport encryption protects the wire
+  and the end-to-end layer protects the peer on NATS;
 - **first contact is the only moment a machine in the middle can insert
   itself**, and the fingerprint comparison is what closes it. Say that plainly
   wherever pairing is described; a pin is only as good as the comparison. Each
   screen therefore prints **both** fingerprints — the peer's and its own — so
-  the two values that have to agree are on both screens at once;
+  the two values that have to agree are on both screens at once. The
+  certificate pin follows the same rule: the first certificate at an address
+  is recorded, and the device-key pin behind it is the stronger gate;
 - do not add a credential to a **command-line flag** — a flag value is visible
   in the process list. Use an environment variable or a file;
 - the secret and the device key are keys, not passwords: never log them, print
@@ -285,12 +295,14 @@ The rules that come with it:
   the only setting, and it comes from the command line.
 - The user's configuration directory holds what the tool writes for itself:
   this device's key (`identity.key`, `0600`), the pins it trusts
-  (`peers.json`, `0600` — public keys, but who you talk to is nobody else's
-  business), the TLS material (`cert.pem` and `key.pem`, the key `0600`), and,
-  only when one is configured, the shared secret (`token`, `0600`). They are
-  written on first use and never committed. The secret and the device key are
-  the two things that must not be shared; `peers.json` is the record that makes
-  the second one meaningful.
+  (`peers.json`, `0600` — public keys and certificate fingerprints, but who you
+  talk to is nobody else's business), the TLS material (`cert.pem` and
+  `key.pem`, the key `0600`), and, only when one is configured, the shared
+  secret (`token`, `0600`). They are written on first use and never committed.
+  The secret and the device key are the two things that must not be shared;
+  `peers.json` is the record that makes the second one meaningful, and the
+  certificate pins in it are what make `wss://` the default without a value to
+  copy.
 - That directory is the one the **platform** provides, not a hard-coded
   `~/.config`: `internal/discovery.ConfigDir` asks `os.UserConfigDir` and
   appends `cthrone`, so it is `~/.config/cthrone` on Linux,

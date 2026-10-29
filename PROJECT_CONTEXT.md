@@ -32,7 +32,7 @@ through a NATS broker.
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
-- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--peers-file`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). What the tool writes for itself lives in the platform's user configuration directory — `~/.config/cthrone` on Linux, `~/Library/Application Support/cthrone` on macOS, `%AppData%\cthrone` on Windows — for the CLI and the desktop GUI, and in the app's private storage on Android: this device's key and the pins it trusts, the TLS material, and — only when one is configured — the shared secret
+- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--peers-file`, `--no-tls`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The websocket transport is encrypted by default, `--no-tls` is the opt-out, and `--tls` is accepted as a no-op so a v0.6.0 command line still runs. What the tool writes for itself lives in the platform's user configuration directory — `~/.config/cthrone` on Linux, `~/Library/Application Support/cthrone` on macOS, `%AppData%\cthrone` on Windows — for the CLI and the desktop GUI, and in the app's private storage on Android: this device's key, the pins it trusts (device keys and host certificates), the TLS material, and — only when one is configured — the shared secret
 - **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container. The APK is the exception: it needs the Android SDK, an NDK and the `fyne` CLI, so it is built in CI
 
 ## Architecture
@@ -154,25 +154,30 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a pin on first contact (`cthrone peers`). `v0.6.0` is the published release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a pin on first contact (`cthrone peers`). `v0.6.0` is the published release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when one is
   (the v0.6.0 path). X25519 + HKDF per direction, AES-256-GCM, a sequence
   number that fails a replay, and a handshake version that gates the two
   models: a peer speaking the other one is refused, never downgraded. There is
-  no plaintext or anonymous mode. `--tls` adds transport encryption (websocket
-  `https`/`wss://`, a `tls://` NATS URL), pinned with `--cert-fingerprint` or
-  skipped with `--insecure`. What stays visible is the shape: frame sizes,
-  timing, and the subject or address. On a websocket the host is the
-  correspondent, so the end-to-end layer protects the wire; on NATS it
-  protects the payload from the broker. The model is issue #125, superseding
-  the "the secret is the identity" rule of #11/#109.
+  no plaintext or anonymous mode. The websocket **connection** is encrypted
+  too: the host serves `https`, the client dials `wss://`, and the self-signed
+  certificate is pinned on first contact in `peers.json` under the dialed
+  `host:port` — a different certificate at a pinned address is refused, and
+  `cthrone peers forget <address>` is the way back. `--no-tls` opts out for a
+  v0.6.0 peer, `--cert-fingerprint` pins by hand, `--insecure` skips the check,
+  and a `tls://` NATS URL asks for the same pinning on the broker. What stays
+  visible is the shape: frame sizes, timing, and the subject or address. On a
+  websocket the host is the correspondent, so the transport and end-to-end
+  layers protect the wire; on NATS the end-to-end layer protects the payload
+  from the broker. The model is issue #125, superseding the "the secret is the
+  identity" rule of #11/#109; the transport default is issue #124.
 - **Open**: see Backlog.
 
 ## Backlog
 
-1. Publish the `v0.6.0` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
+1. Publish the `v0.7.0` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
 2. Delete the leftover `feature/*` branches — the branch gate rejects their names.
 3. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
 4. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
@@ -182,14 +187,14 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - The `ct` alias is the same binary under a second name; both are shipped in
   the release archive.
 - The websocket transport defaults to port `8080` on **every interface**; the
-  client dials `ws://` (or `wss://` with `--tls`) and the server serves https
-  under the same flag. With no secret configured — the default — the host
+  client dials `wss://` and the server serves https by default, and `--no-tls`
+  puts both back on `ws://`. With no secret configured — the default — the host
   pairs by device key: every client completes the sealed handshake, and the
   caller receives the session only once a peer has authenticated. With a
   secret configured the handler additionally compares its header and answers
-  `401`. With `--tls` the host's certificate is pinned by
-  `--cert-fingerprint`; `--insecure` keeps the encryption but skips that
-  check. See issues #11, #109 and #125 for the model.
+  `401`. The host's certificate is pinned on first contact; `--cert-fingerprint`
+  pins it by hand, and `--insecure` keeps the encryption but skips the check.
+  See issues #11, #109, #124 and #125 for the model.
 - The `docker-compose.yml` broker requires the credentials in `NATS_USER` and
   `NATS_PASSWORD` (`nats.conf`), and runs **without** JetStream, so a
   conversation does not outlive the session it happened in. It carries
@@ -202,10 +207,10 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - The tool writes its device state into the platform's user configuration
   directory (`internal/discovery.ConfigDir`, i.e. `os.UserConfigDir` +
   `cthrone`): this device's key (`identity.key`, `0600`), the pins
-  (`peers.json`, `0600`), the TLS material (`cert.pem`, and `key.pem` at
-  `0600`), and — only when one is configured — the shared secret (`token`,
-  `0600`). None of it is ever committed; see `AGENTS.md` → Environment and
-  Secret-File Rules.
+  (`peers.json`, `0600` — device keys and host certificate fingerprints), the
+  TLS material (`cert.pem`, and `key.pem` at `0600`), and — only when one is
+  configured — the shared secret (`token`, `0600`). None of it is ever
+  committed; see `AGENTS.md` → Environment and Secret-File Rules.
 - The Android app writes the same material into its **own private storage**,
   because a phone has no user configuration directory it can rely on. A phone
   that hosts shows its own fingerprint in a dialog and copies nothing: the
