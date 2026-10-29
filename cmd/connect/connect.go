@@ -17,6 +17,11 @@ var natsURLFlag string
 
 var nameFlag string
 
+// connectWebsocket is the websocket client the command runs. It is a variable
+// so a test can see the TLS setting the flags resolved to without a host to
+// dial.
+var connectWebsocket = websocketcore.Connect
+
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
 	Use:   "connect",
@@ -36,7 +41,7 @@ On nats connection only host receive message and only connect device send messag
 
 		// The websocket transport is encrypted unless --no-tls says
 		// otherwise; the NATS one is decided by its broker URL.
-		tlsEnabled, err := auth.TransportTLS(tlsFlag, noTLSFlag)
+		tlsConf, err := auth.TLSFromFlags(tlsFlag, noTLSFlag, fingerprint, acceptAny)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -46,12 +51,6 @@ On nats connection only host receive message and only connect device send messag
 		// Pairing pins a peer by name, so a run without --name still needs one.
 		app.Name = app.ResolveName()
 
-		tlsConf := auth.TLS{
-			Enabled:     tlsEnabled,
-			Fingerprint: fingerprint,
-			Insecure:    acceptAny,
-		}
-
 		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
 
 		if natsFlag {
@@ -60,7 +59,7 @@ On nats connection only host receive message and only connect device send messag
 			return
 		}
 
-		if err := websocketcore.Connect(args, app, opts, tlsConf); err != nil {
+		if err := connectWebsocket(args, app, opts, tlsConf); err != nil {
 			log.Fatal(err)
 		}
 	},

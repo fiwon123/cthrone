@@ -426,6 +426,79 @@ func TestTransportTLS(t *testing.T) {
 	}
 }
 
+// TLSFromFlags is where the command line becomes the transport's setting: the
+// host and the client both call it, so "no flag means encrypted" cannot come
+// out differently on the two ends. The fingerprint and --insecure travel with
+// it unchanged; TLSConfig decides what they mean.
+func TestTLSFromFlags(t *testing.T) {
+	tests := []struct {
+		name        string
+		tlsFlag     bool
+		noTLS       bool
+		fingerprint string
+		insecure    bool
+		want        TLS
+		wantErr     bool
+	}{
+		{
+			name: "nothing passed: encrypted by default",
+			want: TLS{Enabled: true},
+		},
+		{
+			name:        "the opt-out and the values it carries",
+			noTLS:       true,
+			fingerprint: "ab",
+			insecure:    true,
+			want:        TLS{Enabled: false, Fingerprint: "ab", Insecure: true},
+		},
+		{
+			name:    "--tls is still accepted",
+			tlsFlag: true,
+			want:    TLS{Enabled: true},
+		},
+		{
+			name:    "both switches contradict each other",
+			tlsFlag: true,
+			noTLS:   true,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TLSFromFlags(tt.tlsFlag, tt.noTLS, tt.fingerprint, tt.insecure)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("TLSFromFlags error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if got != tt.want {
+				t.Errorf("TLSFromFlags = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// --insecure is the flag that asks for no check at all, so it wins over a
+// fingerprint that also arrived — from --cert-fingerprint or from a setting the
+// GUI kept. Checking the fingerprint first would make "accept any certificate"
+// refuse a host the user asked not to check.
+func TestTLSConfigInsecureWinsOverTheFingerprint(t *testing.T) {
+	config, err := TLSConfig(TLS{Enabled: true, Fingerprint: strings.Repeat("00", 32), Insecure: true}, "192.168.1.5:8080", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing checks the certificate: no fingerprint hook, and the standard
+	// verification skipped as well.
+	if config.VerifyPeerCertificate != nil {
+		t.Error("--insecure built a certificate check anyway")
+	}
+
+	if !config.InsecureSkipVerify {
+		t.Error("--insecure did not skip the standard verification")
+	}
+}
+
 // The pinned certificate is the one the transport asks for.
 func TestTLSConfigPinsTheCertificate(t *testing.T) {
 	cert, err := GenerateCertificate([]string{"127.0.0.1"})

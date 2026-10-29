@@ -76,25 +76,40 @@ func TransportTLS(tlsFlag, noTLSFlag bool) (bool, error) {
 	return !noTLSFlag, nil
 }
 
+// TLSFromFlags turns the command line into the transport's TLS setting. It is
+// the one place the switches become a configuration, so "no flag means
+// encrypted" is testable without a socket, and the host and the client cannot
+// resolve them differently.
+func TLSFromFlags(tlsFlag, noTLSFlag bool, fingerprint string, insecure bool) (TLS, error) {
+	enabled, err := TransportTLS(tlsFlag, noTLSFlag)
+	if err != nil {
+		return TLS{}, err
+	}
+
+	return TLS{Enabled: enabled, Fingerprint: fingerprint, Insecure: insecure}, nil
+}
+
 // TLSConfig returns the configuration a client uses to check the certificate
 // of its peer, or nil when the transport is not encrypted.
 //
-// A fingerprint pins the certificate by hand, and insecure accepts any of
-// them. With neither, the certificate is trusted on first use: the one the
-// host presents is recorded in pins under address, and a different one at the
-// same address later is refused. That is what lets TLS be the default with no
-// value to copy from the other device.
+// Insecure accepts any certificate and comes first: it is the flag that asks
+// for no check at all, so it wins over a fingerprint the command line or the
+// GUI happens to carry as well. A fingerprint pins the certificate by hand.
+// With neither, the certificate is trusted on first use: the one the host
+// presents is recorded in pins under address, and a different one at the same
+// address later is refused. That is what lets TLS be the default with no value
+// to copy from the other device.
 func TLSConfig(tlsConf TLS, address string, pins CertPins) (*tls.Config, error) {
 	if !tlsConf.Enabled {
 		return nil, nil
 	}
 
-	if tlsConf.Fingerprint != "" {
-		return ClientTLSConfig(tlsConf.Fingerprint, false)
-	}
-
 	if tlsConf.Insecure {
 		return ClientTLSConfig("", true)
+	}
+
+	if tlsConf.Fingerprint != "" {
+		return ClientTLSConfig(tlsConf.Fingerprint, false)
 	}
 
 	return trustOnFirstUse(address, pins)
