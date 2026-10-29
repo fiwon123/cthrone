@@ -266,13 +266,39 @@ func (c *Conn) OnError(fn func(error)) {
 	c.mu.Unlock()
 }
 
-// OnPeer reports a peer the moment its confirm authenticated, once per peer,
-// after which its payloads arrive. It is how a caller says "encrypted with
-// X": polling Peers would have to guess when to look.
+// OnPeer reports every peer that has completed the handshake: the ones already
+// verified when it is installed, and each new one as it authenticates, once per
+// peer. It is how a caller says "encrypted with X" without polling Peers and
+// guessing when to look.
+//
+// The replay matters because a fast peer can answer before the caller has had
+// the wrapper back — installing the callback and reading the list are two steps,
+// and a peer that finished in between would be seen by neither.
 func (c *Conn) OnPeer(fn func(Peer)) {
 	c.mu.Lock()
 	c.onPeer = fn
+
+	known := make([]Peer, 0, len(c.order))
+
+	for _, key := range c.order {
+		p := c.peers[key]
+		if p == nil || !p.verified {
+			continue
+		}
+
+		known = append(known, Peer{Device: p.device, Key: append([]byte(nil), p.key...)})
+	}
 	c.mu.Unlock()
+
+	// Outside the lock, for the same reason markVerified reports outside it: a
+	// callback that sends must not deadlock on the mutex.
+	if fn == nil {
+		return
+	}
+
+	for _, p := range known {
+		fn(p)
+	}
 }
 
 // Peer is a correspondent that has completed the handshake.
@@ -280,6 +306,9 @@ type Peer struct {
 	Device string
 	Key    []byte
 }
+
+// Name is what to call the peer when its device name may be empty.
+func (p Peer) Name() string { return peerName(p.Device) }
 
 // Peers lists the peers whose confirm arrived, in the order they were heard.
 func (c *Conn) Peers() []Peer {

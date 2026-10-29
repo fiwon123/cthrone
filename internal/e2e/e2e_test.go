@@ -174,6 +174,51 @@ func TestOnPeerReportsEachPeerOnce(t *testing.T) {
 	}
 }
 
+// A caller that installs OnPeer after the handshake has already finished still
+// learns the peer: the caller gets the wrapper back from New, so a fast peer can
+// win that race, and a status line that misses it would say "encrypted" about
+// nobody.
+func TestOnPeerReplaysPeersThatAlreadyFinished(t *testing.T) {
+	sa := newPipe("alice")
+	sb := newPipe("bob")
+	link(sa, sb)
+
+	a, err := New(sa, Config{Secret: secret, Name: "alice"})
+	if err != nil {
+		t.Fatalf("wrapping alice: %v", err)
+	}
+
+	if _, err := New(sb, Config{Secret: secret, Name: "bob"}); err != nil {
+		t.Fatalf("wrapping bob: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(a.Peers()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the handshake never finished")
+		}
+
+		time.Sleep(time.Millisecond)
+	}
+
+	var reported []Peer
+
+	a.OnPeer(func(p Peer) { reported = append(reported, p) })
+
+	if len(reported) != 1 || reported[0].Device != "bob" {
+		t.Fatalf("reported %v, want bob once", reported)
+	}
+
+	// The same peer is not announced again by the next registration's snapshot.
+	var second []Peer
+
+	a.OnPeer(func(p Peer) { second = append(second, p) })
+
+	if len(second) != 1 || second[0].Device != "bob" {
+		t.Fatalf("reported %v on re-install, want bob once", second)
+	}
+}
+
 func TestSealedPayloadHidesTheText(t *testing.T) {
 	p := newPair(t, secret, secret, Single)
 
