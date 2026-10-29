@@ -177,6 +177,7 @@ type Conn struct {
 	order   []string
 	timer   *time.Timer
 	onError func(error)
+	onPeer  func(Peer)
 }
 
 // New wraps s and starts the handshake.
@@ -262,6 +263,15 @@ func New(s session.Session, cfg Config) (*Conn, error) {
 func (c *Conn) OnError(fn func(error)) {
 	c.mu.Lock()
 	c.onError = fn
+	c.mu.Unlock()
+}
+
+// OnPeer reports a peer the moment its confirm authenticated, once per peer,
+// after which its payloads arrive. It is how a caller says "encrypted with
+// X": polling Peers would have to guess when to look.
+func (c *Conn) OnPeer(fn func(Peer)) {
+	c.mu.Lock()
+	c.onPeer = fn
 	c.mu.Unlock()
 }
 
@@ -654,7 +664,16 @@ func (c *Conn) markVerified(p *peer) {
 		c.timer = nil
 	}
 
+	handler := c.onPeer
+	info := Peer{Device: p.device, Key: append([]byte(nil), p.key...)}
+
 	c.mu.Unlock()
+
+	// Outside the lock: a caller that sends in the callback would deadlock on
+	// it, and the peer is recorded either way.
+	if handler != nil {
+		handler(info)
+	}
 }
 
 // handshakeTimedOut closes a single-peer session whose handshake never

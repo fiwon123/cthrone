@@ -110,6 +110,70 @@ func TestConnForwardsTheSessionIdentity(t *testing.T) {
 	}
 }
 
+// A caller that wants to say "encrypted with bob" has to learn it when it
+// happens: the peer is reported once, with the name it announced, and not
+// again for a repeat of the same confirm.
+func TestOnPeerReportsEachPeerOnce(t *testing.T) {
+	sa := newPipe("alice")
+	sb := newPipe("bob")
+	link(sa, sb)
+
+	a, err := New(sa, Config{Secret: secret, Name: "alice"})
+	if err != nil {
+		t.Fatalf("wrapping alice: %v", err)
+	}
+
+	seen := make(chan Peer, 4)
+	a.OnPeer(func(p Peer) { seen <- p })
+
+	if _, err := New(sb, Config{Secret: secret, Name: "bob"}); err != nil {
+		t.Fatalf("wrapping bob: %v", err)
+	}
+
+	select {
+	case p := <-seen:
+		if p.Device != "bob" {
+			t.Fatalf("reported %q, want bob", p.Device)
+		}
+
+		if len(p.Key) != KeySize {
+			t.Fatalf("reported a %d-byte key, want %d", len(p.Key), KeySize)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("the peer was never reported")
+	}
+
+	// A repeated confirm is not a second peer.
+	bob := handshake{
+		V:      Version,
+		Key:    a.Peers()[0].Key,
+		Nonce:  bytes.Repeat([]byte{7}, HandshakeNonce),
+		Device: "bob",
+	}
+	confirm, err := encodeHandshake(handshake{
+		V:      Version,
+		Step:   stepConfirm,
+		Key:    bob.Key,
+		Nonce:  bob.Nonce,
+		Device: bob.Device,
+		To:     a.key,
+		MAC:    confirmMAC(secret, transcript(a.ours(), bob), a.key),
+	})
+	if err != nil {
+		t.Fatalf("encoding a repeat: %v", err)
+	}
+
+	sa.Deliver(confirm)
+
+	select {
+	case p := <-seen:
+		t.Fatalf("reported %q a second time", p.Device)
+
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestSealedPayloadHidesTheText(t *testing.T) {
 	p := newPair(t, secret, secret, Single)
 
