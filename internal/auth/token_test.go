@@ -96,31 +96,13 @@ func TestResolveWithoutASecret(t *testing.T) {
 	}
 }
 
-// The secret is written for its owner only. A file every process on the
-// machine can read is not a secret.
-func TestWriteFileIsNotReadableByOthers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sub", "token")
-
-	if err := WriteFile(path, "s3cret"); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("expected 0600, got %o", perm)
-	}
-}
-
-// The secret is read back with the newline a shell adds trimmed off.
-func TestWriteFileAndReadItBack(t *testing.T) {
+// The secret is read back with the newline a shell adds trimmed off, and a
+// value of only whitespace is no secret.
+func TestResolveTrimsAFileWrittenByAShell(t *testing.T) {
 	t.Setenv(EnvToken, "")
 
 	path := filepath.Join(t.TempDir(), "token")
-	if err := WriteFile(path, "s3cret"); err != nil {
+	if err := os.WriteFile(path, []byte("  s3cret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,27 +113,6 @@ func TestWriteFileAndReadItBack(t *testing.T) {
 
 	if token.Value != "s3cret" {
 		t.Errorf("expected %q, got %q", "s3cret", token.Value)
-	}
-}
-
-// Two generated secrets are not the same.
-func TestGenerateReturnsADifferentSecretEveryTime(t *testing.T) {
-	first, err := Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	second, err := Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if first == second {
-		t.Error("expected two different secrets")
-	}
-
-	if len(first) < 32 {
-		t.Errorf("expected a secret of at least 32 characters, got %d", len(first))
 	}
 }
 

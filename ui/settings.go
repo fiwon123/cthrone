@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
 // defaultPort is the port both transports use unless another is given.
@@ -78,27 +80,29 @@ func setupVisibility(useNATS, tls, moreOptions bool) setupView {
 
 // setupHint is the line under the actions. The two transports are configured
 // differently enough that one sentence cannot serve both: a websocket chat
-// needs the shared secret and can pin a certificate, while the NATS path also
-// needs a broker it is allowed to join.
+// pairs two devices — by device key, or with a shared secret — and can pin a
+// certificate, while the NATS path also needs a broker it is allowed to join.
 func setupHint(useNATS bool) string {
 	if useNATS {
-		return "NATS: Host or Connect joins the broker with the shared secret; the broker's own credentials come from NATS_USER and NATS_PASSWORD."
+		return "NATS: Host or Connect joins the broker, pairing by device key or with the shared secret; the broker's own credentials come from NATS_USER and NATS_PASSWORD."
 	}
 
-	return "Fast: select Host to start, or pick a device from Devices and Connect. Both devices need the same shared secret."
+	return "Fast: select Host to start, or pick a device from Devices and Connect. The connection is encrypted and the certificate is pinned on first contact; with no shared secret the devices also pair by key — compare the fingerprint each shows."
 }
 
 // resolveConfigDir returns the directory the app keeps its token and its TLS
 // material in.
 //
-// On the desktop it is the same ~/.config/cthrone the CLI uses, so a secret
-// the GUI generates is the one the CLI already knows. On mobile there is no
-// ~/.config to rely on, so the app's own storage directory — which the
-// platform always provides — comes first.
+// On the desktop it is the same directory the CLI resolves — discovery.ConfigDir
+// — so a device that runs `cthrone host` in a terminal and `cthrone ui` on the
+// same machine presents one device key and one pin store, not two identities
+// that refuse each other. On mobile there is no user configuration directory to
+// rely on, so the app's own storage directory — which the platform always
+// provides — comes first.
 func resolveConfigDir(mobile bool, storageRoot string) string {
 	if !mobile {
-		if dir, err := os.UserConfigDir(); err == nil {
-			return filepath.Join(dir, "cthrone")
+		if dir, err := discovery.ConfigDir(); err == nil {
+			return dir
 		}
 	}
 

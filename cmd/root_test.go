@@ -27,20 +27,25 @@ func TestTokenFlagSaysWhereTheSecretShouldComeFrom(t *testing.T) {
 	}
 }
 
-// The transport can be encrypted. The flag is shared by the host and the
-// client: the host serves https when it is on, the client expects it.
-func TestTLSFlagIsPersistent(t *testing.T) {
-	flag := rootCmd.PersistentFlags().Lookup("tls")
-	if flag == nil {
-		t.Fatal("expected the --tls flag to be registered")
-	}
+// The websocket transport is encrypted by default, so the flags come as a
+// pair: --tls is kept so a command line that passes it still runs, and
+// --no-tls is the opt-out. Both are persistent, because the host and the
+// client have to agree — a switch on one command only would leave the other
+// speaking the other transport.
+func TestTLSFlagsArePersistent(t *testing.T) {
+	for _, name := range []string{"tls", "no-tls"} {
+		flag := rootCmd.PersistentFlags().Lookup(name)
+		if flag == nil {
+			t.Fatalf("expected the --%s flag to be registered", name)
+		}
 
-	if flag.Value.Type() != "bool" {
-		t.Errorf("expected --tls to be a switch, got %q", flag.Value.Type())
-	}
+		if flag.Value.Type() != "bool" {
+			t.Errorf("expected --%s to be a switch, got %q", name, flag.Value.Type())
+		}
 
-	if flag.DefValue != "false" {
-		t.Errorf("expected the transport to be unencrypted by default, got %q", flag.DefValue)
+		if flag.DefValue != "false" {
+			t.Errorf("expected --%s to be off by default, got %q", name, flag.DefValue)
+		}
 	}
 }
 

@@ -35,6 +35,7 @@ import (
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
 	"github.com/fiwon123/cthrone/internal/e2e"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -105,7 +106,7 @@ type gui struct {
 	assembler *wire.Assembler
 
 	// devices
-	beacons    []discovery.Beacon
+	beacons    []device
 	beaconList *widget.List
 	scanBtn    *widget.Button
 	listener   *discovery.Listener
@@ -162,6 +163,7 @@ func Run() {
 		}()
 		g.build()
 	}()
+	go g.pruneLoop()
 	if !mobile {
 		func() {
 			defer func() {
@@ -320,10 +322,10 @@ func (g *gui) build() {
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
-	g.tokenEntry.SetPlaceHolder("empty uses the token file")
+	g.tokenEntry.SetPlaceHolder("empty: token file, else device-key pairing")
 
 	g.fingerprintEntry = widget.NewEntry()
-	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (needed with TLS)")
+	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
 
 	g.subjectEntry = widget.NewEntry()
 	g.subjectEntry.SetText(natscore.DefaultSubject)
@@ -332,6 +334,9 @@ func (g *gui) build() {
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
 	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
+	// Encrypted is the default on the CLI, so the app starts the same way: a
+	// phone that has to find a switch before it is protected is not protected.
+	g.tlsCheck.SetChecked(true)
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
 
@@ -545,8 +550,7 @@ func (g *gui) connect() {
 
 	data := g.data()
 	tlsConf := g.tls()
-	token := g.tokenEntry.Text
-	tokenFile := g.tokenFile()
+	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
 
@@ -560,9 +564,9 @@ func (g *gui) connect() {
 		)
 
 		if useNATS {
-			sess, err = natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
+			sess, err = natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 		} else {
-			sess, err = websocketcore.Dial([]string{host}, data, token, tokenFile, tlsConf)
+			sess, err = websocketcore.Dial([]string{host}, data, opts, tlsConf)
 		}
 
 		if err != nil {
@@ -586,18 +590,17 @@ func (g *gui) connect() {
 func (g *gui) host() {
 	data := g.data()
 	tlsConf := g.tls()
-	token := g.tokenEntry.Text
-	tokenFile := g.tokenFile()
+	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
 	useNATS := g.natsCheck.Checked
-	typedToken := strings.TrimSpace(token) != ""
+	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
 	g.setStatus("Starting…")
 
 	go func() {
 		if useNATS {
-			sess, err := natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
+			sess, err := natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 			if err != nil {
 				g.setStatus("Host failed")
 				g.showError(err)
@@ -612,7 +615,7 @@ func (g *gui) host() {
 			return
 		}
 
-		handle, err := websocketcore.OpenServer(data, token, tokenFile, tlsConf, func(sess session.Session) {
+		handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
 			g.setStatus("A device joined — chatting")
 			g.attach(sess)
 		})
@@ -630,29 +633,43 @@ func (g *gui) host() {
 		fyne.Do(g.updateButtons)
 		g.setStatus("Hosting on " + handle.Addr() + " — waiting for connection")
 		g.tabs.SelectIndex(0)
-		g.offerPairing(handle.Token, handle.Fingerprint, !typedToken)
+		g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, !typedToken)
 	}()
 }
 
 // offerPairing shows the values the other device needs. The terminal host
 // prints them; a GUI has no terminal, and on Android there is no file to open,
 // so this dialog is the only way to pair a phone that hosts.
-func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
+//
+// There are two models and the host uses exactly one: with a shared secret the
+// other device types it; without a secret nothing is copied at all, and the
+// two devices compare the fingerprint each shows on first contact. The
+// transport is encrypted either way, and the client pins the host's
+// certificate on first contact unless one is typed into the fingerprint field.
+func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint string, showToken bool) {
 	var message strings.Builder
 
 	if showToken && token != "" {
 		fmt.Fprintf(&message, "Shared secret:\n%s\n\n", token)
 	}
 
-	if fingerprint != "" {
-		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", fingerprint)
+	if token == "" && deviceFingerprint != "" {
+		fmt.Fprintf(&message, "This device's fingerprint:\n%s\n\n", deviceFingerprint)
+		message.WriteString("Nothing to copy: on the other device, connect to this one and compare the fingerprint it shows. It is remembered, and a different key under this name is refused.\n\n")
+	}
+
+	if certificateFingerprint != "" {
+		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", certificateFingerprint)
+		message.WriteString("The other device pins this certificate on first contact: compare the two values there if you want to be sure.\n\n")
 	}
 
 	if message.Len() == 0 {
 		return
 	}
 
-	message.WriteString("Enter the shared secret on the other device; with TLS, its fingerprint too.")
+	if token != "" {
+		message.WriteString("Enter the shared secret on the other device.\n")
+	}
 
 	text := message.String()
 
@@ -660,10 +677,6 @@ func (g *gui) offerPairing(token, fingerprint string, showToken bool) {
 		if showToken && token != "" {
 			g.tokenEntry.SetText(token)
 			g.app.Clipboard().SetContent(token)
-		}
-
-		if fingerprint != "" {
-			g.fingerprintEntry.SetText(fingerprint)
 		}
 
 		dialog.ShowInformation("Pairing", text, g.win)
@@ -738,26 +751,35 @@ func (g *gui) send(text string) {
 }
 
 // scan walks the local subnet for a chat host on the configured port.
+//
+// The devices already listed are re-checked too: a host that was stopped
+// since it was heard fails the check and leaves before its TTL would have
+// expired it, so pressing the button never keeps a dead address around.
 func (g *gui) scan() {
 	data := g.data()
 
 	g.scanBtn.Disable()
 	g.setStatus(fmt.Sprintf("Scanning port %d…", data.Port))
 
+	// The list belongs to the UI goroutine, so the check works on a copy.
+	checked := append([]device(nil), g.beacons...)
+
 	go func() {
+		answered := checkDevices(checked, dialDevice, scanDialTimeout)
 		found := websocketcore.Scan(data)
+		now := time.Now()
 
 		fyne.Do(func() {
 			g.scanBtn.Enable()
+
+			g.beacons = withoutDead(g.beacons, checked, answered)
+			g.beacons = addScanned(g.beacons, found, data.Port, now)
+			g.beaconList.Refresh()
 
 			if len(found) == 0 {
 				g.setStatus("No host answered on this network")
 
 				return
-			}
-
-			for _, addr := range found {
-				g.addBeacon(discovery.Beacon{Name: addr, Addr: addr, Port: data.Port})
 			}
 
 			g.setStatus(fmt.Sprintf("Found %d host(s) — tap one to connect", len(found)))
@@ -803,6 +825,21 @@ func (g *gui) attach(sess session.Session) {
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			if p.First && p.Fingerprint != "" {
+				// First contact is the one moment the fingerprint can be
+				// compared, so it goes on screen and in the transcript; a
+				// later contact only says who it is. Both values are shown,
+				// because the other screen has them under the opposite labels.
+				g.setStatus("Paired with " + p.Name())
+				g.addMessage(chatMessage{
+					from: "system",
+					text: "paired with " + p.Name() + " — first contact; its fingerprint is " + p.Fingerprint +
+						", this device's is " + sealed.Fingerprint() + ". Compare both with the other screen.",
+				})
+
+				return
+			}
+
 			g.setStatus("Encrypted with " + p.Name())
 			g.addMessage(chatMessage{from: "system", text: "encrypted with " + p.Name()})
 		})
@@ -989,16 +1026,36 @@ func (g *gui) showError(err error) {
 	fyne.Do(func() { dialog.ShowError(err, g.win) })
 }
 
-// addBeacon adds a device once. A beacon heard twice is one device.
+// addBeacon records a device heard now. A beacon heard twice is one device
+// whose last-seen time moves.
 func (g *gui) addBeacon(beacon discovery.Beacon) {
-	for _, existing := range g.beacons {
-		if existing.Addr == beacon.Addr && existing.Port == beacon.Port {
-			return
-		}
+	g.beacons = upsertDevice(g.beacons, beacon, time.Now())
+	g.beaconList.Refresh()
+}
+
+// pruneBeacons drops the devices that went quiet. It runs on a timer, so a
+// host that was stopped leaves the list even when no scan is pressed.
+func (g *gui) pruneBeacons() {
+	if g.beaconList == nil {
+		return
 	}
 
-	g.beacons = append(g.beacons, beacon)
-	g.beaconList.Refresh()
+	before := len(g.beacons)
+	g.beacons = pruneDevices(g.beacons, time.Now())
+
+	if len(g.beacons) != before {
+		g.beaconList.Refresh()
+	}
+}
+
+// pruneLoop sweeps the Devices list until the app closes.
+func (g *gui) pruneLoop() {
+	ticker := time.NewTicker(pruneInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		fyne.Do(g.pruneBeacons)
+	}
 }
 
 // startDiscovery listens for beacons announced by other hosts.
@@ -1035,6 +1092,9 @@ func (g *gui) data() *appdata.Data {
 	data.Name = strings.TrimSpace(g.nameEntry.Text)
 	data.Host = strings.TrimSpace(g.bindEntry.Text)
 
+	// Pairing pins a peer by name, so an empty field still needs one.
+	data.Name = data.ResolveName()
+
 	return data
 }
 
@@ -1055,6 +1115,22 @@ func (g *gui) tls() auth.TLS {
 
 func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
+}
+
+// pairingOptions names the files the app keeps its credential in.
+//
+// They live in configDir rather than at the CLI's default, because a phone has
+// no ~/.config to rely on; on the desktop configDir is that same directory, so
+// the GUI and the CLI share one identity and one pin store.
+func (g *gui) pairingOptions() pairing.Options {
+	dir := g.configDir()
+
+	return pairing.Options{
+		FlagToken: strings.TrimSpace(g.tokenEntry.Text),
+		TokenFile: g.tokenFile(),
+		KeyFile:   filepath.Join(dir, "identity.key"),
+		PinsFile:  filepath.Join(dir, "peers.json"),
+	}
 }
 
 // configDir returns the directory the app keeps its token and TLS material in.

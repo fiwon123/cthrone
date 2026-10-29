@@ -45,6 +45,17 @@ func TestAllowedRefusesTheWrongSecret(t *testing.T) {
 	}
 }
 
+// A host that pairs by device key has no secret to check, so the request is
+// let through to the handshake, which is the layer that authenticates it.
+func TestAllowedLetsTheHandshakeDecideWithoutASecret(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/ws", nil)
+
+	if !allowed(recorder, request, "") {
+		t.Fatalf("a device-key host refused the connection before the handshake, with %d", recorder.Code)
+	}
+}
+
 // The bind address decides where the server listens. An empty one means
 // every interface, so another device on the network can reach it.
 func TestListenAddress(t *testing.T) {

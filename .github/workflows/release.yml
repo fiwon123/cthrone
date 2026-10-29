@@ -378,7 +378,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # The draft. Every archive in one flat directory (release asset names are
   # flat), a checksum file over all of them, a curated description followed by
-  # GitHub's generated notes, and `gh release create --draft`.
+  # a changelog built from the merged pull requests, and
+  # `gh release create --draft`.
   # ---------------------------------------------------------------------------
   draft:
     name: Draft release
@@ -419,8 +420,9 @@ jobs:
 
       - name: Compose the release description
         env:
-          # `gh` refuses to authenticate without this, and the compose step calls
-          # `releases/generate-notes`. Without it the step still succeeds — it
+          # `gh` refuses to authenticate without this, and the compose step
+          # calls the releases and pull-request APIs through
+          # `scripts/release-notes.sh`. Without it the step still succeeds — it
           # falls back to a pointer at the commit list — so the loss is silent
           # unless the token is set here.
           GH_TOKEN: ${{ github.token }}
@@ -499,23 +501,35 @@ jobs:
           - **Devices** — **Scan network** walks the local subnet for a host on
             the chat port; tap a result to fill in its address.
 
-          A phone that hosts generates a shared secret and offers it in a dialog,
-          copied to the clipboard — enter it on the other device. The app keeps
-          that secret and its TLS material in its own private data directory;
-          nothing is shared with another app.
+          A phone that hosts shows its own fingerprint in a dialog — the other
+          device connects and the two screens are compared, with nothing to
+          type. The app keeps its device key, its pins, its shared secret (when
+          one is configured) and its TLS material in its own private data
+          directory; nothing is shared with another app.
 
           ### Security
 
-          This tool is **not** encrypted or authenticated by default:
+          Every session is **encrypted and authenticated end to end** — a
+          device that cannot prove its identity cannot join, and a broker
+          carries ciphertext. Two devices pair on first contact by **device
+          key**, with no value to copy; a shared secret remains the alternative
+          for v0.6.0 peers.
 
-          - the **websocket** transport requires a shared secret (a client that
-            does not know it is refused), and `--tls` encrypts the connection,
-            with the host's certificate pinned by `--cert-fingerprint`;
+          - the **websocket** transport is encrypted as well (`wss://`) unless
+            `--no-tls` is given, and the host's certificate is pinned on first
+            contact — a different certificate at the same address is refused,
+            and `cthrone peers forget <address>` is the way back;
           - the **NATS** transport sends the broker's credentials from
             `NATS_USER`/`NATS_PASSWORD`, and a `tls://` broker URL asks for an
             encrypted connection;
           - prefer `--token-file` or the environment over `--token`: a flag value
             is visible in the process list.
+
+          **Compatibility break:** a v0.6.0 peer speaks plaintext `ws://` and
+          will not connect to a v0.7.0 host. Start the v0.7.0 side with
+          `--no-tls` — on both devices — while the older one is in use; the
+          payload stays sealed end to end. `--tls` is still accepted, so an
+          older command line runs unchanged.
 
           ### Changes
 
@@ -523,20 +537,20 @@ jobs:
 
           sed -i "s|@VERSION@|$VERSION|g; s|@COMMIT@|$COMMIT|g; s|@RUN@|$RUN_URL|g" header.md
 
-          # GitHub's generated notes, from the previous release to this commit.
-          if gh api "repos/$REPO/releases/generate-notes" \
-               -f tag_name="$VERSION" \
-               -f target_commitish="$COMMIT" \
-               --jq .body > generated.md 2>generate-notes.err; then
+          # `releases/generate-notes` walks the commit graph from the previous
+          # release tag to this commit, so a squash-merged release PR leaves
+          # every feature commit on `dev` and the notes list only that PR.
+          # `scripts/release-notes.sh` lists the pull requests instead (#130).
+          if ./scripts/release-notes.sh "$REPO" "$VERSION" "$COMMIT" > changes.md 2>release-notes.err; then
             :
           else
-            echo "::warning::generate-notes failed; shipping the curated header only"
-            sed 's/^/  /' generate-notes.err >&2
+            echo "::warning::release-notes.sh failed; shipping the curated header only"
+            sed 's/^/  /' release-notes.err >&2
             printf '_Automatic release notes were unavailable for %s. See the full commit list:\n%s/commits/%s_\n' \
-              "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > generated.md
+              "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > changes.md
           fi
 
-          { cat header.md; echo; cat generated.md; } > release-notes.md
+          { cat header.md; cat changes.md; } > release-notes.md
           wc -l release-notes.md
 
       - name: Create or update the draft release

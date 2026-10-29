@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
@@ -303,5 +304,27 @@ func TestLineIsSafeFromBothSides(t *testing.T) {
 
 	if got := len(input.get()); got != 1000 {
 		t.Errorf("line holds %d runes, want 1000", got)
+	}
+}
+
+// A first contact in the device-key model says which fingerprint to compare:
+// the pin was recorded just now, and after this notice the two devices are
+// trusted on the strength of that comparison.
+func TestPeerNoticeNamesBothFingerprintsOnFirstContact(t *testing.T) {
+	first := peerNotice(e2e.Peer{Device: "bob", Fingerprint: "aaaa-bbbb-cccc-dddd", First: true}, "1111-2222-3333-4444")
+	for _, want := range []string{"bob", "aaaa-bbbb-cccc-dddd", "1111-2222-3333-4444"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("first-contact notice = %q, want %q in it", first, want)
+		}
+	}
+
+	again := peerNotice(e2e.Peer{Device: "bob", Fingerprint: "aaaa-bbbb-cccc-dddd"}, "1111-2222-3333-4444")
+	if strings.Contains(again, "aaaa-bbbb-cccc-dddd") {
+		t.Fatalf("a returning peer's notice repeats the fingerprint: %q", again)
+	}
+
+	secret := peerNotice(e2e.Peer{Device: "bob"}, "")
+	if secret != "Encrypted with bob" {
+		t.Fatalf("a shared-secret peer's notice = %q", secret)
 	}
 }

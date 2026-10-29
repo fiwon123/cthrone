@@ -2,12 +2,16 @@ package websocketcore
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"strings"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/chat"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/e2e"
 	websockethandler "github.com/fiwon123/cthrone/internal/handlers/websocket"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
@@ -22,8 +26,8 @@ var runTerminal = chat.Run
 
 // Connect connects to a host and runs the terminal chat loop until the peer
 // disconnects or the user presses Ctrl-C.
-func Connect(args []string, app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) error {
-	s, err := open(args, app, flagToken, tokenFile, tlsConf)
+func Connect(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) error {
+	s, err := open(args, app, opts, tlsConf)
 	if err != nil {
 		return err
 	}
@@ -38,46 +42,49 @@ func Connect(args []string, app *app.Data, flagToken, tokenFile string, tlsConf 
 // the terminal — the GUI and the mobile app. The token and the TLS
 // configuration are resolved the same way Connect resolves them, so both
 // paths refuse a connection for the same reasons.
-func Dial(args []string, app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) (session.Session, error) {
-	return open(args, app, flagToken, tokenFile, tlsConf)
+func Dial(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) (session.Session, error) {
+	return open(args, app, opts, tlsConf)
 }
 
 // open dials the host and seals the session. Every path through this package
 // ends here, so there is no way to get a websocket session that is not
 // encrypted.
-func open(args []string, app *app.Data, flagToken, tokenFile string, tlsConf auth.TLS) (session.Session, error) {
+func open(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) (session.Session, error) {
 	address := connectAddress(args)
 	if address == "" {
 		return nil, errors.New("the address of the host to connect to is required")
 	}
 
-	token, err := clientToken(tokenConfig{flagValue: flagToken, filePath: tokenFile})
+	cred, err := pairing.Load(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	tlsConfig, err := clientTLSConfig(tlsConf)
+	// A nil store is passed as a nil interface: a typed nil would be non-nil
+	// to the TLS configuration, which would then try to record a pin in it.
+	var pins auth.CertPins
+	if store := cred.Pins(); store != nil {
+		pins = store
+	}
+
+	tlsConfig, err := clientTLSConfig(tlsConf, pinAddress(address, app.Port), pins)
 	if err != nil {
 		return nil, err
 	}
 
-	raw, err := connect(address, app.Port, token, tlsConf.Enabled, tlsConfig)
+	raw, err := connect(address, app.Port, cred.Secret(), tlsConf.Enabled, tlsConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	return seal(raw, token, app.Name)
+	return seal(raw, cred, app.Name)
 }
 
 // seal wraps a transport session and refuses to hand out one that is not
-// sealed. A secret too short for the handshake closes the session here rather
+// sealed. A credential the handshake cannot use closes the session here rather
 // than letting the caller use it in the clear.
-func seal(raw session.Session, secret, name string) (session.Session, error) {
-	sealed, err := e2e.New(raw, e2e.Config{
-		Secret: []byte(secret),
-		Name:   name,
-		Mode:   e2e.Single,
-	})
+func seal(raw session.Session, cred pairing.Credential, name string) (session.Session, error) {
+	sealed, err := e2e.New(raw, cred.Config(e2e.Single, name))
 	if err != nil {
 		raw.Close(err.Error())
 
@@ -95,4 +102,16 @@ func connectAddress(args []string) string {
 	}
 
 	return args[0]
+}
+
+// pinAddress is the key a host's certificate is pinned under: the address the
+// client dialed, with the port the dial actually uses. It is the same form
+// that goes into the URL, so the pin names the host the user asked for rather
+// than a second spelling of it.
+func pinAddress(address string, port int) string {
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return strings.ToLower(address)
+	}
+
+	return strings.ToLower(fmt.Sprintf("%s:%d", address, port))
 }

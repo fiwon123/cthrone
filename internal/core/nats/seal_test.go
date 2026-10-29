@@ -1,14 +1,12 @@
 package natscore
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/e2e"
+	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -67,7 +65,7 @@ func (s *stubSession) reason() string {
 func TestSealWrapsInBusMode(t *testing.T) {
 	stub := newStub()
 
-	sealed, err := seal(stub, strings.Repeat("s", 32), "alice")
+	sealed, err := seal(stub, secretCredential(t, strings.Repeat("s", 32)), "alice")
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
@@ -91,13 +89,16 @@ func TestSealWrapsInBusMode(t *testing.T) {
 	}
 }
 
-// A secret too short to seal with closes the broker session instead of leaving
-// the caller with a session it might talk in the clear on.
-func TestSealRefusesAShortSecret(t *testing.T) {
+// A session the wrapper cannot seal is closed instead of leaving the caller
+// with one it might talk in the clear on. A short secret no longer reaches
+// here — pairing.Load refuses it when the credential is resolved, where the
+// error can still be reported — so what this covers is a credential a caller
+// built by hand.
+func TestSealClosesASessionItCannotSeal(t *testing.T) {
 	stub := newStub()
 
-	if _, err := seal(stub, "short", "alice"); err == nil {
-		t.Fatal("expected a short secret to be refused")
+	if _, err := seal(stub, pairing.Credential{}, "alice"); err == nil {
+		t.Fatal("expected an unusable credential to be refused")
 	}
 
 	if !stub.IsClosed() {
@@ -109,42 +110,42 @@ func TestSealRefusesAShortSecret(t *testing.T) {
 	}
 }
 
-// The NATS path reads the shared secret from the same three places the
-// websocket path does, so one secret protects both transports.
-func TestSharedSecretSources(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(file, []byte("  from-file\n"), 0o600); err != nil {
-		t.Fatal(err)
+// secretCredential is the shared-secret credential the transport tests use.
+func secretCredential(t *testing.T, secret string) pairing.Credential {
+	t.Helper()
+
+	cred, err := pairing.Load(pairing.Options{FlagToken: secret})
+	if err != nil {
+		t.Fatalf("resolving the credential: %v", err)
 	}
 
-	tests := []struct {
-		name    string
-		flag    string
-		file    string
-		env     string
-		want    string
-		wantErr bool
-	}{
-		{name: "flag wins", flag: "from-flag", file: file, env: "from-env", want: "from-flag"},
-		{name: "environment beats the file", file: file, env: "from-env", want: "from-env"},
-		{name: "file is trimmed", file: file, want: "from-file"},
-		{name: "nothing anywhere", want: ""},
-		{name: "missing file is no secret, not an error", file: "does-not-exist", want: ""},
-		{name: "a file that cannot be read is an error", file: t.TempDir(), wantErr: true},
+	return cred
+}
+
+// A NATS session with no secret anywhere is sealed with this device's key, in
+// Bus mode, so one peer can be dropped without ending the room.
+func TestSealUsesTheDeviceKeyWhenThereIsNoSecret(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("CTHRONE_TOKEN", "")
+
+	cred, err := pairing.Load(pairing.Options{})
+	if err != nil {
+		t.Fatalf("resolving the credential: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(auth.EnvToken, tt.env)
+	if cred.HasSecret() {
+		t.Fatal("a credential with no configured secret is a shared secret")
+	}
 
-			got, err := sharedSecret(tt.flag, tt.file)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("sharedSecret() error = %v, wantErr %v", err, tt.wantErr)
-			}
+	stub := newStub()
 
-			if got != tt.want {
-				t.Errorf("sharedSecret() = %q, want %q", got, tt.want)
-			}
-		})
+	sealed, err := seal(stub, cred, "alice")
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	if _, ok := sealed.(*e2e.Conn); !ok {
+		t.Fatalf("got %T, want the sealed session", sealed)
 	}
 }

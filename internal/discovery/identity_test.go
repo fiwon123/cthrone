@@ -9,7 +9,7 @@ import (
 func TestLoadIdentityCreatesDefault(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	// also cover XDG? use UserHomeDir which uses HOME
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
 	id, err := LoadIdentity()
 	if err != nil {
 		t.Fatal(err)
