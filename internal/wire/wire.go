@@ -17,6 +17,11 @@
 // frame, which is why Encode refuses to send such text instead of handing the
 // peer something it will misinterpret.
 //
+// One kind, KindHandshake, carries the end-to-end key exchange. Its payload is
+// JSON that this package moves and never interprets: the envelope is the thing
+// both peers already agree on, so the handshake rides it, and the cryptography
+// stays in internal/e2e where it can be read on its own.
+//
 // Nothing in this package imports a transport or a GUI: the framing has to be
 // testable on its own, and both paths and both front ends have to be able to
 // use it. Assembler, which receives a file, lives in assembler.go.
@@ -47,6 +52,11 @@ const (
 	// before it is trusted.
 	MaxHeader = 64 << 10
 
+	// MaxHandshake bounds a handshake payload. Two public keys, two nonces, two
+	// device names and a MAC are a few hundred bytes, so a frame near this is
+	// not a handshake — it is something to refuse before parsing it as JSON.
+	MaxHandshake = 4 << 10
+
 	// ChunkSize is how much of a file one frame carries. The NATS broker's
 	// max_payload defaults to 1 MiB, and the header plus websocket or TLS
 	// framing has to fit beside the chunk, so 256 KiB leaves room for both and
@@ -69,6 +79,12 @@ const (
 	// KindFileEnd closes a transfer and carries the SHA-256 of the whole file.
 	// The receiver checks it before the file is offered to anyone.
 	KindFileEnd Kind = "file-end"
+
+	// KindHandshake is one step of the end-to-end key exchange. Its payload is
+	// JSON and this package does not read it: the envelope carries the bytes,
+	// internal/e2e decides what they mean, and a peer that does not expect a
+	// handshake refuses the frame instead of printing base64 into the chat.
+	KindHandshake Kind = "handshake"
 )
 
 // Header is the JSON that precedes the payload of a frame.
@@ -254,6 +270,11 @@ func (h Header) validate() error {
 	case KindText:
 		return nil
 
+	case KindHandshake:
+		// The bytes are opaque to this package on purpose, so there is nothing
+		// in the header to check: a handshake carries no file and no id.
+		return nil
+
 	case KindFile, KindFileEnd:
 		if h.ID == "" {
 			return fmt.Errorf("%w: %s frame without an id", ErrHeader, h.Kind)
@@ -297,6 +318,17 @@ func (h Header) validate() error {
 func (h Header) checkPayload(length int) error {
 	switch h.Kind {
 	case KindText:
+		return nil
+
+	case KindHandshake:
+		if length == 0 {
+			return fmt.Errorf("%w: handshake frame with an empty payload", ErrPayload)
+		}
+
+		if length > MaxHandshake {
+			return fmt.Errorf("%w: handshake frame is %d bytes, the limit is %d", ErrPayload, length, MaxHandshake)
+		}
+
 		return nil
 
 	case KindFile:
