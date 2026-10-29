@@ -8,18 +8,28 @@ const maxMessages = 500
 
 // chatMessage is one line of the transcript: what was said, and who said it. A
 // message the user typed themselves carries no sender and renders as "You".
+//
+// A row can also report a file transfer instead of a sentence: file is then set
+// and text is empty, because a transfer says what it is doing from its own
+// state, not from prose.
 type chatMessage struct {
 	from string
 	text string
+	file *fileNote
 }
 
 // line renders the message the way the transcript shows it.
 func (m chatMessage) line() string {
-	if m.from == "" {
-		return "You: " + m.text
+	sender := "You"
+	if m.from != "" {
+		sender = m.from
 	}
 
-	return m.from + ": " + m.text
+	if m.file != nil {
+		return sender + ": " + m.file.line()
+	}
+
+	return sender + ": " + m.text
 }
 
 // transcript renders every message in order, one per line — what "Copy all"
