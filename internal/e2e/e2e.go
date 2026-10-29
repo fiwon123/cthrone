@@ -437,7 +437,27 @@ func (c *Conn) receive(m session.Message) {
 		return
 	}
 
-	c.NotifyMessage(session.Message{From: m.From, Payload: plain, Time: m.Time})
+	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Payload: plain, Time: m.Time})
+}
+
+// senderName is what to call the peer a frame came from. The transport's From
+// is the subject or the address — the same for every peer on a bus — so the
+// device name that authenticated the handshake is a better answer when the
+// peer announced one. The fallback keeps an unnamed peer identifiable.
+func (c *Conn) senderName(key, fallback string) string {
+	c.mu.Lock()
+	p := c.peers[key]
+	device := ""
+	if p != nil {
+		device = p.device
+	}
+	c.mu.Unlock()
+
+	if device != "" {
+		return device
+	}
+
+	return fallback
 }
 
 // receiveFrame handles a payload that carries the wire magic: either a

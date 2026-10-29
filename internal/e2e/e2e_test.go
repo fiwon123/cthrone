@@ -102,6 +102,31 @@ func TestHandshakeCarriesMessages(t *testing.T) {
 	}
 }
 
+// The transport's From is a subject or an address, not a name: on a bus every
+// peer shares the subject, so a message from bob would be labelled "chat". The
+// device name that authenticated the frame is the sender's name.
+func TestTheAuthenticatedPeerNamesTheSender(t *testing.T) {
+	p := newPair(t, secret, secret, Bus)
+
+	from := make(chan string, 1)
+
+	p.a.OnMessage(func(m session.Message) { from <- m.From })
+
+	if err := p.b.Send([]byte("hello")); err != nil {
+		t.Fatalf("bob sends: %v", err)
+	}
+
+	select {
+	case got := <-from:
+		if got != "bob" {
+			t.Errorf("sender is %q, want bob", got)
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("the message never arrived")
+	}
+}
+
 func TestConnForwardsTheSessionIdentity(t *testing.T) {
 	p := newPair(t, secret, secret, Single)
 
