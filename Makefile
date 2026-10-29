@@ -180,8 +180,10 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/cthrone.desktop $(GUI_LINUX_DIR)/ 2>/dev/null || true
-	cp $(ASSETS_DIR)/logo-512.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || cp $(ASSETS_DIR)/logo-128.png $(GUI_LINUX_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png 2>/dev/null || tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop cthrone.png
+	# No icon file goes into the archive: add_to_path.sh writes the launcher
+	# icon from the data it carries, and the window icon is embedded in the
+	# binary. A PNG next to the binaries would be read by nothing.
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop
 
 # The Windows GUI needs mingw-w64 for the CGO link, and the icon needs the Go
 # resource tool below. Both are settled before a single file is generated, so a
@@ -229,8 +231,9 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
-	cp $(ASSETS_DIR)/logo-512.png $(GUI_DARWIN_DIR)/cthrone.png 2>/dev/null || true
-	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png 2>/dev/null || tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.png
+	# No cthrone.png: Finder reads an .icns inside a .app bundle, never a PNG
+	# beside the binary, and the window icon comes from the embedded copy.
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh
 
 # Build the Android APK. Everything the packager needs is checked first: a
 # missing SDK, NDK or fyne CLI fails the target with what to install, instead
@@ -475,6 +478,11 @@ dev-opencode-auto: OPENCODE_ARGS = --auto
 dev-opencode-auto: dev-opencode
 
 # Generate logo assets from SVG master
+#
+# ui/logo.png is the copy the GUI embeds (//go:embed cannot reach outside its
+# own package), so it is refreshed here instead of being left to drift: the test
+# in cmd/assets fails when the two differ.
 assets: ## generate logo assets from SVG
 	@go run ./cmd/assets
-	@echo "Assets generated in assets/"
+	@cp $(ASSETS_DIR)/logo-512.png ui/logo.png
+	@echo "Assets generated in assets/ (and ui/logo.png refreshed)"
