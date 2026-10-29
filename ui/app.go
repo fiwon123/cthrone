@@ -105,7 +105,7 @@ type gui struct {
 	assembler *wire.Assembler
 
 	// devices
-	beacons    []discovery.Beacon
+	beacons    []device
 	beaconList *widget.List
 	scanBtn    *widget.Button
 	listener   *discovery.Listener
@@ -162,6 +162,7 @@ func Run() {
 		}()
 		g.build()
 	}()
+	go g.pruneLoop()
 	if !mobile {
 		func() {
 			defer func() {
@@ -738,26 +739,35 @@ func (g *gui) send(text string) {
 }
 
 // scan walks the local subnet for a chat host on the configured port.
+//
+// The devices already listed are re-checked too: a host that was stopped
+// since it was heard fails the check and leaves before its TTL would have
+// expired it, so pressing the button never keeps a dead address around.
 func (g *gui) scan() {
 	data := g.data()
 
 	g.scanBtn.Disable()
 	g.setStatus(fmt.Sprintf("Scanning port %d…", data.Port))
 
+	// The list belongs to the UI goroutine, so the check works on a copy.
+	checked := append([]device(nil), g.beacons...)
+
 	go func() {
+		answered := checkDevices(checked, dialDevice, scanDialTimeout)
 		found := websocketcore.Scan(data)
+		now := time.Now()
 
 		fyne.Do(func() {
 			g.scanBtn.Enable()
+
+			g.beacons = withoutDead(g.beacons, checked, answered)
+			g.beacons = addScanned(g.beacons, found, data.Port, now)
+			g.beaconList.Refresh()
 
 			if len(found) == 0 {
 				g.setStatus("No host answered on this network")
 
 				return
-			}
-
-			for _, addr := range found {
-				g.addBeacon(discovery.Beacon{Name: addr, Addr: addr, Port: data.Port})
 			}
 
 			g.setStatus(fmt.Sprintf("Found %d host(s) — tap one to connect", len(found)))
@@ -989,16 +999,36 @@ func (g *gui) showError(err error) {
 	fyne.Do(func() { dialog.ShowError(err, g.win) })
 }
 
-// addBeacon adds a device once. A beacon heard twice is one device.
+// addBeacon records a device heard now. A beacon heard twice is one device
+// whose last-seen time moves.
 func (g *gui) addBeacon(beacon discovery.Beacon) {
-	for _, existing := range g.beacons {
-		if existing.Addr == beacon.Addr && existing.Port == beacon.Port {
-			return
-		}
+	g.beacons = upsertDevice(g.beacons, beacon, time.Now())
+	g.beaconList.Refresh()
+}
+
+// pruneBeacons drops the devices that went quiet. It runs on a timer, so a
+// host that was stopped leaves the list even when no scan is pressed.
+func (g *gui) pruneBeacons() {
+	if g.beaconList == nil {
+		return
 	}
 
-	g.beacons = append(g.beacons, beacon)
-	g.beaconList.Refresh()
+	before := len(g.beacons)
+	g.beacons = pruneDevices(g.beacons, time.Now())
+
+	if len(g.beacons) != before {
+		g.beaconList.Refresh()
+	}
+}
+
+// pruneLoop sweeps the Devices list until the app closes.
+func (g *gui) pruneLoop() {
+	ticker := time.NewTicker(pruneInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		fyne.Do(g.pruneBeacons)
+	}
 }
 
 // startDiscovery listens for beacons announced by other hosts.

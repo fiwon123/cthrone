@@ -7,12 +7,24 @@ import (
 	"time"
 )
 
+// BeaconTTL is how long a beacon is trusted after it was last heard. A host
+// announces every two seconds, so this is several missed announcements: long
+// enough that a busy network does not make a live device blink, short enough
+// that a stopped host leaves the list.
+const BeaconTTL = 12 * time.Second
+
 // Beacon is announced by devices on the LAN.
 type Beacon struct {
 	Name     string `json:"name"`
 	Port     int    `json:"port"`
 	Protocol int    `json:"protocol"`
 	Addr     string `json:"addr,omitempty"`
+}
+
+// entry is a beacon and when it was last heard.
+type entry struct {
+	beacon Beacon
+	seen   time.Time
 }
 
 // Announcer broadcasts beacons on UDP.
@@ -57,12 +69,13 @@ func (a *Announcer) Stop() {
 // Listener listens for beacons and reports discovered devices.
 type Listener struct {
 	mu      sync.RWMutex
-	found   map[string]Beacon
+	found   map[string]entry
 	onFound func(Beacon)
+	now     func() time.Time
 }
 
 func NewListener() *Listener {
-	return &Listener{found: make(map[string]Beacon)}
+	return &Listener{found: make(map[string]entry), now: time.Now}
 }
 
 func (l *Listener) OnFound(fn func(Beacon)) {
@@ -97,26 +110,50 @@ func (l *Listener) Start() {
 			if b.Addr == "" {
 				b.Addr = raddr.IP.String()
 			}
-			l.mu.Lock()
-			key := b.Addr + ":" + itoa(b.Port)
-			l.found[key] = b
-			fn := l.onFound
-			l.mu.Unlock()
-			if fn != nil {
-				fn(b)
-			}
+			l.observe(b, l.now())
 		}
 	}()
 }
 
-func (l *Listener) Found() []Beacon {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	out := make([]Beacon, 0, len(l.found))
-	for _, v := range l.found {
-		out = append(out, v)
+// observe records one hearing of a beacon and reports it. Every hearing is
+// news — the caller refreshes how recently the device was seen — while a
+// device heard twice stays one entry.
+func (l *Listener) observe(b Beacon, at time.Time) {
+	l.mu.Lock()
+	l.found[beaconKey(b)] = entry{beacon: b, seen: at}
+	fn := l.onFound
+	l.mu.Unlock()
+
+	if fn != nil {
+		fn(b)
 	}
+}
+
+// Found returns the devices heard within BeaconTTL.
+func (l *Listener) Found() []Beacon {
+	return l.Prune(l.now(), BeaconTTL)
+}
+
+// Prune drops the beacons last heard more than ttl ago and returns the rest.
+// It is the expiry that keeps a stopped host from being listed forever.
+func (l *Listener) Prune(now time.Time, ttl time.Duration) []Beacon {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	out := make([]Beacon, 0, len(l.found))
+	for key, e := range l.found {
+		if now.Sub(e.seen) > ttl {
+			delete(l.found, key)
+			continue
+		}
+		out = append(out, e.beacon)
+	}
+
 	return out
+}
+
+func beaconKey(b Beacon) string {
+	return b.Addr + ":" + itoa(b.Port)
 }
 
 func itoa(i int) string {
