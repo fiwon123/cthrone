@@ -201,6 +201,22 @@ jobs:
       - name: make gui-windows
         run: make gui-windows VERSION="$VERSION"
 
+      # The icon is a PE resource, so its absence is invisible until someone
+      # opens Explorer on Windows. Check the section here instead: a build that
+      # lost rsrc_windows_amd64.syso fails the job rather than shipping.
+      - name: Check the exes carry the icon resource
+        run: |
+          status=0
+          for exe in build/GUI/Windows/cthrone_gui.exe build/GUI/Windows/cthrone.exe; do
+            if x86_64-w64-mingw32-objdump -h "$exe" | grep -q '\.rsrc'; then
+              echo "ok: $exe has a .rsrc section"
+            else
+              echo "error: $exe carries no .rsrc section — the icon is missing" >&2
+              status=1
+            fi
+          done
+          exit $status
+
       - name: Upload the Windows GUI archive
         uses: actions/upload-artifact@v7
         with:
