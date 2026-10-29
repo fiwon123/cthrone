@@ -35,10 +35,9 @@ func subjectOrDefault(text, fallback string) string {
 
 // setupView records which Setup rows apply to the configuration in force.
 type setupView struct {
-	// Security is the anonymous-client row and its "More options" button. It
-	// belongs to the websocket transport: a NATS broker authenticates its
-	// peers itself.
-	Security bool
+	// Options is the "More options" button. It belongs to the websocket
+	// transport, whose advanced rows it opens; the NATS rows are always shown.
+	Options bool
 
 	// SharedSecret, Fingerprint and BindAddress are the advanced websocket
 	// rows, shown only once "More options" is open. Fingerprint joins them
@@ -69,7 +68,7 @@ func setupVisibility(useNATS, tls, moreOptions bool) setupView {
 	}
 
 	return setupView{
-		Security:     true,
+		Options:      true,
 		SharedSecret: moreOptions,
 		Fingerprint:  moreOptions && tls,
 		BindAddress:  moreOptions,
@@ -79,14 +78,14 @@ func setupVisibility(useNATS, tls, moreOptions bool) setupView {
 
 // setupHint is the line under the actions. The two transports are configured
 // differently enough that one sentence cannot serve both: a websocket chat
-// works anonymously by default, while the NATS path is only as authenticated
-// as the broker it joins.
+// needs the shared secret and can pin a certificate, while the NATS path also
+// needs a broker it is allowed to join.
 func setupHint(useNATS bool) string {
 	if useNATS {
-		return "NATS: Host or Connect joins the broker. The broker's credentials come from NATS_USER and NATS_PASSWORD."
+		return "NATS: Host or Connect joins the broker with the shared secret; the broker's own credentials come from NATS_USER and NATS_PASSWORD."
 	}
 
-	return "Fast: select Host to start, or pick a device from Devices and Connect. Anonymous is on by default for easy local chat."
+	return "Fast: select Host to start, or pick a device from Devices and Connect. Both devices need the same shared secret."
 }
 
 // resolveConfigDir returns the directory the app keeps its token and its TLS

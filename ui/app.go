@@ -34,6 +34,7 @@ import (
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/discovery"
+	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 )
@@ -73,13 +74,11 @@ type gui struct {
 	tlsCheck         *widget.Check
 	insecureCheck    *widget.Check
 	natsCheck        *widget.Check
-	anonymousCheck   *widget.Check
 
 	// setup layout: the form is rebuilt whenever the mode changes, because a
 	// Fyne Form always renders a label for every item it holds.
 	moreOptions bool
 	moreBtn     *widget.Button
-	securityRow *fyne.Container
 	formHolder  *fyne.Container
 	transport   *widget.Select
 	hint        *widget.Label
@@ -335,21 +334,11 @@ func (g *gui) build() {
 	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
 	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
 	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
-	g.anonymousCheck = widget.NewCheck("Allow anonymous clients (no shared secret)", nil)
-	g.anonymousCheck.SetChecked(true)
 
 	g.moreBtn = widget.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
 		g.rebuildSetupForm()
 	})
-
-	// A check carries its own label, so a row that is too narrow for the label
-	// and the button on one line puts the button underneath instead.
-	if g.lay.Stack {
-		g.securityRow = container.NewVBox(g.anonymousCheck, g.moreBtn)
-	} else {
-		g.securityRow = container.NewHBox(g.anonymousCheck, g.moreBtn)
-	}
 
 	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
 		g.natsCheck.SetChecked(s == "NATS")
@@ -503,8 +492,8 @@ func (g *gui) rebuildSetupForm() {
 		{Text: "Port", Widget: g.portEntry},
 		{Text: "Transport", Widget: g.transport},
 	}
-	if view.Security {
-		items = append(items, &widget.FormItem{Text: "Security", Widget: g.securityRow})
+	if view.Options {
+		items = append(items, &widget.FormItem{Text: "Options", Widget: g.moreBtn})
 	}
 	if view.SharedSecret {
 		items = append(items, &widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry})
@@ -571,7 +560,7 @@ func (g *gui) connect() {
 		)
 
 		if useNATS {
-			sess, err = natscore.OpenSession([]string{subject}, data, broker, tlsConf)
+			sess, err = natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
 		} else {
 			sess, err = websocketcore.Dial([]string{host}, data, token, tokenFile, tlsConf)
 		}
@@ -583,13 +572,13 @@ func (g *gui) connect() {
 			return
 		}
 
-		g.attach(sess)
-
 		if useNATS {
 			g.setStatus("Connected through NATS on " + broker)
 		} else {
 			g.setStatus("Connected to " + host + " — chatting")
 		}
+
+		g.attach(sess)
 	}()
 }
 
@@ -608,7 +597,7 @@ func (g *gui) host() {
 
 	go func() {
 		if useNATS {
-			sess, err := natscore.OpenSession([]string{subject}, data, broker, tlsConf)
+			sess, err := natscore.OpenSession([]string{subject}, data, token, tokenFile, broker, tlsConf)
 			if err != nil {
 				g.setStatus("Host failed")
 				g.showError(err)
@@ -616,16 +605,16 @@ func (g *gui) host() {
 				return
 			}
 
-			g.attach(sess)
 			g.setStatus("Hosting through NATS on " + broker)
+			g.attach(sess)
 			g.tabs.SelectIndex(0)
 
 			return
 		}
 
 		handle, err := websocketcore.OpenServer(data, token, tokenFile, tlsConf, func(sess session.Session) {
-			g.attach(sess)
 			g.setStatus("A device joined — chatting")
+			g.attach(sess)
 		})
 		if err != nil {
 			g.setStatus("Host failed")
@@ -807,6 +796,21 @@ func (g *gui) attach(sess session.Session) {
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
+
+	// A sealed session reports a peer the moment its handshake authenticates,
+	// and a bus refusal that dropped one peer without ending the room. Both
+	// belong on the status line: a silent drop looks like a peer that never
+	// sent anything, and "connected" is not the same as "encrypted".
+	if sealed, ok := sess.(*e2e.Conn); ok {
+		sealed.OnPeer(func(p e2e.Peer) {
+			g.setStatus("Encrypted with " + p.Name())
+			g.addMessage(chatMessage{from: "system", text: "encrypted with " + p.Name()})
+		})
+		sealed.OnError(func(err error) {
+			g.setStatus("Refused a peer: " + err.Error())
+			g.addMessage(chatMessage{from: "system", text: "refused a peer: " + err.Error()})
+		})
+	}
 
 	sess.OnMessage(func(m session.Message) {
 		from := m.From
@@ -1030,7 +1034,6 @@ func (g *gui) data() *appdata.Data {
 	data := appdata.New(g.port())
 	data.Name = strings.TrimSpace(g.nameEntry.Text)
 	data.Host = strings.TrimSpace(g.bindEntry.Text)
-	data.AllowAnonymous = g.anonymousCheck.Checked
 
 	return data
 }

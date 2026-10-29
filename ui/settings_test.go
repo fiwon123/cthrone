@@ -64,24 +64,24 @@ func TestSetupVisibility(t *testing.T) {
 	}{
 		{
 			name: "websocket, plain",
-			want: setupView{Security: true},
+			want: setupView{Options: true},
 		},
 		{
 			name: "websocket, TLS adds the insecure row",
 			tls:  true,
-			want: setupView{Security: true, Insecure: true},
+			want: setupView{Options: true, Insecure: true},
 		},
 		{
 			name:        "websocket, more options opens the advanced rows",
 			moreOptions: true,
-			want:        setupView{Security: true, SharedSecret: true, BindAddress: true},
+			want:        setupView{Options: true, SharedSecret: true, BindAddress: true},
 		},
 		{
 			name:        "websocket, more options with TLS opens every row",
 			tls:         true,
 			moreOptions: true,
 			want: setupView{
-				Security:     true,
+				Options:      true,
 				SharedSecret: true,
 				Fingerprint:  true,
 				BindAddress:  true,
@@ -89,7 +89,7 @@ func TestSetupVisibility(t *testing.T) {
 			},
 		},
 		{
-			name:    "NATS hides the websocket security row",
+			name:    "NATS hides the websocket options row",
 			useNATS: true,
 			want:    setupView{NATSBroker: true, NATSSubject: true},
 		},
