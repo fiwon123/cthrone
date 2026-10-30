@@ -692,14 +692,19 @@ agent inside the sandbox cannot manage containers.
 packages now has a test file (#85/#86 closed the last gap), covering the
 transports, the scanner, the CLI commands, the shared secret and device-key
 pairing, the TLS handling, the remote-exec allowlist, the session hub, the
-selectable-text helpers and the mobile entry point.
+selectable-text helpers, the GUI's transfer rows and inline image, and the
+mobile entry point.
 
 A green run therefore proves that the code is formatted, that it vets clean,
-that it compiles, and that every package's tests passed. It does **not** prove
-the gui-tagged widget tree, which is only type-checked under `-tags "gui ci"` in
-CI, and it does not make the thin spots deep: several of the newer test files
-hold a single function. `make check` prints the list of packages with no test file
-after the run, so an empty list means every package was exercised.
+that it compiles, and that every package's tests passed. It also runs the
+gui-tagged widget tree headless (`CGO_ENABLED=0 go test -tags "gui ci"
+./ui/... ./cmd/ui/...`), so the transfer rows and the inline image are
+executed, not only type-checked: the `ci` tag swaps Fyne's GL driver for the
+software one, so no GTK/X11/GL is needed. It still does **not** draw a native
+frame, install the APK on a device (#155), or make the thin spots deep: several
+of the newer test files hold a single function. `make check` prints the list of
+packages with no test file after the run, so an empty list means every package
+was exercised.
 
 ## Troubleshooting
 

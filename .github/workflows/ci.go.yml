@@ -2,6 +2,8 @@ name: CI (Go)
 
 # Go CI for this repository. Standard toolchain only: gofmt, go vet, go test,
 # go build -- no third-party linters, so it runs on any Go project unchanged.
+# The gui-tagged widget tree is tested here too, headless (Fyne's `ci` tag),
+# so it needs no toolkit installed.
 # `go.sum` is the lockfile; `go` downloads exactly what it pins, so there is no
 # separate locked-install step to get wrong.
 #
@@ -61,6 +63,14 @@ jobs:
       - name: Test
         run: go test ./...
 
+      # The gui-tagged widget tree, headless. Fyne's `ci` tag swaps the GL
+      # driver for the software one, so this needs no GTK/X11/GL and runs in
+      # this job rather than the release-time GUI build. It is the step that
+      # proves a transfer row and an inline image, not just that the package
+      # compiles.
+      - name: Test the GUI headless
+        run: CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...
+
       - name: Build
         run: go build ./...
 
@@ -74,6 +84,10 @@ jobs:
 # packages compiled and the tested ones passed" — not "everything was executed".
 # `make check` prints the list of uncovered packages for the same reason. Read
 # the run's log before treating a green build as coverage.
+#
+# `Test the GUI headless` is a separate step because `go test ./...` does not
+# include the gui-tagged package: without it, the widget tree would only be
+# compiled by the release-time GUI jobs and never executed.
 #
 # Each stage above is its own step, so a non-zero exit fails the job: unlike the
 # `check` target, nothing here is chained with `;` behind a final `if`.
