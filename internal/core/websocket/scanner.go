@@ -10,9 +10,15 @@ import (
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/data/app"
+	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
 var localIP = getLocalIP
+
+// localAddrs is every address this device holds, so a scan can tell the host's
+// own answers from a peer's. It is a variable so a test supplies the addresses
+// instead of asking the machine.
+var localAddrs = discovery.LocalAddrs
 
 var dialScan = func(addr string, timeout time.Duration) error {
 	conn, err := net.DialTimeout("tcp", addr, timeout)
@@ -35,6 +41,16 @@ func Scan(app *app.Data) []string {
 	mySubnet := subnetFromIP(myIP)
 	timeout := 300 * time.Millisecond
 
+	// A host answers on its own addresses, so a scan that kept every answer
+	// would list this device as a peer to connect to. Every address the machine
+	// holds is dropped, not just the one the subnet walk starts from: a host
+	// bound to every interface answers on each of them.
+	own := make(map[string]bool)
+	for _, ip := range localAddrs() {
+		own[ip] = true
+	}
+	own[myIP] = true
+
 	fmt.Println("Scanning...")
 
 	var mu sync.Mutex
@@ -43,6 +59,10 @@ func Scan(app *app.Data) []string {
 
 	for i := 1; i <= 254; i++ {
 		ip := fmt.Sprintf("%s%d", mySubnet, i)
+		if own[ip] {
+			// This device: it answers on its own address, and it is not a peer.
+			continue
+		}
 		wg.Add(1)
 		go func(ip string) {
 			defer wg.Done()

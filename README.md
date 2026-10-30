@@ -414,7 +414,9 @@ The app has three tabs:
   and **Connect**. Encryption is on unless the box is cleared, and the host's
   certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the local subnet for a host on the chat
-  port; tap a result to fill in its address.
+  port; tap a result to fill in its address. A device that hosts is never listed
+  in its own list — its address is shown read-only under **Setup** instead, as
+  *This device — &lt;address&gt;:&lt;port&gt;*.
 
 A phone that hosts shows **its own fingerprint** in a dialog. Nothing is copied
 to the other device: connect to the phone and compare the fingerprints each

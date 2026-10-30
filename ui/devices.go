@@ -48,6 +48,23 @@ func deviceKey(d device) string {
 	return d.Addr + ":" + strconv.Itoa(d.Port)
 }
 
+// localAddrs is every address this device holds. It is a variable so a test
+// supplies the addresses instead of asking the machine.
+var localAddrs = discovery.LocalAddrs
+
+// isSelf reports whether addr is this device. A host answers on its own
+// addresses, and hears its own announcement when the operating system loops
+// the broadcast back; neither is a device to connect to.
+func isSelf(addr string, own []string) bool {
+	for _, a := range own {
+		if a == addr {
+			return true
+		}
+	}
+
+	return false
+}
+
 // upsertDevice records a beacon heard at now. A device already listed takes
 // its new state instead of appearing twice.
 func upsertDevice(list []device, b discovery.Beacon, now time.Time) []device {
