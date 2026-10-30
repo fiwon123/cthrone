@@ -646,8 +646,24 @@ func (g *gui) connect() {
 			g.setStatus("Connected to " + host + " — chatting")
 		}
 
+		g.noteFirstContact(sess)
 		g.attach(sess)
 	}()
+}
+
+// noteFirstContact shows the code a joining device is compared by while the
+// host decides.
+//
+// Only the side that dials waits on a person: the host is the side that is
+// asked, so it has a dialog and needs no waiting line. A bus has no code and no
+// single person to ask, so nothing is shown there.
+func (g *gui) noteFirstContact(sess session.Session) {
+	sealed, ok := sess.(*e2e.Conn)
+	if !ok {
+		return
+	}
+
+	sealed.OnFirstContact(func(c e2e.FirstContact) { g.setStatus(waitingText(c)) })
 }
 
 // host starts a host (websocket) or joins the broker as a peer (NATS).
@@ -696,7 +712,7 @@ func (g *gui) host() {
 		handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
 			g.setStatus("A device joined — chatting")
 			g.attach(sess)
-		})
+		}, g.confirmFirstContact)
 		if err != nil {
 			g.setStatus("Host failed")
 			g.showError(err)
@@ -1407,6 +1423,7 @@ func (g *gui) forgetSecretFile() {
 		"Stop using the shared secret",
 		"The shared secret in\n"+path+"\nwill be deleted.\n\nThis device will pair by its key again. A device that still holds the secret has to clear it too before the two connect.",
 		"Delete",
+		"Cancel",
 		func(confirmed bool) {
 			if !confirmed {
 				return

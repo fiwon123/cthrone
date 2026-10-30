@@ -55,9 +55,10 @@ installs like any other app. See [Android](#android) below.
 > **Security**: every session is **end-to-end encrypted and authenticated** —
 > a device that cannot prove its identity cannot join, and nothing it carries
 > is readable by whatever sits in the middle, a broker included. Two devices
-> pair on first contact by **device key**, with no value to copy; a **shared
-> secret** stays as the alternative for older peers. There is no anonymous
-> mode. The websocket connection is encrypted as well (`wss://`) unless
+> pair on first contact by **device key**, with no value to copy: a
+> **six-digit code** appears on both screens, the host accepts or refuses, and
+> only then is the key pinned. A **shared secret** stays as the alternative for
+> older peers. There is no anonymous mode. The websocket connection is encrypted as well (`wss://`) unless
 > `--no-tls` is given, and the host's certificate is pinned on first contact.
 > See [Security](#security) for how it works, and
 > [issue #125](https://github.com/fiwon123/cthrone/issues/125) for the model.
@@ -73,7 +74,7 @@ decide which, and nothing falls back to plaintext.
 
 | Credential | When it is used | What pairs the two devices |
 |---|---|---|
-| **device key** | the default — no secret is configured | nothing is copied: each device pins the other's key on first contact |
+| **device key** | the default — no secret is configured | nothing is copied: both screens show a **six-digit code**, the host accepts it, and each device pins the other's key |
 | **shared secret** | `--token`, `CTHRONE_TOKEN` or a token file has a value | the secret itself — every device holding it is the same identity, which is how a v0.6.0 peer still connects |
 
 ### Pairing by device key (the default)
@@ -101,6 +102,42 @@ grouped form of the key's hash — and this device's own. The terminal and the
 app say so explicitly. Compare them with the other screen: the value it calls
 its own is the one this side calls the peer's, and the reverse. If either pair
 differs, stop and forget the pin.
+
+#### The six-digit code
+
+A fingerprint is exact and hard to read aloud, so a first contact also shows a
+**six-digit code** — `123 456` — on both screens, and the host asks before it
+lets the device in:
+
+```text
+phone wants to connect.
+Its fingerprint is 3f1a-9c02-77bd-5e44.
+The code both screens show is 123 456 — they must agree.
+Accept this device? [y/N]
+```
+
+- the code is derived from the two **ephemeral X25519 keys** of this handshake,
+  so it exists only while the question does: it cannot be replayed into a later
+  session, and it is not written anywhere;
+- a machine in the middle terminates two handshakes, so each of its legs
+  derives a different code — that is the point of comparing it. The
+  fingerprints and the code close the same gap; compare both, and answer `n`
+  if either differs;
+- the host **withholds its confirm** until the answer is yes, so the client is
+  not authenticated, and pins nothing, while the question is open. A refusal
+  pins nothing on either side and leaves the client unpaired;
+- an unanswered question expires after **60 seconds** and counts as a refusal:
+  silence is not a yes;
+- a device already pinned under its name is not asked again. The pin *is* the
+  answer to that question, given once.
+
+Only the **websocket host** asks. A websocket session has exactly one
+correspondent and the host is the side that has a person at it; on NATS the
+roles are inverted — every peer subscribes — so nobody is a host to ask, and a
+first contact is pinned without a prompt, with the fingerprints on both screens
+as the comparison. A terminal host that has **no terminal attached** — a
+container, a service — has nobody to ask either: it accepts and pins the first
+contact and prints why. Run it in a terminal to compare the code instead.
 
 A device that returns with a **different key under a pinned name** is refused:
 the session ends on a websocket, and on a NATS subject that peer is dropped
@@ -245,18 +282,29 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    sent; everything the other side types is printed.
 
    The first time the two devices meet, each prints **both** fingerprints —
-   the other device's and its own:
+   the other device's and its own — and a **six-digit code**:
 
    ```text
    Encrypted with host — new device; its fingerprint is 3f1a-9c02-77bd-5e44, this device's is 8b21-77de-02a1-4c9f. Compare both with the other screen.
+   First contact with host — code 428 715. Both screens must show the same code.
    ```
 
-   Compare them with the other screen: the value it calls **its own** is the
-   one this side calls **the other device's**, and the reverse. After this
-   contact it is remembered — the device is pinned in
-   `~/.config/cthrone/peers.json`, and a different key under the same name is
-   refused. A device that only announces itself and never completes the
-   exchange pins nothing.
+   The host asks before it lets the device in, with the same code:
+
+   ```text
+   phone wants to connect.
+   Its fingerprint is 3f1a-9c02-77bd-5e44.
+   The code both screens show is 428 715 — they must agree.
+   Accept this device? [y/N]
+   ```
+
+   Compare the fingerprints, then the code with the other screen: the value it
+   calls **its own** is the one this side calls **the other device's**, and the
+   reverse. If either differs, answer `n` — nothing is pinned. If they agree,
+   answer `y`: the device is pinned in `~/.config/cthrone/peers.json`, and a
+   different key under the same name is refused from then on. An answer that
+   never comes expires after 60 seconds and counts as a refusal. A device that
+   only announces itself and never completes the exchange pins nothing.
 
    The shared secret still works if you have one — from a v0.6.0 device, or
    because you want several devices to share one value. Give both sides the
@@ -426,7 +474,10 @@ The app has three tabs:
 
 A phone that hosts shows **its own fingerprint** in a dialog. Nothing is copied
 to the other device: connect to the phone and compare the fingerprints each
-screen shows — that is the whole pairing. A phone that is given a shared secret
+screen shows — that is the whole pairing. A first contact is also confirmed by
+a **six-digit code**, shown on both screens: the host has a dialog with
+**Accept** and **Refuse**, and the device that dialed waits with the same code
+on screen. A phone that is given a shared secret
 instead shows the secret, copied to the clipboard, and the other device needs
 the same value. The app keeps its device key, its pins, the secret and its TLS
 material in its own private app storage, because a phone has no user
@@ -455,8 +506,9 @@ chmod +x cthrone ct
 ```
 
 The terminal pairs the same way it does on a desktop: the first contact prints
-the other device's fingerprint on both screens, and no file crosses between the
-two. `cthrone peers` lists and forgets what this device has pinned.
+the other device's fingerprint and a six-digit code on both screens, and no
+file crosses between the two. `cthrone peers` lists and forgets what this
+device has pinned.
 
 What the Android CLI does and does not give you:
 

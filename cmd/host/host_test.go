@@ -5,6 +5,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
+	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/pairing"
 )
@@ -21,7 +22,7 @@ func TestHostServesEncryptedWithoutAFlag(t *testing.T) {
 		called bool
 	)
 
-	stubHost(t, func(_ *app.Data, _ pairing.Options, tlsConf auth.TLS) error {
+	stubHost(t, func(_ *app.Data, _ pairing.Options, tlsConf auth.TLS, _ ...websocketcore.Confirm) error {
 		called, got = true, tlsConf
 
 		return nil
@@ -54,7 +55,7 @@ func TestHostOptsOutOfTLS(t *testing.T) {
 		called bool
 	)
 
-	stubHost(t, func(_ *app.Data, _ pairing.Options, tlsConf auth.TLS) error {
+	stubHost(t, func(_ *app.Data, _ pairing.Options, tlsConf auth.TLS, _ ...websocketcore.Confirm) error {
 		called, got = true, tlsConf
 
 		return nil
@@ -100,7 +101,7 @@ func inheritRootFlags(t *testing.T) {
 
 // stubHost replaces the websocket host for the duration of a test, so the test
 // sees the TLS setting the command resolved without opening a listener.
-func stubHost(t *testing.T, replacement func(*app.Data, pairing.Options, auth.TLS) error) {
+func stubHost(t *testing.T, replacement func(*app.Data, pairing.Options, auth.TLS, ...websocketcore.Confirm) error) {
 	t.Helper()
 
 	original := hostWebsocket

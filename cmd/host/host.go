@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	"github.com/fiwon123/cthrone/internal/chat"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var natsFlag bool
@@ -77,10 +80,27 @@ On nats connection only host receive message and only connect device send messag
 			return
 		}
 
-		if err := hostWebsocket(app, opts, tlsConf); err != nil {
+		if err := hostWebsocket(app, opts, tlsConf, firstContactGate()); err != nil {
 			log.Fatal(err)
 		}
 	},
+}
+
+// firstContactGate is how a new device is let in: a question on the terminal.
+//
+// A host with no terminal attached has nobody to ask, so it accepts and pins a
+// first contact the way it did before the code existed, and says so when the
+// device arrives. Refusing every new device would make a headless host
+// unusable, and there is no person at such a host to compare a code with
+// anyway. The question is asked only when a device that is not already pinned
+// turns up, and not at all when a shared secret is configured: the secret path
+// has no first-contact code to compare.
+func firstContactGate() websocketcore.Confirm {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return chat.AcceptFirstContact(os.Stdout)
+	}
+
+	return chat.ConfirmFirstContact(os.Stdin, os.Stdout)
 }
 
 func init() {
