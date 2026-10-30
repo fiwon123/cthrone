@@ -55,9 +55,10 @@ internal/chat/ + ui/        the terminal loop and the GUI, over one session.Sess
 
 `internal/core` decides *what* to do (`connect`, `host`, `scan`); the handlers
 decide *how* the transport does it. `scan` walks the local subnet and reports
-the addresses that answer on the chat port. `internal/pairing` decides *which
-credential* a session speaks — the shared secret when one is configured, this
-device's key otherwise — so the transports cannot disagree.
+the addresses that answer on the chat port — never this device's own, so a host
+does not offer itself as a peer. `internal/pairing` decides *which credential* a
+session speaks — the shared secret when one is configured, this device's key
+otherwise — so the transports cannot disagree.
 
 The GUI is not a fourth transport: `ui/` reads and writes through the same
 `internal/session.Session` the terminal loops use, and `mobile/` is a second

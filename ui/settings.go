@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,35 @@ import (
 
 // defaultPort is the port both transports use unless another is given.
 const defaultPort = 8080
+
+// deviceAddresses lists this device's addresses as host:port pairs — the form
+// the other device types, or its scan finds. An empty list returns "", because
+// a device with no reachable address has nothing to advertise.
+func deviceAddresses(addrs []string, port int) string {
+	if len(addrs) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		parts = append(parts, net.JoinHostPort(addr, strconv.Itoa(port)))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// thisDeviceText is the read-only line that tells a hosting device its own
+// address: the values the other device's scan will find. A host bound to every
+// interface answers on each address this device holds, so each one is listed.
+// An empty list means there is nothing to show.
+func thisDeviceText(addrs []string, port int) string {
+	addresses := deviceAddresses(addrs, port)
+	if addresses == "" {
+		return ""
+	}
+
+	return "This device — " + addresses
+}
 
 // parsePort returns the port in text, or defaultPort when text is not a
 // usable port. A GUI has no line to print a usage error to, and a port that

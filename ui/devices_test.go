@@ -107,3 +107,31 @@ func TestAddScannedListsNewAddresses(t *testing.T) {
 		t.Fatalf("row = %+v, want the scanned address on the scanned port", list[0])
 	}
 }
+
+// A host answers on its own addresses and hears its own beacon when the
+// operating system loops the broadcast back. Neither is a device to connect to,
+// so every address the machine holds is filtered — not only the first one.
+func TestIsSelf(t *testing.T) {
+	own := []string{"192.168.1.20", "10.0.5.7"}
+
+	tests := []struct {
+		name string
+		addr string
+		own  []string
+		want bool
+	}{
+		{"first own address", "192.168.1.20", own, true},
+		{"second own address", "10.0.5.7", own, true},
+		{"another device", "192.168.1.21", own, false},
+		{"empty address", "", own, false},
+		{"no addresses known", "192.168.1.20", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSelf(tt.addr, tt.own); got != tt.want {
+				t.Errorf("isSelf(%q, %v) = %v, want %v", tt.addr, tt.own, got, tt.want)
+			}
+		})
+	}
+}
