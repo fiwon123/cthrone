@@ -65,6 +65,11 @@ func run(s session.Session, in *os.File, out io.Writer) {
 
 		sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
 		sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
+
+		// The code a first contact is compared by arrives before the peer is
+		// accepted, and on both sides: the side that is waiting has nothing
+		// else to go on.
+		sealed.OnFirstContact(func(c e2e.FirstContact) { notice(out, input, FirstContactNotice(c)) })
 	}
 
 	// receive only installs the printer on the session, so it is done by the

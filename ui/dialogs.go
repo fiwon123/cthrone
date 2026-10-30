@@ -72,11 +72,19 @@ func (g *gui) showCopyable(title, message string) {
 }
 
 // showCopyableConfirm is showCopyable's asking form: the message can be copied,
-// and the dialog has a confirm and a cancel.
-func (g *gui) showCopyableConfirm(title, message, confirm string, action func(bool)) {
+// and the dialog has a confirm and a cancel button whose labels say what the
+// answer means on this screen — "Delete"/"Cancel" for a file, "Accept"/"Refuse"
+// for a device.
+//
+// The dialog is returned so a caller that is waiting on the answer can take it
+// off the screen when the question has expired.
+func (g *gui) showCopyableConfirm(title, message, confirm, cancel string, action func(bool)) *dialog.ConfirmDialog {
 	if g.win == nil {
-		return
+		return nil
 	}
 
-	dialog.NewCustomConfirm(title, confirm, "Cancel", g.copyableBody(message), action, g.win).Show()
+	box := dialog.NewCustomConfirm(title, confirm, cancel, g.copyableBody(message), action, g.win)
+	box.Show()
+
+	return box
 }

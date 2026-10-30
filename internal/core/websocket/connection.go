@@ -83,8 +83,18 @@ func open(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) 
 // seal wraps a transport session and refuses to hand out one that is not
 // sealed. A credential the handshake cannot use closes the session here rather
 // than letting the caller use it in the clear.
-func seal(raw session.Session, cred pairing.Credential, name string) (session.Session, error) {
-	sealed, err := e2e.New(raw, cred.Config(e2e.Single, name))
+//
+// confirm is the gate a host answers first contacts with. A client passes none:
+// the code it shows is on the other screen, and the side that does not ask is
+// the side that waits.
+func seal(raw session.Session, cred pairing.Credential, name string, confirm ...Confirm) (session.Session, error) {
+	cfg := cred.Config(e2e.Single, name)
+
+	if len(confirm) > 0 {
+		cfg.Confirm = confirm[0]
+	}
+
+	sealed, err := e2e.New(raw, cfg)
 	if err != nil {
 		raw.Close(err.Error())
 
