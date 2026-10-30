@@ -209,9 +209,17 @@ winres-icon: ## generate the Windows GUI exe icon resource (first run needs modu
 # bloats the archive. The resource is created *after* the two CLI exes are built
 # and removed right after the GUI exe: cthrone.exe and ct.exe are the
 # command-line tool, and only the exe the user clicks carries the logo.
+#
+# The subsystem follows the same split, and it is not cosmetic. cthrone_gui.exe
+# is linked -H=windowsgui, so a click opens the window with no console flashing
+# behind it. The two CLI exes keep the console subsystem: a GUI-subsystem
+# cthrone.exe shows nothing when double-clicked, makes cmd return before it
+# finishes (so `errorlevel` is meaningless), and hides every log and panic line —
+# a failed host looks like a silent no-op. release.yml checks the three values
+# from the PE headers, so a regression fails the build instead of shipping.
 gui-windows: $(BUILD_DIR) require-mingw ## cross-build the Windows Fyne GUI archive (needs mingw-w64)
 	@mkdir -p $(GUI_WINDOWS_DIR)
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	@$(MAKE) --no-print-directory winres-icon || { rm -f $(WINRES_SYSO); exit 1; }
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }

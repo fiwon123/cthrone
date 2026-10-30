@@ -266,6 +266,34 @@ jobs:
           done
           exit $status
 
+      # The subsystem decides whether Windows gives the process a console, and
+      # getting it wrong is silent: a GUI-subsystem CLI exe shows nothing when
+      # double-clicked, lets cmd return before it finishes, and swallows every
+      # log line. The GUI exe wants 2 (no console flashing behind the window),
+      # the two CLI exes want 3.
+      - name: Check the exe subsystems
+        run: |
+          status=0
+          subsystem() {
+            x86_64-w64-mingw32-objdump -p "$1" | awk '$1 == "Subsystem" { print $2; exit }'
+          }
+          check() {
+            file="$1"
+            want="$2"
+            name="$3"
+            got="$(subsystem "$file")"
+            if [ "$got" = "$want" ]; then
+              echo "ok: $file is the $name subsystem ($got)"
+            else
+              echo "error: $file is subsystem ${got:-unknown}, want $want ($name)" >&2
+              status=1
+            fi
+          }
+          check build/GUI/Windows/cthrone_gui.exe 00000002 GUI
+          check build/GUI/Windows/cthrone.exe 00000003 console
+          check build/GUI/Windows/ct.exe 00000003 console
+          exit $status
+
       - name: Upload the Windows GUI archive
         uses: actions/upload-artifact@v7
         with:
