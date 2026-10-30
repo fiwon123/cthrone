@@ -410,7 +410,10 @@ adb install cthrone_<tag>_android_gui_arm64.apk
 The app has three tabs:
 
 - **Chat** — the conversation, a send field and a stop button. Tap a message to
-  copy it; **Copy all** copies the whole conversation.
+  copy it, or drag to select a part of it; **Copy all** copies the whole
+  conversation. Every message, address and error is selectable text, and an
+  error dialog carries a **Copy** button, so a failure can be pasted into a bug
+  report instead of retyped from a screenshot.
 - **Setup** — the port, the credential (device key by default, or a shared
   secret), the transport (NATS or websocket) and the TLS options, with **Host**
   and **Connect**. Encryption is on unless the box is cleared, and the host's
