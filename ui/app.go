@@ -13,6 +13,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -102,6 +104,14 @@ type gui struct {
 	// while that file is what decides the credential, because deleting it in
 	// any other case would change nothing the user could see.
 	forgetSecret *widget.Button
+
+	// about is the read-only tab: which build this is, where it comes from,
+	// and — on a press, never on a start — whether there is a newer release.
+	// aboutCredential repeats the Setup tab's line, because "which model am I
+	// in?" belongs on the screen a bug report is written from.
+	aboutCredential *widget.Label
+	aboutNote       *widget.Label
+	updateBtn       *widget.Button
 
 	// chat
 	tabs      *container.AppTabs
@@ -483,6 +493,7 @@ func (g *gui) build() {
 		tab("Chat", theme.MailComposeIcon(), chat),
 		tab("Setup", theme.SettingsIcon(), setup),
 		tab("Devices", theme.ComputerIcon(), devices),
+		tab("About", theme.InfoIcon(), g.buildAbout()),
 	)
 
 	g.win.SetContent(g.tabs)
@@ -1236,6 +1247,120 @@ func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
 }
 
+// buildAbout lays out the About tab: which version this is, where it comes
+// from, and — only when the button is pressed — whether there is a newer one.
+//
+// Nothing here polls. A start-up check would put a network call in the path of
+// a window that has to open on a phone with no signal, and this tab exists to
+// answer a question, not to chase one. The check runs on demand, in the
+// background, and writes its answer on the tab it belongs to.
+func (g *gui) buildAbout() fyne.CanvasObject {
+	version := aboutVersion(Version, g.app.Metadata().Version)
+
+	g.aboutCredential = widget.NewLabel("")
+	g.aboutCredential.Wrapping = fyne.TextWrapWord
+
+	g.aboutNote = widget.NewLabel("")
+	g.aboutNote.Wrapping = fyne.TextWrapWord
+
+	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		g.copyToClipboard(version)
+		g.setAboutNote("Copied " + version)
+	})
+
+	versionLine := container.NewHBox(
+		widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel(version),
+		copyBtn,
+	)
+
+	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, widget.NewLabel(RepositoryURL))
+
+	g.updateBtn = widget.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates)
+
+	note := widget.NewLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+	note.Wrapping = fyne.TextWrapWord
+
+	body := container.NewVBox(
+		versionLine,
+		repoLine,
+		widget.NewSeparator(),
+		g.aboutCredential,
+		widget.NewSeparator(),
+		g.updateBtn,
+		g.aboutNote,
+		note,
+	)
+
+	// The credential line was filled in before this tab existed, so it is
+	// brought up to date now rather than staying empty until the next rebuild.
+	g.refreshCredential()
+
+	return container.NewVScroll(container.NewPadded(body))
+}
+
+// openRepository opens the project's page in the browser.
+//
+// A link that does nothing is the failure this reports: `OpenURL` returns the
+// reason a desktop has no browser or a phone has no handler, and a swallowed
+// one leaves the user clicking a dead button.
+func (g *gui) openRepository() {
+	link, err := url.Parse(RepositoryURL)
+	if err != nil {
+		dialog.ShowError(err, g.win)
+
+		return
+	}
+
+	if err := g.app.OpenURL(link); err != nil {
+		dialog.ShowError(fmt.Errorf("could not open %s: %w", RepositoryURL, err), g.win)
+	}
+}
+
+// checkUpdates asks GitHub for the newest release, off the UI goroutine.
+//
+// The answer is always written back through fyne.Do, including the failures: a
+// button left disabled or a note left saying "Checking…" is the spinner that
+// never resolves this tab is built to avoid.
+func (g *gui) checkUpdates() {
+	if g.updateBtn != nil {
+		g.updateBtn.Disable()
+	}
+
+	g.setAboutNote("Checking…")
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+		defer cancel()
+
+		tag, err := latestReleaseTag(ctx, &http.Client{Timeout: updateCheckTimeout}, LatestReleaseURL)
+
+		fyne.Do(func() {
+			if g.updateBtn != nil {
+				g.updateBtn.Enable()
+			}
+
+			if err != nil {
+				g.setAboutNote("Could not check: " + err.Error() + ".")
+
+				return
+			}
+
+			g.setAboutNote(updateText(aboutVersion(Version, g.app.Metadata().Version), tag))
+		})
+	}()
+}
+
+// setAboutNote writes the update check's answer on the About tab.
+func (g *gui) setAboutNote(text string) {
+	if g.aboutNote == nil {
+		return
+	}
+
+	g.aboutNote.SetText(text)
+}
+
 // refreshCredential keeps the Setup tab saying which credential the next Host
 // or Connect will speak, and offers to delete the token file while that file is
 // the thing in charge.
@@ -1253,7 +1378,12 @@ func (g *gui) refreshCredential() {
 	path := g.tokenFile()
 	fromFile := secretFileHasValue(path)
 
-	g.credential.SetText(credentialText(typed, envSet, path, fromFile))
+	text := credentialText(typed, envSet, path, fromFile)
+	g.credential.SetText(text)
+
+	if g.aboutCredential != nil {
+		g.aboutCredential.SetText(text)
+	}
 
 	if fromFile && typed == "" && !envSet {
 		g.forgetSecret.Show()
