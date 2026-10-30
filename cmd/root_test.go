@@ -79,3 +79,60 @@ func TestInsecureFlagIsASwitch(t *testing.T) {
 		t.Errorf("expected the certificate to be checked by default, got %q", flag.DefValue)
 	}
 }
+
+// A command line with no subcommand opens the window.
+//
+// cthrone_gui is this same command built with -tags gui and -H=windowsgui: a
+// double-click runs it with no arguments, and before this it did nothing at all
+// and exited 0 — no window, no console, no message. The launch is a variable so
+// the no-argument path can be observed; running the real one would open a
+// window in the test, and checking the exit code would prove nothing, because
+// the broken version also exited 0.
+func TestNoSubcommandLaunchesTheGUI(t *testing.T) {
+	launched := 0
+	restore := stubLaunchGUI(func() { launched++ })
+	defer restore()
+
+	rootCmd.SetArgs([]string{})
+	defer rootCmd.SetArgs(nil)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() = %v, want nil", err)
+	}
+
+	if launched != 1 {
+		t.Fatalf("the GUI was launched %d times by a command with no arguments, want 1", launched)
+	}
+}
+
+// --version prints the version and must not also open a window over the shell
+// that asked for a string.
+func TestVersionDoesNotLaunchTheGUI(t *testing.T) {
+	launched := 0
+	restore := stubLaunchGUI(func() { launched++ })
+	defer restore()
+
+	rootCmd.SetArgs([]string{"--version"})
+	defer rootCmd.SetArgs(nil)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute() = %v, want nil", err)
+	}
+
+	if launched != 0 {
+		t.Errorf("--version launched the GUI %d times, want 0", launched)
+	}
+}
+
+// stubLaunchGUI replaces the launcher and returns a function that puts the
+// command tree back the way it was: the flag a test parses stays parsed, and
+// the next test would inherit both the stub and the flag.
+func stubLaunchGUI(fn func()) func() {
+	original := launchGUI
+	launchGUI = fn
+
+	return func() {
+		launchGUI = original
+		checkVersion = false
+	}
+}

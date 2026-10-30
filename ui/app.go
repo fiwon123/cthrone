@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,80 +123,101 @@ type gui struct {
 }
 
 // Run starts the Fyne GUI.
+//
+// A window is started by a click, so there is no console to print to and no
+// exit code anybody reads: a failure that is only returned is a failure nobody
+// sees. Anything that stops the GUI therefore goes to logFailure, which writes
+// it beside the device's key and prints it for a binary started from a
+// terminal, instead of vanishing into an empty recover().
 func Run() {
+	if err := run(); err != nil {
+		logFailure(err)
+	}
+}
+
+// run builds the window and hands the event loop to the toolkit. It returns the
+// failure that stopped it rather than swallowing it.
+//
+// A panic is a failure too: the toolkit and the platform underneath it are not
+// this program's code, and a nil window from a driver that could not start is
+// exactly the case that used to exit 0 in silence.
+func run() (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// avoid crash
+			err = fmt.Errorf("the GUI stopped: %v\n%s", r, debug.Stack())
 		}
 	}()
-	var mobile bool
-	func() {
-		defer func() {
-			recover()
-		}()
-		if dev := fyne.CurrentDevice(); dev != nil {
-			mobile = dev.IsMobile()
-		}
-	}()
-	var a fyne.App
-	var w fyne.Window
-	func() {
-		defer func() {
-			recover()
-		}()
-		a = fyneapp.NewWithID("com.cthrone.app")
-		if a != nil {
-			if ic := appIcon(); ic != nil {
-				a.SetIcon(ic)
-			}
-		}
-		if a != nil {
-			w = a.NewWindow("cthrone")
-			if w != nil {
-				if ic := appIcon(); ic != nil {
-					w.SetIcon(ic)
-				}
-			}
-		}
-	}()
-	if a == nil || w == nil {
-		return
+
+	a := fyneapp.NewWithID("com.cthrone.app")
+	if a == nil {
+		return errors.New("the GUI toolkit did not create an application")
 	}
+
+	if ic := appIcon(); ic != nil {
+		a.SetIcon(ic)
+	}
+
+	// The device is asked *after* the app exists: fyne.CurrentDevice goes
+	// through the current app, so before this point there is nothing to ask and
+	// the call panics — which is why the answer used to be "not mobile" on
+	// every device, including the phone.
+	mobile := currentDeviceIsMobile()
+
+	w := a.NewWindow("cthrone")
+	if w == nil {
+		return errors.New("the GUI toolkit did not create a window")
+	}
+
+	if ic := appIcon(); ic != nil {
+		w.SetIcon(ic)
+	}
+
 	g := &gui{app: a, win: w, mobile: mobile}
-	func() {
-		defer func() {
-			recover()
-		}()
-		g.build()
-	}()
+
+	// A window that cannot be built has nothing to show, and a blank window is
+	// a worse answer than a report: the panic propagates to the recover above.
+	g.build()
+
 	go g.pruneLoop()
-	if !mobile {
-		func() {
-			defer func() {
-				recover()
-			}()
-			g.startDiscovery()
-		}()
-		func() {
-			defer func() {
-				recover()
-			}()
-			w.Resize(fyne.NewSize(900, 640))
-		}()
+
+	if mobile {
+		// Discovery is skipped on a phone: the beacon and the scan are for
+		// finding another machine on a network, and the app that is already
+		// open is the one the user picked up.
 	} else {
-		// Skip discovery on mobile to avoid startup crashes
-		func() {
-			defer func() {
-				recover()
-			}()
-		}()
+		// Discovery and the resize are not worth the window: a failure in
+		// either is recorded and the chat still opens.
+		if err := guard("discovery", g.startDiscovery); err != nil {
+			logFailure(err)
+		}
+
+		if err := guard("resize", func() { w.Resize(fyne.NewSize(900, 640)) }); err != nil {
+			logFailure(err)
+		}
 	}
-	func() {
-		defer func() {
-			recover()
-		}()
-		w.ShowAndRun()
+
+	w.ShowAndRun()
+
+	return nil
+}
+
+// currentDeviceIsMobile reports whether this is a touch device.
+//
+// "Not mobile" is the answer when the toolkit cannot say: a desktop layout on a
+// phone is a bad layout, while a phone layout on a desktop is a window with
+// stacked rows, and only one of those is unusable.
+func currentDeviceIsMobile() (mobile bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			mobile = false
+		}
 	}()
+
+	if dev := fyne.CurrentDevice(); dev != nil {
+		return dev.IsMobile()
+	}
+
+	return false
 }
 
 // build creates every widget and lays the window out.
