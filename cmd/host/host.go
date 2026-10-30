@@ -2,6 +2,7 @@ package hostcmd
 
 import (
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/fiwon123/cthrone/internal/auth"
@@ -63,6 +64,12 @@ On nats connection only host receive message and only connect device send messag
 		app.Name = app.ResolveName()
 
 		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
+
+		// Name the credential and where it came from before the transport
+		// starts. A token file nobody remembers writing switches the device
+		// into the shared-secret model, which refuses a peer that pairs by
+		// key, and nothing on screen used to say so.
+		fmt.Println("Credential:", pairing.DescribeOptions(opts))
 
 		if natsFlag {
 			natscore.Host(args, app, opts, natsURLFlag, tlsConf)

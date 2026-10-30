@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
@@ -153,4 +154,46 @@ func resolveConfigDir(mobile bool, storageRoot string) string {
 	}
 
 	return "."
+}
+
+// credentialText is the Setup tab's read row: which credential the next Host or
+// Connect will speak, and where it came from.
+//
+// It exists because a token file the user forgot about is invisible: the device
+// joins the shared-secret model, which refuses a peer that pairs by key, and
+// the only symptom is a connection that will not complete. Naming the source is
+// what turns that into something a person can act on — and the file case is
+// also what the "Stop using the shared secret" button acts on.
+//
+// It never carries the secret itself. A source is what explains the model; the
+// value is the one thing that must not sit on a screen.
+func credentialText(typed string, envSet bool, filePath string, fileHasSecret bool) string {
+	switch {
+	case strings.TrimSpace(typed) != "":
+		return "Credential: the shared secret typed above — a device that pairs by its key is refused. Clear the field to go back to key pairing."
+	case envSet:
+		return "Credential: the shared secret in " + auth.EnvToken + " — a device that pairs by its key is refused. Unset it to go back to key pairing."
+	case fileHasSecret:
+		return "Credential: the shared secret in " + filePath + " — a device that pairs by its key is refused. It is not shown; delete the file to go back to key pairing."
+	default:
+		return "Credential: this device's key, pinned by the other device on first contact. Compare the two fingerprints the screens show."
+	}
+}
+
+// secretFileHasValue reports whether path holds a secret this app would read.
+//
+// The read is the same one auth.Resolve will do a moment later, so the line in
+// the Setup tab cannot promise a model the transport then disagrees with: an
+// empty file is no secret at all, and a missing one is the default.
+func secretFileHasValue(path string) bool {
+	if path == "" {
+		return false
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(string(data)) != ""
 }

@@ -38,6 +38,11 @@ type Credential struct {
 	identity *e2e.Identity
 	pins     *discovery.PinStore
 	source   string
+
+	// path is the token file the secret was read from, when source is
+	// auth.SourceFile. It is the file a "stop using the shared secret" action
+	// has to remove, and the one a status line names.
+	path string
 }
 
 // HasSecret reports whether the credential is the shared secret. A session
@@ -49,8 +54,66 @@ func (c Credential) HasSecret() bool { return c.secret != "" }
 // Secret is the shared secret, or the empty string in the device-key model.
 func (c Credential) Secret() string { return c.secret }
 
-// Source says where the credential came from, for a status line.
+// Source says where the credential came from, for a status line. It is
+// auth.SourceFlag, auth.SourceEnvironment, auth.SourceFile or SourceDeviceKey.
 func (c Credential) Source() string { return c.source }
+
+// SecretFile is the token file the shared secret was read from, or the empty
+// string when there is no file in charge — the device-key model, a flag, or the
+// environment. It is what a "stop using the shared secret" action deletes.
+func (c Credential) SecretFile() string {
+	if c.source != auth.SourceFile {
+		return ""
+	}
+
+	return c.path
+}
+
+// DescribeOptions names the credential a set of options resolves to, for the
+// line a command prints before it starts a transport.
+//
+// It is the same resolution the transport will do, so the line cannot describe
+// a credential other than the one in use. A resolution that fails is reported
+// here as well: the transport fails on that same error a moment later, and the
+// user reads the reason first.
+func DescribeOptions(opts Options) string {
+	cred, err := Load(opts)
+	if err != nil {
+		return fmt.Sprintf("unavailable — %v", err)
+	}
+
+	return cred.Describe()
+}
+
+// Describe names the credential and where it came from, for the line a run
+// prints when it starts.
+//
+// It never carries the secret: a source and a path are what explain the model
+// in use, and the value is the one thing that must not reach a terminal, a log
+// or a screenshot. The device-key branch carries this device's fingerprint
+// instead, which is public and is what the other screen compares.
+func (c Credential) Describe() string {
+	if !c.HasSecret() {
+		if print := c.Fingerprint(); print != "" {
+			return fmt.Sprintf("%s (fingerprint %s)", SourceDeviceKey, print)
+		}
+
+		return SourceDeviceKey
+	}
+
+	switch c.source {
+	case auth.SourceFlag:
+		// The flag is the one source that is visible in the process list, so
+		// naming it is a reminder rather than a boast.
+		return "shared secret (--token, visible in the process list)"
+	case auth.SourceEnvironment:
+		return fmt.Sprintf("shared secret (%s)", auth.EnvToken)
+	case auth.SourceFile:
+		return fmt.Sprintf("shared secret (file %s)", c.path)
+	default:
+		return "shared secret"
+	}
+}
 
 // Pins is the trust-on-first-use record of the devices and host certificates
 // this device has met, or nil for a credential that was never loaded. It is
@@ -138,7 +201,7 @@ func Load(opts Options) (Credential, error) {
 				e2e.ErrSecret, len(token.Value), e2e.MinSecret)
 		}
 
-		return Credential{secret: token.Value, pins: pins, source: token.Source}, nil
+		return Credential{secret: token.Value, pins: pins, source: token.Source, path: token.Path}, nil
 	}
 
 	keyFile, err := keyPath(opts.KeyFile)

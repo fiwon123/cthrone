@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -229,6 +231,128 @@ func TestThisDeviceText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := thisDeviceText(tt.addrs, tt.port); got != tt.want {
 				t.Errorf("thisDeviceText(%v, %d) = %q, want %q", tt.addrs, tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+// The Setup tab names the credential in force and where it came from. A token
+// file a user forgot about is otherwise invisible: it switches the device into
+// the shared-secret model, which refuses a key-paired peer, and the only
+// symptom is a connection that never completes.
+func TestCredentialText(t *testing.T) {
+	tests := []struct {
+		name          string
+		typed         string
+		envSet        bool
+		filePath      string
+		fileHasSecret bool
+		want          string
+		notWant       []string
+	}{
+		{
+			name:    "the device key is the default",
+			want:    "this device's key",
+			notWant: []string{"shared secret"},
+		},
+		{
+			name:  "what is typed wins",
+			typed: "typed-secret",
+			want:  "typed above",
+		},
+		{
+			name:          "what is typed wins over the file",
+			typed:         "typed-secret",
+			filePath:      "/home/u/.config/cthrone/token",
+			fileHasSecret: true,
+			want:          "typed above",
+		},
+		{
+			name:          "the environment beats the file",
+			envSet:        true,
+			filePath:      "/home/u/.config/cthrone/token",
+			fileHasSecret: true,
+			want:          "CTHRONE_TOKEN",
+		},
+		{
+			name:          "the file is named",
+			filePath:      "/home/u/.config/cthrone/token",
+			fileHasSecret: true,
+			want:          "/home/u/.config/cthrone/token",
+		},
+		{
+			name:     "an empty file is no secret",
+			filePath: "/home/u/.config/cthrone/token",
+			want:     "this device's key",
+		},
+		{
+			name:  "blank typing is not a secret",
+			typed: "   ",
+			want:  "this device's key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := credentialText(tt.typed, tt.envSet, tt.filePath, tt.fileHasSecret)
+
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("credentialText() = %q, want it to name %q", got, tt.want)
+			}
+
+			for _, unwanted := range tt.notWant {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("credentialText() = %q, want it not to name %q", got, unwanted)
+				}
+			}
+
+			// The value of a secret never reaches this line, whatever the
+			// source: a screen is copyable, a screenshot is permanent, and the
+			// one thing that must not be either is the secret itself.
+			if typed := strings.TrimSpace(tt.typed); typed != "" && strings.Contains(got, typed) {
+				t.Errorf("credentialText() carries what was typed: %q", got)
+			}
+		})
+	}
+}
+
+// The "Stop using the shared secret" button is offered only while the file is
+// what decides the credential, so deleting it must be detectable without a
+// window: an empty file is no secret, and a missing one is the default.
+func TestSecretFileHasValue(t *testing.T) {
+	dir := t.TempDir()
+
+	withSecret := filepath.Join(dir, "token")
+	if err := os.WriteFile(withSecret, []byte("  "+strings.Repeat("s", 32)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	blank := filepath.Join(dir, "blank")
+	if err := os.WriteFile(blank, []byte("  \n\t\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"a secret", withSecret, true},
+		{"an empty file", empty, false},
+		{"whitespace only", blank, false},
+		{"a missing file", filepath.Join(dir, "absent"), false},
+		{"no path at all", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := secretFileHasValue(tt.path); got != tt.want {
+				t.Errorf("secretFileHasValue(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
 	}
