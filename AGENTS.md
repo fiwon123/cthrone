@@ -131,18 +131,19 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 26 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 27 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (26 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (27 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
   `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`,
   `internal/core/nats`, `internal/core/websocket` (the scanner included),
   `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic; the Fyne widgets are still unverified).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers; the
+  gui-tagged widget tree is still unverified).
 
 So a green `make check` proves:
 
@@ -153,9 +154,9 @@ So a green `make check` proves:
 
 **A test file is not depth.** The newest ones are small — `cmd/assets`,
 `cmd/ui`, `internal/data/app` and `mobile` have one test function each — and
-the Fyne widgets are still only type-checked with `go build -tags "gui ci"
-./ui`, which `make check` does not run. Report what executed, not just that the
-package list is complete.
+the gui-tagged widget tree is still only type-checked with `go build -tags
+"gui ci" ./ui`, which `make check` does not run. Report what executed, not just
+that the package list is complete.
 
 `make check` prints the list of packages with no test file after the run, so a
 green run with no such list means every package was exercised.

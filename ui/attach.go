@@ -18,6 +18,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/wire"
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // outgoing is a picked file waiting its turn on the transport.
@@ -374,7 +375,7 @@ func (g *gui) showFiles() {
 	folder := widget.NewEntry()
 	folder.SetText(settings.folder)
 
-	ask := widget.NewCheck("Ask before saving each file", nil)
+	ask := widgets.NewCheckRow("Ask before saving each file", nil)
 	ask.SetChecked(settings.policy == saveAsk)
 
 	choose := widget.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
@@ -398,8 +399,8 @@ func (g *gui) showFiles() {
 	items := []*widget.FormItem{
 		// The picker is the normal way in on a phone, where typing a path is
 		// close to impossible; the field stays for a path pasted from a desktop.
-		widget.NewFormItem("Folder", container.NewBorder(nil, nil, nil, choose, folder)),
-		widget.NewFormItem("", ask),
+		widgets.FormRow("Folder", container.NewBorder(nil, nil, nil, choose, folder)),
+		{Text: "", Widget: ask},
 	}
 
 	form := dialog.NewForm("Files", "Save", "Cancel", items, func(ok bool) {
@@ -407,7 +408,7 @@ func (g *gui) showFiles() {
 			return
 		}
 
-		g.storeFileSettings(folder.Text, ask.Checked)
+		g.storeFileSettings(folder.Text, ask.Checked())
 	}, g.win)
 	form.Resize(g.dialogSize())
 	form.Show()

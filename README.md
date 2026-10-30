@@ -688,17 +688,17 @@ agent inside the sandbox cannot manage containers.
 
 ### A note on what `make check` proves
 
-`make check` runs gofmt, vet, test, and build. Every one of the module's 26
+`make check` runs gofmt, vet, test, and build. Every one of the module's 27
 packages now has a test file (#85/#86 closed the last gap), covering the
 transports, the scanner, the CLI commands, the shared secret and device-key
-pairing, the TLS handling, the remote-exec allowlist, the session hub and the
-mobile entry point.
+pairing, the TLS handling, the remote-exec allowlist, the session hub, the
+selectable-text helpers and the mobile entry point.
 
 A green run therefore proves that the code is formatted, that it vets clean,
 that it compiles, and that every package's tests passed. It does **not** prove
-the Fyne widgets, which are only type-checked under `-tags "gui ci"` in CI, and
-it does not make the thin spots deep: several of the newer test files hold a
-single function. `make check` prints the list of packages with no test file
+the gui-tagged widget tree, which is only type-checked under `-tags "gui ci"` in
+CI, and it does not make the thin spots deep: several of the newer test files
+hold a single function. `make check` prints the list of packages with no test file
 after the run, so an empty list means every package was exercised.
 
 ## Troubleshooting
