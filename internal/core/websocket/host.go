@@ -224,17 +224,25 @@ func describeBind(bindAddress string) string {
 // generates them the first time and keeps them afterwards: a client that
 // pinned the fingerprint must not find a different certificate tomorrow.
 func hostCertificate(configuredCert, configuredKey string) (string, string, error) {
-	certFile, keyFile, err := auth.DefaultCertificateFiles()
-	if err != nil {
-		return "", "", err
-	}
+	certFile, keyFile := configuredCert, configuredKey
 
-	if configuredCert != "" {
-		certFile = configuredCert
-	}
+	// The platform default is asked for only when the caller named no path.
+	// On Android os.UserConfigDir fails — there is no $HOME — and the GUI
+	// supplies both paths from the app's own storage; asking first made every
+	// phone host fail before the listener bound.
+	if certFile == "" || keyFile == "" {
+		defaultCert, defaultKey, err := auth.DefaultCertificateFiles()
+		if err != nil {
+			return "", "", err
+		}
 
-	if configuredKey != "" {
-		keyFile = configuredKey
+		if certFile == "" {
+			certFile = defaultCert
+		}
+
+		if keyFile == "" {
+			keyFile = defaultKey
+		}
 	}
 
 	if fileExists(certFile) && fileExists(keyFile) {

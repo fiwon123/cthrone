@@ -277,6 +277,10 @@ func WriteCertificate(certPath, keyPath string, cert Certificate) error {
 		return fmt.Errorf("creating %s: %w", filepath.Dir(certPath), err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(keyPath), err)
+	}
+
 	if err := os.WriteFile(certPath, cert.CertPEM, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", certPath, err)
 	}
