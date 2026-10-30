@@ -41,6 +41,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // copyHintDuration is how long the transcript's "Copied" confirmation stays on
@@ -75,12 +76,12 @@ type gui struct {
 	fingerprintEntry *widget.Entry
 	subjectEntry     *widget.Entry
 	natsURLEntry     *widget.Entry
-	tlsCheck         *widget.Check
-	insecureCheck    *widget.Check
-	natsCheck        *widget.Check
+	tlsCheck         *widgets.CheckRow
+	insecureCheck    *widgets.CheckRow
+	natsCheck        *widgets.CheckRow
 
 	// setup layout: the form is rebuilt whenever the mode changes, because a
-	// Fyne Form always renders a label for every item it holds.
+	// Fyne Form always renders a row for every item it holds.
 	moreOptions bool
 	moreBtn     *widget.Button
 	formHolder  *fyne.Container
@@ -381,12 +382,12 @@ func (g *gui) build() {
 	g.natsURLEntry = widget.NewEntry()
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
-	g.tlsCheck = widget.NewCheck("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
+	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
 	// Encrypted is the default on the CLI, so the app starts the same way: a
 	// phone that has to find a switch before it is protected is not protected.
 	g.tlsCheck.SetChecked(true)
-	g.insecureCheck = widget.NewCheck("Skip the certificate check (insecure)", nil)
-	g.natsCheck = widget.NewCheck("Use NATS instead of websocket", nil)
+	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil)
+	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil)
 
 	g.moreBtn = widget.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
@@ -419,7 +420,7 @@ func (g *gui) build() {
 	g.forgetSecret.Hide()
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widgets.SelectableHeading("Quick Setup"),
 		g.tlsCheck,
 		g.insecureCheck,
 		g.formHolder,
@@ -539,46 +540,44 @@ func (g *gui) cycleTab(delta int) {
 
 // rebuildSetupForm lays out the rows the current configuration uses.
 //
-// Fyne's widget.Form renders a label for every FormItem it holds, and there is
-// no public handle on that label, so hiding a field's entry leaves its label
-// dangling on screen. The rows are therefore rebuilt from the visible subset:
+// The rows are rebuilt from the visible subset rather than hidden one by one:
 // the entries themselves live on g, so the text already typed into them
-// survives.
+// survives, and a row that is not in the subset leaves nothing behind.
 func (g *gui) rebuildSetupForm() {
 	// The transport's OnSelected runs while build() is still wiring the tab.
 	if g.formHolder == nil {
 		return
 	}
 
-	useNATS := g.natsCheck.Checked
-	view := setupVisibility(useNATS, g.tlsCheck.Checked, g.moreOptions)
+	useNATS := g.natsCheck.Checked()
+	view := setupVisibility(useNATS, g.tlsCheck.Checked(), g.moreOptions)
 
 	items := []*widget.FormItem{
-		{Text: "Device name", Widget: g.nameEntry},
-		{Text: labelConnectTo, Widget: g.hostEntry},
-		{Text: "Port", Widget: g.portEntry},
-		{Text: "Transport", Widget: g.transport},
+		widgets.FormRow("Device name", g.nameEntry),
+		widgets.FormRow(labelConnectTo, g.hostEntry),
+		widgets.FormRow("Port", g.portEntry),
+		widgets.FormRow("Transport", g.transport),
 	}
 	if view.Options {
-		items = append(items, &widget.FormItem{Text: "Options", Widget: g.moreBtn})
+		items = append(items, widgets.FormRow("Options", g.moreBtn))
 	}
 	if view.SharedSecret {
-		items = append(items, &widget.FormItem{Text: "Shared secret", Widget: g.tokenEntry})
+		items = append(items, widgets.FormRow("Shared secret", g.tokenEntry))
 	}
 	if view.Fingerprint {
-		items = append(items, &widget.FormItem{Text: "Fingerprint", Widget: g.fingerprintEntry})
+		items = append(items, widgets.FormRow("Fingerprint", g.fingerprintEntry))
 	}
 	if view.NATSBroker {
-		items = append(items, &widget.FormItem{Text: "NATS URL", Widget: g.natsURLEntry})
+		items = append(items, widgets.FormRow("NATS URL", g.natsURLEntry))
 	}
 	if view.NATSSubject {
-		items = append(items, &widget.FormItem{Text: "NATS subject", Widget: g.subjectEntry})
+		items = append(items, widgets.FormRow("NATS subject", g.subjectEntry))
 	}
 	if view.BindAddress {
-		items = append(items, &widget.FormItem{Text: "Bind address", Widget: g.bindEntry})
+		items = append(items, widgets.FormRow("Bind address", g.bindEntry))
 	}
 
-	// A check carries its own label, so hiding the widget removes the text.
+	// A check row hides its caption with the box, so the whole row goes.
 	if view.Insecure {
 		g.insecureCheck.Show()
 	} else {
@@ -604,7 +603,7 @@ func (g *gui) rebuildSetupForm() {
 // connect joins a host (websocket) or a broker (NATS).
 func (g *gui) connect() {
 	host := strings.TrimSpace(g.hostEntry.Text)
-	useNATS := g.natsCheck.Checked
+	useNATS := g.natsCheck.Checked()
 
 	if !useNATS && host == "" {
 		g.showError(errors.New("enter the host address to connect to"))
@@ -673,7 +672,7 @@ func (g *gui) host() {
 	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
-	useNATS := g.natsCheck.Checked
+	useNATS := g.natsCheck.Checked()
 	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
 	// This device's own address, as the other device's scan will find it. The
@@ -1257,8 +1256,8 @@ func (g *gui) tls() auth.TLS {
 	dir := g.configDir()
 
 	return auth.TLS{
-		Enabled:     g.tlsCheck.Checked,
-		Insecure:    g.insecureCheck.Checked,
+		Enabled:     g.tlsCheck.Checked(),
+		Insecure:    g.insecureCheck.Checked(),
 		Fingerprint: strings.TrimSpace(g.fingerprintEntry.Text),
 		CertFile:    filepath.Join(dir, "cert.pem"),
 		KeyFile:     filepath.Join(dir, "key.pem"),
@@ -1282,15 +1281,12 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.aboutCredential = selectableLabel("")
 	g.aboutNote = selectableLabel("")
 
-	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
-		g.copyToClipboard(version)
-		g.setAboutNote("Copied " + version)
-	})
-
+	// No Copy button beside the version: the version is a selectable label like
+	// every other line here, so the button only repeated a selection the user
+	// can already make.
 	versionLine := container.NewHBox(
-		widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widgets.SelectableHeading("cthrone"),
 		selectableLabel(version),
-		copyBtn,
 	)
 
 	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
