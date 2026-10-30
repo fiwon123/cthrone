@@ -15,4 +15,12 @@ var Cmd = &cobra.Command{
 	},
 }
 
+// Run starts the GUI. The root command calls it when it is given no
+// subcommand, which is what a double-click on cthrone_gui does: that binary is
+// this same command built with -tags gui and -H=windowsgui, so there is no
+// console left to explain a binary that starts nothing.
+func Run() {
+	ui.Run()
+}
+
 func init() {}
