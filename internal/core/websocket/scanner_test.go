@@ -1,7 +1,10 @@
 package websocketcore
 
 import (
+	"errors"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -105,6 +108,110 @@ func TestScanFindsHostsOn10Network(t *testing.T) {
 	}
 	if found[0] != "10.0.5.10" {
 		t.Errorf("expected 10.0.5.10, got %q", found[0])
+	}
+}
+
+// stubRoute makes getLocalIP answer from a fixed route and interface list.
+func stubRoute(t *testing.T, route string, hasRoute bool, addrs []net.Addr, addrsErr error) {
+	t.Helper()
+
+	origRoute, origAddrs := defaultRouteIP, interfaceAddrs
+	t.Cleanup(func() { defaultRouteIP, interfaceAddrs = origRoute, origAddrs })
+
+	defaultRouteIP = func() (string, bool) { return route, hasRoute }
+	interfaceAddrs = func() ([]net.Addr, error) { return addrs, addrsErr }
+}
+
+// The first private address in the list is often a docker bridge or a VPN
+// adapter; the route's own address is the network the device is actually on.
+func TestGetLocalIPPrefersTheDefaultRoute(t *testing.T) {
+	stubRoute(t, "192.168.1.5", true, []net.Addr{
+		&net.IPNet{IP: net.ParseIP("172.17.0.1")},
+		&net.IPNet{IP: net.ParseIP("10.8.0.6")},
+	}, nil)
+
+	ip, err := getLocalIP()
+	if err != nil {
+		t.Fatalf("getLocalIP() error = %v", err)
+	}
+	if ip != "192.168.1.5" {
+		t.Errorf("getLocalIP() = %q, want the default route's address 192.168.1.5", ip)
+	}
+}
+
+// An isolated LAN has no default route, and the address list is the only
+// evidence of where the device is.
+func TestGetLocalIPFallsBackWithoutADefaultRoute(t *testing.T) {
+	stubRoute(t, "", false, []net.Addr{
+		&net.IPNet{IP: net.ParseIP("127.0.0.1")},
+		&net.IPNet{IP: net.ParseIP("8.8.8.8")},
+		&net.IPNet{IP: net.ParseIP("10.0.5.7")},
+	}, nil)
+
+	ip, err := getLocalIP()
+	if err != nil {
+		t.Fatalf("getLocalIP() error = %v", err)
+	}
+	if ip != "10.0.5.7" {
+		t.Errorf("getLocalIP() = %q, want 10.0.5.7", ip)
+	}
+}
+
+func TestGetLocalIPWithoutAnyAddress(t *testing.T) {
+	stubRoute(t, "", false, []net.Addr{&net.IPNet{IP: net.ParseIP("127.0.0.1")}}, nil)
+
+	if _, err := getLocalIP(); err == nil {
+		t.Fatal("getLocalIP() = no error, want the no-local-IP error")
+	}
+}
+
+func TestGetLocalIPReportsTheInterfaceError(t *testing.T) {
+	wantErr := errors.New("no interfaces")
+	stubRoute(t, "", false, nil, wantErr)
+
+	_, err := getLocalIP()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("getLocalIP() error = %v, want %v", err, wantErr)
+	}
+}
+
+// The scan walks the subnet of the address getLocalIP returns, so the route's
+// address is what decides which /24 is dialled.
+func TestScanWalksTheDefaultRoutesSubnet(t *testing.T) {
+	origDial, origAddrs := dialScan, localAddrs
+	t.Cleanup(func() { dialScan, localAddrs = origDial, origAddrs })
+
+	stubRoute(t, "192.168.1.5", true, []net.Addr{
+		&net.IPNet{IP: net.ParseIP("172.17.0.1")},
+	}, nil)
+	localAddrs = func() []string { return []string{"172.17.0.1", "192.168.1.5"} }
+
+	var mu sync.Mutex
+	var dialed []string
+	dialScan = func(addr string, _ time.Duration) error {
+		mu.Lock()
+		defer mu.Unlock()
+		dialed = append(dialed, addr)
+
+		return net.ErrClosed
+	}
+
+	Scan(app.New(8080))
+
+	if len(dialed) != 253 {
+		t.Fatalf("expected 253 dials (.1-.254 without this device), got %d", len(dialed))
+	}
+	for _, addr := range dialed {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			t.Fatalf("dialled %q, which is not host:port: %v", addr, err)
+		}
+		if !strings.HasPrefix(host, "192.168.1.") {
+			t.Fatalf("dialled %q, outside the default route's subnet", host)
+		}
+		if port != "8080" {
+			t.Fatalf("dialled %q, want port 8080", addr)
+		}
 	}
 }
 

@@ -54,9 +54,11 @@ internal/chat/ + ui/        the terminal loop and the GUI, over one session.Sess
 ```
 
 `internal/core` decides *what* to do (`connect`, `host`, `scan`); the handlers
-decide *how* the transport does it. `scan` walks the local subnet and reports
-the addresses that answer on the chat port — never this device's own, so a host
-does not offer itself as a peer. `internal/pairing` decides *which credential* a
+decide *how* the transport does it. `scan` walks the `/24` the default route
+uses — not the first private address an adapter happens to list, which on a
+machine with a docker bridge or a VPN is often the wrong one — and reports the
+addresses that answer on the chat port, never this device's own, so a host does
+not offer itself as a peer. `internal/pairing` decides *which credential* a
 session speaks — the shared secret when one is configured, this device's key
 otherwise — so the transports cannot disagree.
 
