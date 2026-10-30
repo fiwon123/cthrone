@@ -521,7 +521,7 @@ jobs:
           # or copy the file to the device and tap it
           ```
 
-          The app has three tabs:
+          The app has four tabs:
 
           - **Chat** — the conversation, a send field and a stop button.
           - **Setup** — the port, the credential (device key by default, or a
@@ -534,6 +534,11 @@ jobs:
             device that hosts is never listed in its own list — its address is
             shown read-only under **Setup** instead, as *This device —
             &lt;address&gt;:&lt;port&gt;*.
+          - **About** — the version this build reports, with a **Copy** button;
+            the repository link; which credential the next session will speak;
+            and **Check for updates**, which runs only when pressed. Nothing
+            polls on start-up, so a window still opens on a phone with no
+            signal.
 
           A phone that hosts shows its own fingerprint in a dialog — the other
           device connects and the two screens are compared, with nothing to
