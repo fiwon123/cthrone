@@ -27,7 +27,6 @@ import (
 	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -251,7 +250,7 @@ func (g *gui) build() {
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
 	// title bar to show it in, the copy confirmation, and the copy-all action.
-	g.copyHint = widget.NewLabel("")
+	g.copyHint = selectableLabel("")
 
 	copyLabel := "Copy all"
 	if g.lay.Stack {
@@ -281,9 +280,8 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
+	g.status = selectableLabel("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
-	g.status.Wrapping = fyne.TextWrapWord
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -297,8 +295,7 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := widget.NewLabel("")
-			row.Wrapping = fyne.TextWrapWord
+			row := selectableLabel("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
@@ -411,15 +408,12 @@ func (g *gui) build() {
 		widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect),
 	)
 
-	g.hint = widget.NewLabel("")
-	g.hint.Wrapping = fyne.TextWrapWord
+	g.hint = selectableLabel("")
 
-	g.thisDevice = widget.NewLabel("")
-	g.thisDevice.Wrapping = fyne.TextWrapWord
+	g.thisDevice = selectableLabel("")
 	g.thisDevice.Hide()
 
-	g.credential = widget.NewLabel("")
-	g.credential.Wrapping = fyne.TextWrapWord
+	g.credential = selectableLabel("")
 
 	g.forgetSecret = widget.NewButtonWithIcon("Stop using the shared secret", theme.ContentClearIcon(), g.forgetSecretFile)
 	g.forgetSecret.Hide()
@@ -442,6 +436,10 @@ func (g *gui) build() {
 	// --- devices ------------------------------------------------------
 	g.scanBtn = widget.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan)
 
+	// A beacon row stays a plain label: the list gives it one fixed line, and a
+	// wrapping selectable label would clip there. The address is copyable from
+	// the "Selected" status line and the dial field, which is where a user who
+	// wants it is already looking.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.beacons) },
 		func() fyne.CanvasObject { return widget.NewLabel("") },
@@ -461,8 +459,7 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	beaconHint := widget.NewLabel("UDP beacons on port 9999")
-	beaconHint.Wrapping = fyne.TextWrapWord
+	beaconHint := selectableLabel("UDP beacons on port 9999")
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
 	} else {
@@ -610,7 +607,7 @@ func (g *gui) connect() {
 	useNATS := g.natsCheck.Checked
 
 	if !useNATS && host == "" {
-		dialog.ShowError(errors.New("enter the host address to connect to"), g.win)
+		g.showError(errors.New("enter the host address to connect to"))
 
 		return
 	}
@@ -800,7 +797,7 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint, own
 			g.app.Clipboard().SetContent(token)
 		}
 
-		dialog.ShowInformation("Pairing", text, g.win)
+		g.showCopyable("Pairing", text)
 	})
 }
 
@@ -1144,8 +1141,17 @@ func (g *gui) copyToClipboard(text string) {
 	})
 }
 
+// showError reports a failure in a dialog whose message can be copied.
+//
+// A popup used to be an inert label: the one message a user is most likely to
+// need to paste somewhere was the one they could only retype. The text is
+// selectable now, and a Copy button takes all of it at once.
 func (g *gui) showError(err error) {
-	fyne.Do(func() { dialog.ShowError(err, g.win) })
+	if err == nil {
+		return
+	}
+
+	fyne.Do(func() { g.showCopyable("Error", err.Error()) })
 }
 
 // addBeacon records a device heard now. A beacon heard twice is one device
@@ -1257,11 +1263,8 @@ func (g *gui) tokenFile() string {
 func (g *gui) buildAbout() fyne.CanvasObject {
 	version := aboutVersion(Version, g.app.Metadata().Version)
 
-	g.aboutCredential = widget.NewLabel("")
-	g.aboutCredential.Wrapping = fyne.TextWrapWord
-
-	g.aboutNote = widget.NewLabel("")
-	g.aboutNote.Wrapping = fyne.TextWrapWord
+	g.aboutCredential = selectableLabel("")
+	g.aboutNote = selectableLabel("")
 
 	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
 		g.copyToClipboard(version)
@@ -1270,17 +1273,16 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 
 	versionLine := container.NewHBox(
 		widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabel(version),
+		selectableLabel(version),
 		copyBtn,
 	)
 
 	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
-	repoLine := container.NewBorder(nil, nil, nil, repoBtn, widget.NewLabel(RepositoryURL))
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, selectableLabel(RepositoryURL))
 
 	g.updateBtn = widget.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates)
 
-	note := widget.NewLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
-	note.Wrapping = fyne.TextWrapWord
+	note := selectableLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
 		versionLine,
@@ -1308,13 +1310,13 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 func (g *gui) openRepository() {
 	link, err := url.Parse(RepositoryURL)
 	if err != nil {
-		dialog.ShowError(err, g.win)
+		g.showError(err)
 
 		return
 	}
 
 	if err := g.app.OpenURL(link); err != nil {
-		dialog.ShowError(fmt.Errorf("could not open %s: %w", RepositoryURL, err), g.win)
+		g.showError(fmt.Errorf("could not open %s: %w", RepositoryURL, err))
 	}
 }
 
@@ -1401,16 +1403,17 @@ func (g *gui) refreshCredential() {
 func (g *gui) forgetSecretFile() {
 	path := g.tokenFile()
 
-	dialog.ShowConfirm(
+	g.showCopyableConfirm(
 		"Stop using the shared secret",
 		"The shared secret in\n"+path+"\nwill be deleted.\n\nThis device will pair by its key again. A device that still holds the secret has to clear it too before the two connect.",
+		"Delete",
 		func(confirmed bool) {
 			if !confirmed {
 				return
 			}
 
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				dialog.ShowError(err, g.win)
+				g.showError(err)
 
 				return
 			}
@@ -1418,7 +1421,6 @@ func (g *gui) forgetSecretFile() {
 			g.refreshCredential()
 			g.setStatus("Deleted " + path + " — this device pairs by its key again.")
 		},
-		g.win,
 	)
 }
 
