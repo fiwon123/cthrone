@@ -52,6 +52,11 @@ func deviceKey(d device) string {
 // supplies the addresses instead of asking the machine.
 var localAddrs = discovery.LocalAddrs
 
+// defaultRouteIP is the address this device's default route uses: the network a
+// peer on this LAN would find it on. It is a variable for the same reason —
+// a test supplies the answer instead of reading the machine's routing table.
+var defaultRouteIP = discovery.DefaultRouteIP
+
 // isSelf reports whether addr is this device. A host answers on its own
 // addresses, and hears its own announcement when the operating system loops
 // the broadcast back; neither is a device to connect to.

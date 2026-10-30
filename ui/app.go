@@ -606,11 +606,14 @@ func (g *gui) host() {
 	useNATS := g.natsCheck.Checked
 	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
-	// This device's own address, as the other device's scan will find it. It is
-	// read before the goroutine so the entry is not read off the UI thread, and
-	// it is only meaningful for the websocket host: the NATS path has a broker,
-	// not an address on this network.
-	addrs := localAddrs()
+	// This device's own address, as the other device's scan will find it. The
+	// default route picks the network the device is actually on, so a docker
+	// bridge or a VPN adapter is not advertised as a way in. Both are read
+	// before the goroutine so no interface is touched off the UI thread, and
+	// they are only meaningful for the websocket host: the NATS path has a
+	// broker, not an address on this network.
+	route, _ := defaultRouteIP()
+	addrs := discovery.AdvertisedAddrs(localAddrs(), route)
 	own := thisDeviceText(addrs, data.Port)
 	hosting := "Hosting — waiting for connection"
 	if addresses := deviceAddresses(addrs, data.Port); addresses != "" {

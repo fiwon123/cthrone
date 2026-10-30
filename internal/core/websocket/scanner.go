@@ -15,6 +15,14 @@ import (
 
 var localIP = getLocalIP
 
+// interfaceAddrs is every address the machine holds. It is a variable so a
+// test supplies the list instead of asking the machine's adapters.
+var interfaceAddrs = net.InterfaceAddrs
+
+// defaultRouteIP is the address the default route uses — the network this
+// device is actually on. It is a variable so a test supplies the answer.
+var defaultRouteIP = discovery.DefaultRouteIP
+
 // localAddrs is every address this device holds, so a scan can tell the host's
 // own answers from a peer's. It is a variable so a test supplies the addresses
 // instead of asking the machine.
@@ -83,8 +91,18 @@ func Scan(app *app.Data) []string {
 	return found
 }
 
+// getLocalIP returns the address whose subnet the scan walks: the one the
+// default route uses, so a docker bridge or a VPN adapter listed first does not
+// send the scan into a subnet no peer is on.
 func getLocalIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
+	if ip, ok := defaultRouteIP(); ok {
+		return ip, nil
+	}
+
+	// No default route — an isolated LAN, or a host reachable only from its own
+	// subnet — leaves the address list as the only evidence of where this device
+	// is, which is what the scan did before the route was consulted.
+	addrs, err := interfaceAddrs()
 	if err != nil {
 		return "", err
 	}
