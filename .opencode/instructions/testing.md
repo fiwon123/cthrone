@@ -29,27 +29,28 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file**: #85/#86 closed the last gap, so all 26
+**Every package has a test file**: #85/#86 closed the last gap, so all 27
 packages in the module carry tests and `go test ./...` prints no
 `? package [no test files]` line.
 
-- **Covered (26)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
+- **Covered (27)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
   `cmd/exec`, `cmd/host`, `cmd/peers`, `cmd/recv`, `cmd/scan`, `cmd/ui`,
   `internal/auth`, `internal/chat`, `internal/core/nats`,
   `internal/core/websocket` (scanner included), `internal/data/app`,
   `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic only — the Fyne widgets need `-tags gui` and the `ci`
-  driver, and `make check` runs neither).
+  non-GUI settings logic only), `ui/widgets` (the selectable-text helpers; the
+  gui-tagged widget tree needs `-tags gui` and the `ci` driver, and `make check`
+  runs neither).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
 nothing, it compiles, and every package's tests passed.
 
 **A test file is not depth.** Several newer files hold one test function
-(`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`), and a GUI widget change
-is still verified only by `go build -tags "gui ci" ./ui` (type-check) and by
-nothing else in this environment. Report what executed; "26/26 packages have
+(`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`), and a gui-tagged widget
+change is still verified only by `go build -tags "gui ci" ./ui` (type-check) and
+by nothing else in this environment. Report what executed; "27/27 packages have
 tests" is not "the behaviour is covered".
 
 ### Go conventions
