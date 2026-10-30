@@ -101,11 +101,16 @@ and write.
   name is refused, and `cthrone peers forget` is the way back. The pin is
   recorded only after the handshake has proved the peer holds the key — a
   hello alone records nothing, so a stranger cannot claim a name from a frame
-  it never proved. The shared secret stays for one release so a v0.6.0 peer
-  still connects, and the handshake version gates the two models. Pairing by
-  key is what makes the tool usable from a phone, which has no terminal and no
-  clipboard that crosses devices. (2026-10, issue #125; supersedes the "the
-  secret is the identity" rule of #11/#109)
+  it never proved. A websocket first contact also shows a six-digit code on
+  both screens and the host asks before the device joins; the host withholds
+  its confirm until the answer, so an unaccepted peer is neither authenticated
+  nor pinned, and an unanswered question expires into a refusal. (2026-10,
+  issue #145; a NATS subject has no host to ask, so a first contact there is
+  pinned without a prompt.) The shared secret stays for one release so a
+  v0.6.0 peer still connects, and the handshake version gates the two models.
+  Pairing by key is what makes the tool usable from a phone, which has no
+  terminal and no clipboard that crosses devices. (2026-10, issue #125;
+  supersedes the "the secret is the identity" rule of #11/#109)
 
 ## Topology
 
@@ -157,7 +162,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a pin on first contact (`cthrone peers`). `v0.6.0` is the published release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`). `v0.6.0` is the published release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when one is
