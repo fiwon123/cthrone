@@ -503,7 +503,7 @@ func (g *gui) rebuildSetupForm() {
 
 	items := []*widget.FormItem{
 		{Text: "Device name", Widget: g.nameEntry},
-		{Text: "Host address", Widget: g.hostEntry},
+		{Text: labelConnectTo, Widget: g.hostEntry},
 		{Text: "Port", Widget: g.portEntry},
 		{Text: "Transport", Widget: g.transport},
 	}

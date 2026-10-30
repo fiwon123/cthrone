@@ -13,6 +13,14 @@ import (
 // defaultPort is the port both transports use unless another is given.
 const defaultPort = 8080
 
+// labelConnectTo names the Setup row that holds the host to dial.
+//
+// It is not this device's address: that one is shown read-only while hosting,
+// by thisDeviceText, because the other device's scan is what finds it. The
+// label says what the field does, so a user who is hosting does not read an
+// empty box as "my address".
+const labelConnectTo = "Connect to"
+
 // deviceAddresses lists this device's addresses as host:port pairs — the form
 // the other device types, or its scan finds. An empty list returns "", because
 // a device with no reachable address has nothing to advertise.

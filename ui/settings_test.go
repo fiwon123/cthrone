@@ -181,6 +181,14 @@ func TestResolveConfigDir(t *testing.T) {
 	})
 }
 
+// The row that dials a host is not this device's address, and the label must
+// not read as though it were: a user who hosts is shown an empty box there.
+func TestConnectToLabel(t *testing.T) {
+	if labelConnectTo != "Connect to" {
+		t.Errorf("labelConnectTo = %q, want %q", labelConnectTo, "Connect to")
+	}
+}
+
 func TestDeviceAddresses(t *testing.T) {
 	tests := []struct {
 		name  string
