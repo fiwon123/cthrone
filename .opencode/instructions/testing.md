@@ -40,18 +40,22 @@ packages in the module carry tests and `go test ./...` prints no
   `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic only), `ui/widgets` (the selectable-text helpers; the
-  gui-tagged widget tree needs `-tags gui` and the `ci` driver, and `make check`
-  runs neither).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers), and the
+  gui-tagged widget tree (headless).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
-nothing, it compiles, and every package's tests passed.
+nothing, it compiles, every package's tests passed, and the gui-tagged widget
+tree's tests passed under Fyne's software driver.
 
 **A test file is not depth.** Several newer files hold one test function
-(`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`), and a gui-tagged widget
-change is still verified only by `go build -tags "gui ci" ./ui` (type-check) and
-by nothing else in this environment. Report what executed; "27/27 packages have
-tests" is not "the behaviour is covered".
+(`cmd/assets`, `cmd/ui`, `internal/data/app`, `mobile`). A gui-tagged widget
+change is now executed, not only type-checked: `make check` and the CI `Test
+the GUI headless` step run
+`CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...`. The `ci` tag
+swaps Fyne's GL driver for the software one, so no GTK/X11/GL is needed. A
+native rendered frame and the APK on a device are still unverified (#155).
+Report what executed; "27/27 packages have tests" is not "the behaviour is
+covered".
 
 ### Go conventions
 
@@ -99,6 +103,21 @@ tests" is not "the behaviour is covered".
 - Never let a test reach the network, and never let it depend on wall-clock
   time or a random seed unless it controls both
 
+### GUI tests
+
+The Fyne GUI is behind the `gui` build tag, so plain `go test ./...` never
+compiles it. Test it headless instead:
+
+```bash
+CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...
+```
+
+The `ci` tag swaps Fyne's GL driver for the software one, so this needs no
+GTK/X11/GL. `make check` and the CI `Test the GUI headless` step run it, and
+`make test-gui` runs it alone. Build the tree with `test.NewApp()` and a
+`t.TempDir()` configuration home — never the real one. Assert widget state (a
+row's text, an image's `Visible`/`Aspect`), not pixels.
+
 ### Database tests (when the project has a database)
 
 - A test that truncates, drops, or rewrites tables acts on whatever
@@ -123,6 +142,8 @@ it wiping a real database.
 
 ### Visual checks
 
-This project has no user interface, so there is nothing to photograph. A visual
-audit is only relevant to a project that renders screens; if one is added later,
-add the `visual` subagent and the capture harness at the same time, not after.
+The GUI renders screens, but this environment has no toolkit to draw them: the
+headless test above asserts widget state, not pixels. A change to the native
+layout still needs a human look on a machine with GTK/X11/GL — or a phone for
+the APK — and that is recorded in the PR body rather than implied by a green
+`make check`. There is no `visual` subagent in this repository.

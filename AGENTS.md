@@ -142,21 +142,26 @@ files]` line and `make check` has no gap left to report.
   `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic), `ui/widgets` (the selectable-text helpers; the
-  gui-tagged widget tree is still unverified).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers), and the
+  gui-tagged widget tree (headless — see below).
 
 So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
 - the code compiles,
-- every package's tests passed.
+- every package's tests passed,
+- the gui-tagged widget tree's tests passed under Fyne's software driver.
 
 **A test file is not depth.** The newest ones are small — `cmd/assets`,
-`cmd/ui`, `internal/data/app` and `mobile` have one test function each — and
-the gui-tagged widget tree is still only type-checked with `go build -tags
-"gui ci" ./ui`, which `make check` does not run. Report what executed, not just
-that the package list is complete.
+`cmd/ui`, `internal/data/app` and `mobile` have one test function each. The
+gui-tagged widget tree is now **executed**, not just type-checked:
+`make check` and the `CI (Go)` job run
+`CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...`, which swaps
+Fyne's GL driver for the software one (`fyne.io/fyne/v2/app/app_software.go`)
+and needs no GTK/X11/GL. What that still does not prove is a rendered frame
+under the native driver, or the APK on a device (#155). Report what executed,
+not just that the package list is complete.
 
 `make check` prints the list of packages with no test file after the run, so a
 green run with no such list means every package was exercised.
@@ -445,8 +450,9 @@ a human who wants a differently named branch still has the convention above.
 
 A dependency pull request into `dev` gets the gate and **nothing else** — CI
 runs on release pull requests only. Verification of a bump is therefore the
-merger's local `make check`; a `gui`-tagged dependency (Fyne) cannot be built in
-this environment at all, so its PR body must say the change is unverified.
+merger's local `make check`; a `gui`-tagged dependency (Fyne) can be tested
+headless (`-tags "gui ci"`) but cannot be linked natively in this environment,
+so its PR body must say what was and was not verified.
 
 ### Repository settings (configure by hand)
 

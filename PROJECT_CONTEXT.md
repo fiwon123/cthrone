@@ -181,6 +181,11 @@ docker-compose.yml   the dev sandbox and a local NATS server
   layers protect the wire; on NATS the end-to-end layer protects the payload
   from the broker. The model is issue #125, superseding the "the secret is the
   identity" rule of #11/#109; the transport default is issue #124.
+- **The GUI widget tree is executed, not just compiled**: `make check` and the
+  `CI (Go)` job run `CGO_ENABLED=0 go test -tags "gui ci" ./ui/...`, which
+  swaps Fyne's GL driver for the software one, so a transfer progress row and
+  an inline decodable image are asserted headless. A native rendered frame and
+  the APK on a device are still unverified (#155).
 - **Open**: see Backlog.
 
 ## Backlog
