@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
@@ -89,6 +90,18 @@ type gui struct {
 	// address. It is hidden until this device hosts: the Devices list never
 	// lists this device, so this is where its address lives.
 	thisDevice *widget.Label
+
+	// credential is the read-only line that names the credential in force and
+	// where it came from — this device's key, or a shared secret from the
+	// field, the environment or the token file. A token file a user forgot
+	// about otherwise switches the device into the secret model in silence,
+	// and a key-paired peer is then refused with no explanation on screen.
+	credential *widget.Label
+
+	// forgetSecret deletes the token file that is in charge. It is shown only
+	// while that file is what decides the credential, because deleting it in
+	// any other case would change nothing the user could see.
+	forgetSecret *widget.Button
 
 	// chat
 	tabs      *container.AppTabs
@@ -349,7 +362,8 @@ func (g *gui) build() {
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
-	g.tokenEntry.SetPlaceHolder("empty: token file, else device-key pairing")
+	g.tokenEntry.SetPlaceHolder("empty: the token file, else key pairing")
+	g.tokenEntry.OnChanged = func(string) { g.refreshCredential() }
 
 	g.fingerprintEntry = widget.NewEntry()
 	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
@@ -394,11 +408,19 @@ func (g *gui) build() {
 	g.thisDevice.Wrapping = fyne.TextWrapWord
 	g.thisDevice.Hide()
 
+	g.credential = widget.NewLabel("")
+	g.credential.Wrapping = fyne.TextWrapWord
+
+	g.forgetSecret = widget.NewButtonWithIcon("Stop using the shared secret", theme.ContentClearIcon(), g.forgetSecretFile)
+	g.forgetSecret.Hide()
+
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		g.tlsCheck,
 		g.insecureCheck,
 		g.formHolder,
+		g.credential,
+		g.forgetSecret,
 		widget.NewSeparator(),
 		actions,
 		g.thisDevice,
@@ -565,6 +587,8 @@ func (g *gui) rebuildSetupForm() {
 
 	g.formHolder.Objects = []fyne.CanvasObject{widget.NewForm(items...)}
 	g.formHolder.Refresh()
+
+	g.refreshCredential()
 }
 
 // --- actions ----------------------------------------------------------
@@ -1210,6 +1234,62 @@ func (g *gui) tls() auth.TLS {
 
 func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
+}
+
+// refreshCredential keeps the Setup tab saying which credential the next Host
+// or Connect will speak, and offers to delete the token file while that file is
+// the thing in charge.
+//
+// The button is hidden when a typed secret or the environment already wins:
+// deleting the file would then change nothing the user could see, and a button
+// that does nothing is worse than no button.
+func (g *gui) refreshCredential() {
+	if g.credential == nil || g.tokenEntry == nil {
+		return
+	}
+
+	typed := strings.TrimSpace(g.tokenEntry.Text)
+	envSet := os.Getenv(auth.EnvToken) != ""
+	path := g.tokenFile()
+	fromFile := secretFileHasValue(path)
+
+	g.credential.SetText(credentialText(typed, envSet, path, fromFile))
+
+	if fromFile && typed == "" && !envSet {
+		g.forgetSecret.Show()
+	} else {
+		g.forgetSecret.Hide()
+	}
+}
+
+// forgetSecretFile deletes the token file after a confirmation, which is what
+// puts this device back on key pairing.
+//
+// It asks first because the file is the only place that secret exists: a device
+// that still holds it will not connect afterwards, and the deletion cannot be
+// undone from this screen.
+func (g *gui) forgetSecretFile() {
+	path := g.tokenFile()
+
+	dialog.ShowConfirm(
+		"Stop using the shared secret",
+		"The shared secret in\n"+path+"\nwill be deleted.\n\nThis device will pair by its key again. A device that still holds the secret has to clear it too before the two connect.",
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				dialog.ShowError(err, g.win)
+
+				return
+			}
+
+			g.refreshCredential()
+			g.setStatus("Deleted " + path + " — this device pairs by its key again.")
+		},
+		g.win,
+	)
 }
 
 // pairingOptions names the files the app keeps its credential in.

@@ -1,6 +1,7 @@
 package connectcmd
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/fiwon123/cthrone/internal/auth"
@@ -52,6 +53,11 @@ On nats connection only host receive message and only connect device send messag
 		app.Name = app.ResolveName()
 
 		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
+
+		// Same line as the host: which credential this run speaks, and where
+		// it came from. A left-over token file is otherwise invisible until a
+		// key-paired peer is refused with no explanation.
+		fmt.Println("Credential:", pairing.DescribeOptions(opts))
 
 		if natsFlag {
 			natscore.Connect(args, app, opts, natsURLFlag, tlsConf)

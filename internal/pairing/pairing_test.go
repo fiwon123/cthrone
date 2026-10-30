@@ -305,3 +305,149 @@ func (s *stub) Send(payload []byte) error {
 }
 
 func (s *stub) Close(reason string) { s.NotifyClose(reason) }
+
+// A status line has to name the credential and where it came from, because a
+// token file nobody remembers writing is what switches a device into the
+// shared-secret model and makes it refuse a key-paired peer.
+func TestDescribeNamesTheCredentialAndItsSource(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("f", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		opts     Options
+		env      string
+		want     string
+		secret   string
+		wantFile string
+	}{
+		{
+			name:     "the flag",
+			opts:     Options{FlagToken: strings.Repeat("a", 32)},
+			want:     "--token",
+			secret:   strings.Repeat("a", 32),
+			wantFile: "",
+		},
+		{
+			name:     "the environment",
+			opts:     Options{TokenFile: filepath.Join(dir, "absent")},
+			env:      strings.Repeat("b", 32),
+			want:     auth.EnvToken,
+			secret:   strings.Repeat("b", 32),
+			wantFile: "",
+		},
+		{
+			name:     "the file",
+			opts:     Options{TokenFile: tokenFile},
+			want:     tokenFile,
+			secret:   strings.Repeat("f", 32),
+			wantFile: tokenFile,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(auth.EnvToken, tt.env)
+
+			cred, err := Load(tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			described := cred.Describe()
+
+			if !strings.Contains(described, "shared secret") {
+				t.Errorf("Describe() = %q, want it to name the shared secret", described)
+			}
+
+			if !strings.Contains(described, tt.want) {
+				t.Errorf("Describe() = %q, want it to name %q", described, tt.want)
+			}
+
+			if strings.Contains(described, tt.secret) {
+				t.Errorf("Describe() carries the secret itself: %q", described)
+			}
+
+			if got := cred.SecretFile(); got != tt.wantFile {
+				t.Errorf("SecretFile() = %q, want %q", got, tt.wantFile)
+			}
+		})
+	}
+}
+
+// The device-key model is described by the key's fingerprint, which is public
+// and is the value the other screen compares. There is no secret to name, and
+// no file to offer to delete.
+func TestDescribeNamesTheDeviceKeyByItsFingerprint(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(auth.EnvToken, "")
+
+	cred, err := Load(Options{
+		TokenFile: filepath.Join(dir, "absent"),
+		KeyFile:   filepath.Join(dir, "identity.key"),
+		PinsFile:  filepath.Join(dir, "peers.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	described := cred.Describe()
+
+	if !strings.Contains(described, SourceDeviceKey) {
+		t.Errorf("Describe() = %q, want it to name the device key", described)
+	}
+
+	if !strings.Contains(described, cred.Fingerprint()) {
+		t.Errorf("Describe() = %q, want it to carry the fingerprint %q", described, cred.Fingerprint())
+	}
+
+	if got := cred.SecretFile(); got != "" {
+		t.Errorf("SecretFile() = %q, want none: the device key is not a file to delete", got)
+	}
+}
+
+// The line a command prints describes the credential the transport will use,
+// and says so when there is no usable one instead of staying quiet until the
+// transport fails.
+func TestDescribeOptionsMatchesTheLoad(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(auth.EnvToken, "")
+
+	tokenFile := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("s", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := Options{TokenFile: tokenFile}
+
+	cred, err := Load(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := DescribeOptions(opts), cred.Describe(); got != want {
+		t.Errorf("DescribeOptions() = %q, want %q", got, want)
+	}
+
+	// A short flag secret is refused by Load, and the line has to carry that
+	// reason: the transport reports the same error, and this is the earlier
+	// one the user actually reads.
+	bad := Options{FlagToken: "short"}
+	if _, err := Load(bad); err == nil {
+		t.Fatal("a short flag secret was accepted")
+	}
+
+	if got := DescribeOptions(bad); !strings.HasPrefix(got, "unavailable") {
+		t.Errorf("DescribeOptions() = %q, want it to report the failure", got)
+	}
+}
