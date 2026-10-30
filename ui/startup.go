@@ -52,6 +52,38 @@ func logFailure(err error) string {
 	return path
 }
 
+// logEvent writes a diagnostic line to the failure log. It is used to
+// record startup markers that are not errors themselves: a click can fail
+// before the process is created, but if the process starts and dies inside
+// the toolkit the log must show it began.
+func logEvent(message string) string {
+	if message == "" {
+		return ""
+	}
+
+	line := fmt.Sprintf("%s  %s\n", time.Now().Format(time.RFC3339), message)
+
+	path := failureLogPath()
+	if path == "" {
+		fmt.Fprint(os.Stderr, line)
+
+		return ""
+	}
+
+	file, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if openErr != nil {
+		fmt.Fprint(os.Stderr, line)
+
+		return ""
+	}
+	defer file.Close()
+
+	fmt.Fprint(file, line)
+	fmt.Fprint(os.Stderr, line)
+
+	return path
+}
+
 // failureLogPath is where logFailure writes: the same configuration directory
 // the CLI keeps its key and its pins in, so one machine has one place to look.
 // A directory that cannot be created yields "", never an error to report — the

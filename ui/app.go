@@ -153,8 +153,10 @@ type gui struct {
 // it beside the device's key and prints it for a binary started from a
 // terminal, instead of vanishing into an empty recover().
 func Run() {
+	logEvent("gui start")
 	if err := run(); err != nil {
 		logFailure(err)
+		notifyFailure(err)
 	}
 }
 
