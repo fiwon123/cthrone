@@ -6,6 +6,12 @@ ASSETS_DIR := assets
 SCRIPT_NAME := add_to_path
 INJECT_VERSION:= github.com/fiwon123/cthrone/cmd.Version
 
+# The GUI reports its own version on the About tab, so a window has to know the
+# release it came from without a terminal to ask. The APK is the exception: it
+# is packaged by `fyne package -app-version`, and the About tab reads that
+# metadata when this line is not in the binary.
+INJECT_GUI_VERSION:= github.com/fiwon123/cthrone/ui.Version
+
 # Detect last tag and increment patch
 VERSION := $(shell git describe --tags --always)
 
@@ -174,7 +180,7 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	  echo "  Debian/Ubuntu: sudo apt-get install gcc libgl1-mesa-dev xorg-dev libgtk-3-dev libxkbcommon-dev" >&2; \
 	  exit 1; }
 	@mkdir -p $(GUI_LINUX_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)
 	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
@@ -222,7 +228,7 @@ gui-windows: $(BUILD_DIR) require-mingw ## cross-build the Windows Fyne GUI arch
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	@$(MAKE) --no-print-directory winres-icon || { rm -f $(WINRES_SYSO); exit 1; }
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }
 	@rm -f $(WINRES_SYSO)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
@@ -234,7 +240,7 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	  echo "  This target is built by the release workflow on a macos-latest runner." >&2; \
 	  exit 1; }
 	@mkdir -p $(GUI_DARWIN_DIR)
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
