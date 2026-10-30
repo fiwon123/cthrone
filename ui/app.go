@@ -84,6 +84,11 @@ type gui struct {
 	transport   *widget.Select
 	hint        *widget.Label
 
+	// thisDevice is the read-only line that shows a hosting device its own
+	// address. It is hidden until this device hosts: the Devices list never
+	// lists this device, so this is where its address lives.
+	thisDevice *widget.Label
+
 	// chat
 	tabs      *container.AppTabs
 	status    *widget.Label
@@ -363,6 +368,10 @@ func (g *gui) build() {
 	g.hint = widget.NewLabel("")
 	g.hint.Wrapping = fyne.TextWrapWord
 
+	g.thisDevice = widget.NewLabel("")
+	g.thisDevice.Wrapping = fyne.TextWrapWord
+	g.thisDevice.Hide()
+
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		g.tlsCheck,
@@ -370,6 +379,7 @@ func (g *gui) build() {
 		g.formHolder,
 		widget.NewSeparator(),
 		actions,
+		g.thisDevice,
 		g.hint,
 	)))
 
@@ -493,7 +503,7 @@ func (g *gui) rebuildSetupForm() {
 
 	items := []*widget.FormItem{
 		{Text: "Device name", Widget: g.nameEntry},
-		{Text: "Host address", Widget: g.hostEntry},
+		{Text: labelConnectTo, Widget: g.hostEntry},
 		{Text: "Port", Widget: g.portEntry},
 		{Text: "Transport", Widget: g.transport},
 	}
@@ -596,6 +606,20 @@ func (g *gui) host() {
 	useNATS := g.natsCheck.Checked
 	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
+	// This device's own address, as the other device's scan will find it. The
+	// default route picks the network the device is actually on, so a docker
+	// bridge or a VPN adapter is not advertised as a way in. Both are read
+	// before the goroutine so no interface is touched off the UI thread, and
+	// they are only meaningful for the websocket host: the NATS path has a
+	// broker, not an address on this network.
+	route, _ := defaultRouteIP()
+	addrs := discovery.AdvertisedAddrs(localAddrs(), route)
+	own := thisDeviceText(addrs, data.Port)
+	hosting := "Hosting — waiting for connection"
+	if addresses := deviceAddresses(addrs, data.Port); addresses != "" {
+		hosting = "Hosting on " + addresses + " — waiting for connection"
+	}
+
 	g.setStatus("Starting…")
 
 	go func() {
@@ -631,10 +655,36 @@ func (g *gui) host() {
 		g.mu.Unlock()
 
 		fyne.Do(g.updateButtons)
-		g.setStatus("Hosting on " + handle.Addr() + " — waiting for connection")
+		g.showThisDevice(own)
+		g.setStatus(hosting)
 		g.tabs.SelectIndex(0)
-		g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, !typedToken)
+		g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, own, !typedToken)
 	}()
+}
+
+// showThisDevice puts this device's own address on screen while it hosts. The
+// Devices list never lists this device, so this line is where a user reads the
+// address the other device connects to.
+func (g *gui) showThisDevice(text string) {
+	if g.thisDevice == nil || text == "" {
+		return
+	}
+
+	fyne.Do(func() {
+		g.thisDevice.SetText(text)
+		g.thisDevice.Show()
+	})
+}
+
+// hideThisDevice takes the address line away when this device stops hosting: it
+// is a fact about the running host, not a permanent setting.
+func (g *gui) hideThisDevice() {
+	if g.thisDevice == nil {
+		return
+	}
+
+	g.thisDevice.SetText("")
+	g.thisDevice.Hide()
 }
 
 // offerPairing shows the values the other device needs. The terminal host
@@ -646,7 +696,11 @@ func (g *gui) host() {
 // two devices compare the fingerprint each shows on first contact. The
 // transport is encrypted either way, and the client pins the host's
 // certificate on first contact unless one is typed into the fingerprint field.
-func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint string, showToken bool) {
+//
+// own is this device's own address line (thisDeviceText), which is the address
+// the other device's scan finds: the Devices list never lists this device, so
+// the dialog is where a hosting user reads it.
+func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint, own string, showToken bool) {
 	var message strings.Builder
 
 	if showToken && token != "" {
@@ -661,6 +715,16 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint stri
 	if certificateFingerprint != "" {
 		fmt.Fprintf(&message, "Certificate fingerprint:\n%s\n\n", certificateFingerprint)
 		message.WriteString("The other device pins this certificate on first contact: compare the two values there if you want to be sure.\n\n")
+	}
+
+	if own != "" {
+		fmt.Fprintf(&message, "%s\n\n", own)
+
+		if token != "" {
+			message.WriteString("That is the address the other device connects to; enter the shared secret there.\n\n")
+		} else {
+			message.WriteString("That is the address the other device connects to; compare the fingerprint both screens show.\n\n")
+		}
 	}
 
 	if message.Len() == 0 {
@@ -698,6 +762,7 @@ func (g *gui) stop() {
 	g.finishReceive()
 
 	g.updateButtons()
+	g.hideThisDevice()
 	g.setStatus("Disconnected")
 
 	go func() {
@@ -1068,6 +1133,14 @@ func (g *gui) startDiscovery() {
 	g.listener = discovery.NewListener()
 	if g.listener != nil {
 		g.listener.OnFound(func(beacon discovery.Beacon) {
+			// This device's own announcement is dropped here, off the UI
+			// thread: the operating system can loop a broadcast back to the
+			// sender, and a device is not a peer to itself. The check reads the
+			// interfaces, so it stays out of the render path.
+			if isSelf(beacon.Addr, localAddrs()) {
+				return
+			}
+
 			fyne.Do(func() {
 				g.addBeacon(beacon)
 				g.setStatus("Discovered " + beacon.Name)

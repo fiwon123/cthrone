@@ -277,7 +277,9 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    cthrone scan
    ```
 
-   It walks your /24 and prints the addresses that answer on the chat port.
+   It walks the `/24` of the address your default route uses — the network the
+   machine is actually on, not the first private address an adapter happens to
+   list — and prints the addresses that answer on the chat port.
 
 5. Prefer a broker? Add `--nats` to either side, and run a NATS server
    locally — the repository ships one in `docker-compose.yml` for that:
@@ -413,8 +415,11 @@ The app has three tabs:
   secret), the transport (NATS or websocket) and the TLS options, with **Host**
   and **Connect**. Encryption is on unless the box is cleared, and the host's
   certificate is pinned on first contact.
-- **Devices** — **Scan network** walks the local subnet for a host on the chat
-  port; tap a result to fill in its address.
+- **Devices** — **Scan network** walks the `/24` the default route uses for a
+  host on the chat port; tap a result to fill in its address. A device that hosts
+  is never listed in its own list — its address is shown read-only under
+  **Setup** instead, as *This device — &lt;address&gt;:&lt;port&gt;*, limited to
+  the addresses a peer on that network can reach.
 
 A phone that hosts shows **its own fingerprint** in a dialog. Nothing is copied
 to the other device: connect to the phone and compare the fingerprints each
@@ -472,7 +477,7 @@ What the Android CLI does and does not give you:
 |---|---|
 | `cthrone host` | host the chat server and wait for a client |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
-| `cthrone scan` | scan the local subnet for chat servers (shows device names when discovered) |
+| `cthrone scan` | scan the default route's `/24` for chat servers (shows device names when discovered) |
 | `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
@@ -701,9 +706,13 @@ An address that already carries a port is used as it is:
 
 ### `scan` finds nothing
 
-`scan` walks your own /24 and dials the chat port on every address. It finds
-nothing when the server is on a different subnet, when a firewall blocks the
-port, or when the server is on the other side of a NAT.
+`scan` walks the `/24` of the address your default route uses — the network the
+machine is actually on, rather than the first private address an adapter lists,
+which on a machine with a docker bridge or a VPN is often the wrong one — and
+dials the chat port on every address. It falls back to the adapter list when
+there is no default route. It finds nothing when the server is on a different
+subnet, when a firewall blocks the port, or when the server is on the other side
+of a NAT.
 
 ### The broker says "Authorization Violation"
 

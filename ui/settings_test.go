@@ -180,3 +180,56 @@ func TestResolveConfigDir(t *testing.T) {
 		}
 	})
 }
+
+// The row that dials a host is not this device's address, and the label must
+// not read as though it were: a user who hosts is shown an empty box there.
+func TestConnectToLabel(t *testing.T) {
+	if labelConnectTo != "Connect to" {
+		t.Errorf("labelConnectTo = %q, want %q", labelConnectTo, "Connect to")
+	}
+}
+
+func TestDeviceAddresses(t *testing.T) {
+	tests := []struct {
+		name  string
+		addrs []string
+		port  int
+		want  string
+	}{
+		{"one address", []string{"192.168.1.20"}, 8080, "192.168.1.20:8080"},
+		{"several addresses", []string{"192.168.1.20", "10.0.5.7"}, 9000, "192.168.1.20:9000, 10.0.5.7:9000"},
+		{"no address", nil, 8080, ""},
+		{"empty list", []string{}, 8080, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deviceAddresses(tt.addrs, tt.port); got != tt.want {
+				t.Errorf("deviceAddresses(%v, %d) = %q, want %q", tt.addrs, tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+// The line a hosting device reads is the address the other device's scan finds,
+// because the Devices list no longer lists the host itself.
+func TestThisDeviceText(t *testing.T) {
+	tests := []struct {
+		name  string
+		addrs []string
+		port  int
+		want  string
+	}{
+		{"one address", []string{"192.168.1.20"}, 8080, "This device — 192.168.1.20:8080"},
+		{"several addresses", []string{"192.168.1.20", "10.0.5.7"}, 8080, "This device — 192.168.1.20:8080, 10.0.5.7:8080"},
+		{"no address", nil, 8080, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := thisDeviceText(tt.addrs, tt.port); got != tt.want {
+				t.Errorf("thisDeviceText(%v, %d) = %q, want %q", tt.addrs, tt.port, got, tt.want)
+			}
+		})
+	}
+}
