@@ -13,7 +13,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +27,6 @@ import (
 	fyneapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -89,6 +92,26 @@ type gui struct {
 	// lists this device, so this is where its address lives.
 	thisDevice *widget.Label
 
+	// credential is the read-only line that names the credential in force and
+	// where it came from — this device's key, or a shared secret from the
+	// field, the environment or the token file. A token file a user forgot
+	// about otherwise switches the device into the secret model in silence,
+	// and a key-paired peer is then refused with no explanation on screen.
+	credential *widget.Label
+
+	// forgetSecret deletes the token file that is in charge. It is shown only
+	// while that file is what decides the credential, because deleting it in
+	// any other case would change nothing the user could see.
+	forgetSecret *widget.Button
+
+	// about is the read-only tab: which build this is, where it comes from,
+	// and — on a press, never on a start — whether there is a newer release.
+	// aboutCredential repeats the Setup tab's line, because "which model am I
+	// in?" belongs on the screen a bug report is written from.
+	aboutCredential *widget.Label
+	aboutNote       *widget.Label
+	updateBtn       *widget.Button
+
 	// chat
 	tabs      *container.AppTabs
 	status    *widget.Label
@@ -122,80 +145,101 @@ type gui struct {
 }
 
 // Run starts the Fyne GUI.
+//
+// A window is started by a click, so there is no console to print to and no
+// exit code anybody reads: a failure that is only returned is a failure nobody
+// sees. Anything that stops the GUI therefore goes to logFailure, which writes
+// it beside the device's key and prints it for a binary started from a
+// terminal, instead of vanishing into an empty recover().
 func Run() {
+	if err := run(); err != nil {
+		logFailure(err)
+	}
+}
+
+// run builds the window and hands the event loop to the toolkit. It returns the
+// failure that stopped it rather than swallowing it.
+//
+// A panic is a failure too: the toolkit and the platform underneath it are not
+// this program's code, and a nil window from a driver that could not start is
+// exactly the case that used to exit 0 in silence.
+func run() (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			// avoid crash
+			err = fmt.Errorf("the GUI stopped: %v\n%s", r, debug.Stack())
 		}
 	}()
-	var mobile bool
-	func() {
-		defer func() {
-			recover()
-		}()
-		if dev := fyne.CurrentDevice(); dev != nil {
-			mobile = dev.IsMobile()
-		}
-	}()
-	var a fyne.App
-	var w fyne.Window
-	func() {
-		defer func() {
-			recover()
-		}()
-		a = fyneapp.NewWithID("com.cthrone.app")
-		if a != nil {
-			if ic := appIcon(); ic != nil {
-				a.SetIcon(ic)
-			}
-		}
-		if a != nil {
-			w = a.NewWindow("cthrone")
-			if w != nil {
-				if ic := appIcon(); ic != nil {
-					w.SetIcon(ic)
-				}
-			}
-		}
-	}()
-	if a == nil || w == nil {
-		return
+
+	a := fyneapp.NewWithID("com.cthrone.app")
+	if a == nil {
+		return errors.New("the GUI toolkit did not create an application")
 	}
+
+	if ic := appIcon(); ic != nil {
+		a.SetIcon(ic)
+	}
+
+	// The device is asked *after* the app exists: fyne.CurrentDevice goes
+	// through the current app, so before this point there is nothing to ask and
+	// the call panics — which is why the answer used to be "not mobile" on
+	// every device, including the phone.
+	mobile := currentDeviceIsMobile()
+
+	w := a.NewWindow("cthrone")
+	if w == nil {
+		return errors.New("the GUI toolkit did not create a window")
+	}
+
+	if ic := appIcon(); ic != nil {
+		w.SetIcon(ic)
+	}
+
 	g := &gui{app: a, win: w, mobile: mobile}
-	func() {
-		defer func() {
-			recover()
-		}()
-		g.build()
-	}()
+
+	// A window that cannot be built has nothing to show, and a blank window is
+	// a worse answer than a report: the panic propagates to the recover above.
+	g.build()
+
 	go g.pruneLoop()
-	if !mobile {
-		func() {
-			defer func() {
-				recover()
-			}()
-			g.startDiscovery()
-		}()
-		func() {
-			defer func() {
-				recover()
-			}()
-			w.Resize(fyne.NewSize(900, 640))
-		}()
+
+	if mobile {
+		// Discovery is skipped on a phone: the beacon and the scan are for
+		// finding another machine on a network, and the app that is already
+		// open is the one the user picked up.
 	} else {
-		// Skip discovery on mobile to avoid startup crashes
-		func() {
-			defer func() {
-				recover()
-			}()
-		}()
+		// Discovery and the resize are not worth the window: a failure in
+		// either is recorded and the chat still opens.
+		if err := guard("discovery", g.startDiscovery); err != nil {
+			logFailure(err)
+		}
+
+		if err := guard("resize", func() { w.Resize(fyne.NewSize(900, 640)) }); err != nil {
+			logFailure(err)
+		}
 	}
-	func() {
-		defer func() {
-			recover()
-		}()
-		w.ShowAndRun()
+
+	w.ShowAndRun()
+
+	return nil
+}
+
+// currentDeviceIsMobile reports whether this is a touch device.
+//
+// "Not mobile" is the answer when the toolkit cannot say: a desktop layout on a
+// phone is a bad layout, while a phone layout on a desktop is a window with
+// stacked rows, and only one of those is unusable.
+func currentDeviceIsMobile() (mobile bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			mobile = false
+		}
 	}()
+
+	if dev := fyne.CurrentDevice(); dev != nil {
+		return dev.IsMobile()
+	}
+
+	return false
 }
 
 // build creates every widget and lays the window out.
@@ -206,7 +250,7 @@ func (g *gui) build() {
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
 	// title bar to show it in, the copy confirmation, and the copy-all action.
-	g.copyHint = widget.NewLabel("")
+	g.copyHint = selectableLabel("")
 
 	copyLabel := "Copy all"
 	if g.lay.Stack {
@@ -236,9 +280,8 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = widget.NewLabel("Ready — open Setup to connect or host.")
+	g.status = selectableLabel("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
-	g.status.Wrapping = fyne.TextWrapWord
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -252,8 +295,7 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := widget.NewLabel("")
-			row.Wrapping = fyne.TextWrapWord
+			row := selectableLabel("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
@@ -327,7 +369,8 @@ func (g *gui) build() {
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
-	g.tokenEntry.SetPlaceHolder("empty: token file, else device-key pairing")
+	g.tokenEntry.SetPlaceHolder("empty: the token file, else key pairing")
+	g.tokenEntry.OnChanged = func(string) { g.refreshCredential() }
 
 	g.fingerprintEntry = widget.NewEntry()
 	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
@@ -365,18 +408,23 @@ func (g *gui) build() {
 		widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect),
 	)
 
-	g.hint = widget.NewLabel("")
-	g.hint.Wrapping = fyne.TextWrapWord
+	g.hint = selectableLabel("")
 
-	g.thisDevice = widget.NewLabel("")
-	g.thisDevice.Wrapping = fyne.TextWrapWord
+	g.thisDevice = selectableLabel("")
 	g.thisDevice.Hide()
+
+	g.credential = selectableLabel("")
+
+	g.forgetSecret = widget.NewButtonWithIcon("Stop using the shared secret", theme.ContentClearIcon(), g.forgetSecretFile)
+	g.forgetSecret.Hide()
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		widget.NewLabelWithStyle("Quick Setup", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		g.tlsCheck,
 		g.insecureCheck,
 		g.formHolder,
+		g.credential,
+		g.forgetSecret,
 		widget.NewSeparator(),
 		actions,
 		g.thisDevice,
@@ -388,6 +436,10 @@ func (g *gui) build() {
 	// --- devices ------------------------------------------------------
 	g.scanBtn = widget.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan)
 
+	// A beacon row stays a plain label: the list gives it one fixed line, and a
+	// wrapping selectable label would clip there. The address is copyable from
+	// the "Selected" status line and the dial field, which is where a user who
+	// wants it is already looking.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.beacons) },
 		func() fyne.CanvasObject { return widget.NewLabel("") },
@@ -407,8 +459,7 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	beaconHint := widget.NewLabel("UDP beacons on port 9999")
-	beaconHint.Wrapping = fyne.TextWrapWord
+	beaconHint := selectableLabel("UDP beacons on port 9999")
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
 	} else {
@@ -439,6 +490,7 @@ func (g *gui) build() {
 		tab("Chat", theme.MailComposeIcon(), chat),
 		tab("Setup", theme.SettingsIcon(), setup),
 		tab("Devices", theme.ComputerIcon(), devices),
+		tab("About", theme.InfoIcon(), g.buildAbout()),
 	)
 
 	g.win.SetContent(g.tabs)
@@ -543,6 +595,8 @@ func (g *gui) rebuildSetupForm() {
 
 	g.formHolder.Objects = []fyne.CanvasObject{widget.NewForm(items...)}
 	g.formHolder.Refresh()
+
+	g.refreshCredential()
 }
 
 // --- actions ----------------------------------------------------------
@@ -553,7 +607,7 @@ func (g *gui) connect() {
 	useNATS := g.natsCheck.Checked
 
 	if !useNATS && host == "" {
-		dialog.ShowError(errors.New("enter the host address to connect to"), g.win)
+		g.showError(errors.New("enter the host address to connect to"))
 
 		return
 	}
@@ -592,8 +646,24 @@ func (g *gui) connect() {
 			g.setStatus("Connected to " + host + " — chatting")
 		}
 
+		g.noteFirstContact(sess)
 		g.attach(sess)
 	}()
+}
+
+// noteFirstContact shows the code a joining device is compared by while the
+// host decides.
+//
+// Only the side that dials waits on a person: the host is the side that is
+// asked, so it has a dialog and needs no waiting line. A bus has no code and no
+// single person to ask, so nothing is shown there.
+func (g *gui) noteFirstContact(sess session.Session) {
+	sealed, ok := sess.(*e2e.Conn)
+	if !ok {
+		return
+	}
+
+	sealed.OnFirstContact(func(c e2e.FirstContact) { g.setStatus(waitingText(c)) })
 }
 
 // host starts a host (websocket) or joins the broker as a peer (NATS).
@@ -642,7 +712,7 @@ func (g *gui) host() {
 		handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
 			g.setStatus("A device joined — chatting")
 			g.attach(sess)
-		})
+		}, g.confirmFirstContact)
 		if err != nil {
 			g.setStatus("Host failed")
 			g.showError(err)
@@ -743,7 +813,7 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint, own
 			g.app.Clipboard().SetContent(token)
 		}
 
-		dialog.ShowInformation("Pairing", text, g.win)
+		g.showCopyable("Pairing", text)
 	})
 }
 
@@ -1087,8 +1157,17 @@ func (g *gui) copyToClipboard(text string) {
 	})
 }
 
+// showError reports a failure in a dialog whose message can be copied.
+//
+// A popup used to be an inert label: the one message a user is most likely to
+// need to paste somewhere was the one they could only retype. The text is
+// selectable now, and a Copy button takes all of it at once.
 func (g *gui) showError(err error) {
-	fyne.Do(func() { dialog.ShowError(err, g.win) })
+	if err == nil {
+		return
+	}
+
+	fyne.Do(func() { g.showCopyable("Error", err.Error()) })
 }
 
 // addBeacon records a device heard now. A beacon heard twice is one device
@@ -1188,6 +1267,178 @@ func (g *gui) tls() auth.TLS {
 
 func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
+}
+
+// buildAbout lays out the About tab: which version this is, where it comes
+// from, and — only when the button is pressed — whether there is a newer one.
+//
+// Nothing here polls. A start-up check would put a network call in the path of
+// a window that has to open on a phone with no signal, and this tab exists to
+// answer a question, not to chase one. The check runs on demand, in the
+// background, and writes its answer on the tab it belongs to.
+func (g *gui) buildAbout() fyne.CanvasObject {
+	version := aboutVersion(Version, g.app.Metadata().Version)
+
+	g.aboutCredential = selectableLabel("")
+	g.aboutNote = selectableLabel("")
+
+	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		g.copyToClipboard(version)
+		g.setAboutNote("Copied " + version)
+	})
+
+	versionLine := container.NewHBox(
+		widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		selectableLabel(version),
+		copyBtn,
+	)
+
+	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, selectableLabel(RepositoryURL))
+
+	g.updateBtn = widget.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates)
+
+	note := selectableLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+
+	body := container.NewVBox(
+		versionLine,
+		repoLine,
+		widget.NewSeparator(),
+		g.aboutCredential,
+		widget.NewSeparator(),
+		g.updateBtn,
+		g.aboutNote,
+		note,
+	)
+
+	// The credential line was filled in before this tab existed, so it is
+	// brought up to date now rather than staying empty until the next rebuild.
+	g.refreshCredential()
+
+	return container.NewVScroll(container.NewPadded(body))
+}
+
+// openRepository opens the project's page in the browser.
+//
+// A link that does nothing is the failure this reports: `OpenURL` returns the
+// reason a desktop has no browser or a phone has no handler, and a swallowed
+// one leaves the user clicking a dead button.
+func (g *gui) openRepository() {
+	link, err := url.Parse(RepositoryURL)
+	if err != nil {
+		g.showError(err)
+
+		return
+	}
+
+	if err := g.app.OpenURL(link); err != nil {
+		g.showError(fmt.Errorf("could not open %s: %w", RepositoryURL, err))
+	}
+}
+
+// checkUpdates asks GitHub for the newest release, off the UI goroutine.
+//
+// The answer is always written back through fyne.Do, including the failures: a
+// button left disabled or a note left saying "Checking…" is the spinner that
+// never resolves this tab is built to avoid.
+func (g *gui) checkUpdates() {
+	if g.updateBtn != nil {
+		g.updateBtn.Disable()
+	}
+
+	g.setAboutNote("Checking…")
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+		defer cancel()
+
+		tag, err := latestReleaseTag(ctx, &http.Client{Timeout: updateCheckTimeout}, LatestReleaseURL)
+
+		fyne.Do(func() {
+			if g.updateBtn != nil {
+				g.updateBtn.Enable()
+			}
+
+			if err != nil {
+				g.setAboutNote("Could not check: " + err.Error() + ".")
+
+				return
+			}
+
+			g.setAboutNote(updateText(aboutVersion(Version, g.app.Metadata().Version), tag))
+		})
+	}()
+}
+
+// setAboutNote writes the update check's answer on the About tab.
+func (g *gui) setAboutNote(text string) {
+	if g.aboutNote == nil {
+		return
+	}
+
+	g.aboutNote.SetText(text)
+}
+
+// refreshCredential keeps the Setup tab saying which credential the next Host
+// or Connect will speak, and offers to delete the token file while that file is
+// the thing in charge.
+//
+// The button is hidden when a typed secret or the environment already wins:
+// deleting the file would then change nothing the user could see, and a button
+// that does nothing is worse than no button.
+func (g *gui) refreshCredential() {
+	if g.credential == nil || g.tokenEntry == nil {
+		return
+	}
+
+	typed := strings.TrimSpace(g.tokenEntry.Text)
+	envSet := os.Getenv(auth.EnvToken) != ""
+	path := g.tokenFile()
+	fromFile := secretFileHasValue(path)
+
+	text := credentialText(typed, envSet, path, fromFile)
+	g.credential.SetText(text)
+
+	if g.aboutCredential != nil {
+		g.aboutCredential.SetText(text)
+	}
+
+	if fromFile && typed == "" && !envSet {
+		g.forgetSecret.Show()
+	} else {
+		g.forgetSecret.Hide()
+	}
+}
+
+// forgetSecretFile deletes the token file after a confirmation, which is what
+// puts this device back on key pairing.
+//
+// It asks first because the file is the only place that secret exists: a device
+// that still holds it will not connect afterwards, and the deletion cannot be
+// undone from this screen.
+func (g *gui) forgetSecretFile() {
+	path := g.tokenFile()
+
+	g.showCopyableConfirm(
+		"Stop using the shared secret",
+		"The shared secret in\n"+path+"\nwill be deleted.\n\nThis device will pair by its key again. A device that still holds the secret has to clear it too before the two connect.",
+		"Delete",
+		"Cancel",
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				g.showError(err)
+
+				return
+			}
+
+			g.refreshCredential()
+			g.setStatus("Deleted " + path + " — this device pairs by its key again.")
+		},
+	)
 }
 
 // pairingOptions names the files the app keeps its credential in.

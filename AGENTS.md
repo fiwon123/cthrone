@@ -233,7 +233,15 @@ given. The model is the one issue #125 decided, superseding #11/#109:
     name is **refused**, never re-pinned; `cthrone peers forget` is the way
     back. **The pin is written only after the confirm authenticates the
     peer** — a hello alone records nothing, or anyone could take a name from a
-    frame it never proved;
+    frame it never proved. On a **websocket** the host also shows a
+    six-digit **first-contact code** on both screens and asks before the
+    device joins; it **withholds its confirm** until the answer, so a peer
+    that has not been accepted is neither authenticated nor pinned, an
+    unanswered question expires into a refusal (silence is not a yes), and a
+    name already pinned is never asked again. Only the websocket host asks: a
+    NATS subject has no host and no single person to ask, so a first contact
+    there is pinned without a prompt, and a terminal host with no tty accepts
+    and pins and prints why;
   - **the shared secret**, when a flag, `CTHRONE_TOKEN` or a token file has a
     value — the compatibility path a v0.6.0 peer speaks. Nothing generates one
     any more: a minted token file would force every later run on that machine
@@ -276,7 +284,10 @@ The rules that come with it:
   itself**, and the fingerprint comparison is what closes it. Say that plainly
   wherever pairing is described; a pin is only as good as the comparison. Each
   screen therefore prints **both** fingerprints — the peer's and its own — so
-  the two values that have to agree are on both screens at once. The
+  the two values that have to agree are on both screens at once, and a
+  websocket first contact is confirmed by a short code both screens show
+  rather than by a forty-character hash; the code is derived from the two
+  ephemeral keys, so a spliced session shows two different ones. The
   certificate pin follows the same rule: the first certificate at an address
   is recorded, and the device-key pin behind it is the stronger gate;
 - do not add a credential to a **command-line flag** — a flag value is visible

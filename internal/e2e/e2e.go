@@ -74,6 +74,13 @@ const Protocol = "cthrone-e2e/v1"
 // not be able to end a room.
 const DefaultTimeout = 15 * time.Second
 
+// DefaultConfirmTimeout is how long a pending first-contact confirmation may
+// hold a single-peer session open. It is longer than DefaultTimeout because the
+// person answering has to read a code off two screens, and because the side
+// that is waiting for an answer must not time out while the other side's human
+// is still deciding.
+const DefaultConfirmTimeout = 60 * time.Second
+
 // MinSecret is the shortest secret this package will derive keys from. The token
 // the tool generates is 32 random bytes; a short secret makes the confirm MAC —
 // the only thing standing between a stranger and the session — brute-forceable.
@@ -130,6 +137,34 @@ type Config struct {
 	// Timeout is how long a single-peer session waits for the confirm. Zero
 	// means DefaultTimeout; it is ignored in Bus mode.
 	Timeout time.Duration
+
+	// Confirm decides whether a device met for the first time may join. It is
+	// asked at most once per peer, only on a single-peer session, only in the
+	// device-key model, and only after the peer has proved it holds the key it
+	// presented — never for a device that is already pinned.
+	//
+	// While the answer is pending this side withholds its confirm, so the peer
+	// is not authenticated and its session is not attached until the answer is
+	// yes. The question is put on a goroutine of its own, so a caller may block
+	// on a terminal or a dialog without stopping the transport.
+	//
+	// A nil Confirm accepts the peer and pins it, which is what every caller
+	// did before there was a code to compare.
+	Confirm func(FirstContact) bool
+
+	// ConfirmTimeout bounds how long a pending confirmation may hold a session
+	// open. Zero means DefaultConfirmTimeout. It replaces Timeout while the
+	// question is pending: a person reading a code aloud needs longer than a
+	// stalled handshake is allowed.
+	ConfirmTimeout time.Duration
+}
+
+// FirstContact is a device met for the first time: what the other screen shows,
+// and the short code both sides derived without sending it.
+type FirstContact struct {
+	Name        string
+	Fingerprint string
+	Code        string
 }
 
 // Errors. A message says what happened; the error says what kind of wrong it
@@ -163,6 +198,11 @@ var (
 
 	// ErrPeer is a peer this Conn will not track: the room is full.
 	ErrPeer = errors.New("e2e: peer refused")
+
+	// ErrConfirm is a first contact that nobody answered: the person at the
+	// other end refused it, or the question ran out of time. Nothing is pinned
+	// in either case.
+	ErrConfirm = errors.New("e2e: first contact not confirmed")
 )
 
 // peer is one correspondent: what it told us about itself and the two ciphers
@@ -184,6 +224,20 @@ type peer struct {
 	id          []byte
 	fingerprint string
 	first       bool
+
+	// step is the last handshake step this peer sent, kept because the answer
+	// to it may be withheld until a person confirms the contact.
+	step handshake
+
+	// code is the six-digit comparison value for this contact, empty in the
+	// shared-secret model and on a bus. announced records that the contact was
+	// reported to the caller, and asks are the confirmation in flight:
+	// asking is set while the question is pending, and oweConfirm records that
+	// this side still has to send its confirm once the answer is yes.
+	code       string
+	announced  bool
+	asking     bool
+	oweConfirm bool
 
 	// sendSeq is the next sequence number used to seal a payload for this
 	// peer; expect is the one the next payload from it must carry.
@@ -219,6 +273,19 @@ type Conn struct {
 	key   []byte
 	tag   []byte
 	nonce []byte
+
+	// confirm is the human gate for a first contact, nil when this side has
+	// nobody to ask. confirmTimeout bounds the question, and extended records
+	// that the waiting side already used the one confirmation window it gets.
+	confirm        func(FirstContact) bool
+	confirmTimeout time.Duration
+	extended       bool
+
+	// onFirst and firsts are the first-contact reports: a contact recorded
+	// before the callback was installed is replayed, the way OnPeer replays a
+	// peer that finished early.
+	onFirst func(FirstContact)
+	firsts  []FirstContact
 
 	mu      sync.Mutex
 	peers   map[string]*peer
@@ -293,18 +360,20 @@ func New(s session.Session, cfg Config) (*Conn, error) {
 	}
 
 	c := &Conn{
-		Base:     session.NewBase(s.ID(), s.RemoteAddr()),
-		inner:    s,
-		secret:   append([]byte(nil), cfg.Secret...),
-		name:     cfg.Name,
-		mode:     cfg.Mode,
-		version:  version,
-		identity: cfg.Identity,
-		pins:     cfg.Pins,
-		priv:     priv,
-		key:      priv.PublicKey().Bytes(),
-		nonce:    nonce,
-		peers:    make(map[string]*peer),
+		Base:           session.NewBase(s.ID(), s.RemoteAddr()),
+		inner:          s,
+		secret:         append([]byte(nil), cfg.Secret...),
+		name:           cfg.Name,
+		mode:           cfg.Mode,
+		version:        version,
+		identity:       cfg.Identity,
+		pins:           cfg.Pins,
+		confirm:        cfg.Confirm,
+		confirmTimeout: cfg.ConfirmTimeout,
+		priv:           priv,
+		key:            priv.PublicKey().Bytes(),
+		nonce:          nonce,
+		peers:          make(map[string]*peer),
 	}
 	c.tag = recipientTag(c.key)
 
@@ -382,6 +451,59 @@ func (c *Conn) OnPeer(fn func(Peer)) {
 
 	for _, p := range known {
 		fn(p)
+	}
+}
+
+// OnFirstContact reports a device met for the first time, with the code the two
+// screens compare.
+//
+// It fires on both sides of a first contact, because the screen that is not
+// asked anything is the one that has to show what it is waiting for. It fires
+// as soon as the peer's step is recorded — before the exchange has proved
+// anything — so a caller can display the code while the other side decides;
+// nothing may be trusted on it beyond the fact that a peer said a name.
+//
+// A contact recorded before the callback was installed is replayed, for the
+// same reason OnPeer replays one that finished early.
+func (c *Conn) OnFirstContact(fn func(FirstContact)) {
+	c.mu.Lock()
+	c.onFirst = fn
+	known := append([]FirstContact(nil), c.firsts...)
+	c.mu.Unlock()
+
+	for _, contact := range known {
+		fn(contact)
+	}
+}
+
+// announceFirst reports a first contact once per peer, and records it for a
+// callback that arrives later. It is called with the lock released: the caller
+// may open a dialog.
+//
+// It is a single-peer report: on a bus there is no code to compare and no one
+// person to ask, so nothing is announced and every first contact is pinned the
+// way it always was.
+func (c *Conn) announceFirst(p *peer) {
+	if c.mode != Single {
+		return
+	}
+
+	c.mu.Lock()
+
+	if p.announced || !p.first {
+		c.mu.Unlock()
+
+		return
+	}
+
+	p.announced = true
+	contact := FirstContact{Name: p.device, Fingerprint: p.fingerprint, Code: p.code}
+	c.firsts = append(c.firsts, contact)
+	handler := c.onFirst
+	c.mu.Unlock()
+
+	if handler != nil {
+		handler(contact)
 	}
 }
 
@@ -610,14 +732,27 @@ func (c *Conn) receiveFrame(m session.Message) {
 // is already known is ignored: a second hello is not a rekey, and it is not a
 // second chance at a wrong secret.
 func (c *Conn) receiveHello(h handshake) {
-	_, fresh, err := c.record(h)
+	p, fresh, err := c.record(h)
 	if err != nil {
 		c.fail(err, "")
 
 		return
 	}
 
+	c.announceFirst(p)
+
 	if !fresh {
+		return
+	}
+
+	// A first contact this side has to confirm gets no answer yet: the peer is
+	// not authenticated until a person has accepted it, and this side's confirm
+	// is the answer that would authenticate it. So it is owed, not sent — the
+	// question is put once the peer's own confirm has proved it holds the keys
+	// it presented, and a frame nobody proved never opens a dialog.
+	if c.awaiting(p) {
+		c.oweConfirm(p)
+
 		return
 	}
 
@@ -662,6 +797,8 @@ func (c *Conn) receiveConfirm(h handshake) {
 		return
 	}
 
+	c.announceFirst(p)
+
 	// The transcript is rebuilt from what this side recorded — the identity,
 	// the name and the nonce — not from the fields of the step that just
 	// arrived. A confirm that repeats a different name under the same ephemeral
@@ -686,6 +823,15 @@ func (c *Conn) receiveConfirm(h handshake) {
 		// bad MAC, and dropping it would let a stranger silence a peer that is
 		// still working. It is unverified either way, so it can send nothing.
 		c.fail(fmt.Errorf("%w: %q did not prove it holds %s", ErrMAC, peerName(h.Device), proof), "")
+
+		return
+	}
+
+	// The peer has now proved it holds the key it presented, which is the
+	// moment a person can be asked about it: a name and a code from a frame
+	// nobody proved would be a dialog a stranger could open at will.
+	if c.awaiting(p) {
+		c.askFirstContact(p, fresh)
 
 		return
 	}
@@ -884,6 +1030,7 @@ func (c *Conn) record(h handshake) (*peer, bool, error) {
 		id:          append([]byte(nil), h.Id...),
 		fingerprint: fingerprint,
 		first:       first,
+		step:        h,
 		sendSeq:     firstSequence,
 		expect:      firstSequence,
 	}
@@ -892,6 +1039,17 @@ func (c *Conn) record(h handshake) (*peer, bool, error) {
 		p.confirm, err = deriveConfirmKey(shared, handshakeSalt(c.ours(), h), c.ours(), h)
 		if err != nil {
 			return nil, false, err
+		}
+
+		// A code is only meaningful between two devices that compared one, and
+		// that is a single correspondent: on a bus the room is the audience,
+		// nobody can read several codes off one screen, and the pin-without-
+		// asking path is what keeps one stranger from holding the room.
+		if c.mode == Single {
+			p.code, err = confirmCode(c.ours(), h)
+			if err != nil {
+				return nil, false, err
+			}
 		}
 	} else {
 		p.confirm = c.secret
@@ -1018,14 +1176,200 @@ func (c *Conn) handshakeTimedOut(timeout time.Duration) {
 	}
 
 	c.mu.Lock()
-	verified := c.verifiedLocked() > 0
-	c.mu.Unlock()
 
-	if verified {
+	if c.verifiedLocked() > 0 {
+		c.mu.Unlock()
+
 		return
 	}
 
+	// The side that is not asking may be waiting on the other side's person: a
+	// first contact is recorded, nothing is verified, and the confirm that
+	// would finish the exchange is being held back until that person answers.
+	// The deadline is extended once for the confirmation window, so the waiting
+	// side does not close a session the other side is about to accept. A peer
+	// that is merely silent still runs out.
+	if c.identity != nil && c.mode == Single && !c.extended && c.pendingFirstLocked() {
+		c.extended = true
+		timeout = c.confirmWindowLocked()
+		c.timer = time.AfterFunc(timeout, func() { c.handshakeTimedOut(timeout) })
+		c.mu.Unlock()
+
+		return
+	}
+
+	c.mu.Unlock()
+
 	c.fail(fmt.Errorf("%w: no encrypted handshake within %s", ErrHandshake, timeout), "")
+}
+
+// awaiting reports whether this peer's admission needs a person's answer: a
+// device-key session on a single connection, for a name that has not been
+// pinned before, with somebody to ask.
+func (c *Conn) awaiting(p *peer) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.awaitingLocked(p)
+}
+
+func (c *Conn) awaitingLocked(p *peer) bool {
+	return c.confirm != nil && c.identity != nil && c.mode == Single && p.first && !p.verified
+}
+
+// pendingFirstLocked reports a first contact recorded here and not yet proved,
+// with no question of this side's own in flight: the shape of a session that is
+// waiting for the other side to answer.
+func (c *Conn) pendingFirstLocked() bool {
+	for _, p := range c.peers {
+		if p.first && !p.verified && !p.asking {
+			return true
+		}
+	}
+
+	return false
+}
+
+// oweConfirm records that this peer is still waiting for the confirm this side
+// withheld, so accepting the contact sends it.
+func (c *Conn) oweConfirm(p *peer) {
+	c.mu.Lock()
+	p.oweConfirm = true
+	c.mu.Unlock()
+}
+
+// claimAsk marks a peer as pending an answer and reports whether this call is
+// the one that asks. oweConfirm records that the answer owes the peer its
+// confirm. A second step from the same peer — a hello, then a confirm — joins
+// the question already pending instead of opening a second one.
+func (c *Conn) claimAsk(p *peer, oweConfirm bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	p.oweConfirm = p.oweConfirm || oweConfirm
+
+	if p.asking {
+		return false
+	}
+
+	p.asking = true
+
+	return true
+}
+
+// askFirstContact puts the first-contact question to the caller and puts the
+// answer to work without holding up the transport: the question runs on its own
+// goroutine, and this side's confirm is withheld until the answer is yes.
+func (c *Conn) askFirstContact(p *peer, oweConfirm bool) {
+	if !c.claimAsk(p, oweConfirm) {
+		return
+	}
+
+	c.mu.Lock()
+
+	contact := FirstContact{Name: p.device, Fingerprint: p.fingerprint, Code: p.code}
+	confirm := c.confirm
+	timeout := c.confirmWindowLocked()
+
+	// The handshake deadline is the wrong clock for a person reading a code
+	// aloud: the question gets a bound of its own, and a question that is never
+	// answered is refused rather than left half open.
+	if c.timer != nil {
+		c.timer.Stop()
+	}
+
+	c.timer = time.AfterFunc(timeout, func() { c.confirmTimedOut(p, timeout) })
+	c.mu.Unlock()
+
+	go func() {
+		if confirm != nil && confirm(contact) {
+			c.acceptFirstContact(p)
+
+			return
+		}
+
+		c.refuseFirstContact(p, contact)
+	}()
+}
+
+// resolveAsk settles a pending question and reports whether this call owns the
+// outcome: a timeout that lost the race to the answer does nothing, and an
+// answer that lost the race to the timeout does nothing either.
+func (c *Conn) resolveAsk(p *peer) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !p.asking {
+		return false
+	}
+
+	p.asking = false
+
+	if c.timer != nil {
+		c.timer.Stop()
+		c.timer = nil
+	}
+
+	return true
+}
+
+// acceptFirstContact records the pin and answers the confirm that was held
+// back. It runs on the goroutine the question was put on.
+func (c *Conn) acceptFirstContact(p *peer) {
+	if c.IsClosed() || !c.resolveAsk(p) {
+		return
+	}
+
+	if err := c.markVerified(p); err != nil {
+		c.fail(err, string(p.key))
+
+		return
+	}
+
+	c.mu.Lock()
+	owe := p.oweConfirm
+	p.oweConfirm = false
+	step := p.step
+	c.mu.Unlock()
+
+	if !owe {
+		return
+	}
+
+	if err := c.sendConfirm(step); err != nil {
+		c.fail(err, string(p.key))
+	}
+}
+
+// refuseFirstContact drops a peer nobody accepted. Nothing is pinned and
+// nothing is answered; the refusal travels the way every other refusal does,
+// so a single-peer session closes and a host's listener stays up for the next
+// device.
+func (c *Conn) refuseFirstContact(p *peer, contact FirstContact) {
+	if !c.resolveAsk(p) {
+		return
+	}
+
+	c.fail(fmt.Errorf("%w: %q was not confirmed (code %s)", ErrConfirm, peerName(contact.Name), contact.Code), string(p.key))
+}
+
+// confirmTimedOut refuses a contact whose question ran out of time.
+func (c *Conn) confirmTimedOut(p *peer, timeout time.Duration) {
+	if c.IsClosed() || !c.resolveAsk(p) {
+		return
+	}
+
+	c.fail(fmt.Errorf("%w: %q was not confirmed within %s", ErrConfirm, peerName(p.device), timeout), string(p.key))
+}
+
+// confirmWindowLocked is how long a pending question may hold the session
+// open.
+func (c *Conn) confirmWindowLocked() time.Duration {
+	if c.confirmTimeout > 0 {
+		return c.confirmTimeout
+	}
+
+	return DefaultConfirmTimeout
 }
 
 // shutdown is the wrapped session's close: it reaches the caller through this

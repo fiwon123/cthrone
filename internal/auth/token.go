@@ -39,6 +39,12 @@ const (
 type Token struct {
 	Value  string
 	Source string
+
+	// Path is the file the secret was read from, and only set when Source is
+	// SourceFile. It is not secret — the path is not the key — and it is what
+	// lets a status line say which file is in charge, and a "stop using this"
+	// action delete the right one.
+	Path string
 }
 
 // Resolve returns the secret to use and where it came from.
@@ -74,7 +80,7 @@ func Resolve(flagValue, filePath string) (Token, error) {
 		return Token{Source: SourceNone}, nil
 	}
 
-	return Token{Value: secret, Source: SourceFile}, nil
+	return Token{Value: secret, Source: SourceFile, Path: filePath}, nil
 }
 
 // DefaultFile returns the path of the default token file: the token file

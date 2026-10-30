@@ -63,15 +63,25 @@ func (h *HostHandle) Stop() error {
 	return h.server.Stop()
 }
 
+// Confirm is the human answer to a first contact: whether the device that just
+// proved it holds its key may join, given the code the two screens show.
+//
+// A host passes one; a caller that has nobody to ask passes none, and the peer
+// is accepted and pinned the way it was before there was a code to compare —
+// which is what an unattended host and every peer in the shared-secret model
+// do. It is asked only in the device-key model, only for a name that has not
+// been pinned before, and only once per device.
+type Confirm func(e2e.FirstContact) bool
+
 // Host serves the chat endpoint with the terminal as its consumer.
 //
 // The bind address is empty by default, which means every interface: the tool
 // is a chat between two devices on the same network, and a host that only
 // listens on the loopback cannot be reached by the other device.
-func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS) error {
+func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS, confirm ...Confirm) error {
 	handle, err := OpenServer(app, opts, tlsConf, func(s session.Session) {
 		go runTerminal(s)
-	})
+	}, confirm...)
 	if err != nil {
 		return err
 	}
@@ -89,11 +99,15 @@ func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS) error {
 // Every client that is let in arrives at onSession already sealed: the
 // wrapper is installed here, so a caller cannot forget it and cannot opt out.
 //
+// A first contact is put to confirm before it is pinned, and the peer is not
+// handed to onSession until it is accepted — so an unconfirmed device never
+// reaches the consumer and leaves no pin behind.
+//
 // The handle also reports what the other device needs to pair — the shared
 // secret, or this device's fingerprint in the device-key model — and the
 // certificate fingerprint: the terminal prints them, and a GUI has nowhere to
 // print them to.
-func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession func(session.Session)) (*HostHandle, error) {
+func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession func(session.Session), confirm ...Confirm) (*HostHandle, error) {
 	cred, err := pairing.Load(opts)
 	if err != nil {
 		return nil, err
@@ -126,6 +140,16 @@ func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession
 		ready = make(chan struct{})
 	)
 
+	// gate is the human answer a first contact waits on, or nil when this host
+	// has nobody to ask.
+	gate := func() func(e2e.FirstContact) bool {
+		if len(confirm) == 0 {
+			return nil
+		}
+
+		return confirm[0]
+	}()
+
 	// admit hands an authenticated session to the caller and records it in the
 	// hub. Only a sealed session ever reaches it, so a broadcast cannot write
 	// to the transport in the clear.
@@ -141,7 +165,7 @@ func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession
 	}
 
 	srv, err := server(app.Port, app.Host, token, certFile, keyFile, func(raw session.Session) {
-		sealed, err := seal(raw, cred, app.Name)
+		sealed, err := seal(raw, cred, app.Name, gate)
 		if err != nil {
 			return
 		}

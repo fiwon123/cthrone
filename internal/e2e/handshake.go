@@ -80,6 +80,11 @@ const (
 	// keyLabel separates the two directions of the session keys, so the key a
 	// peer sends with is never the key it receives with.
 	keyLabel = " key "
+
+	// confirmCodeLabel separates the code two screens compare from every other
+	// use of the transcript. It is a label rather than a field on the wire:
+	// both sides derive the code locally and neither sends it.
+	confirmCodeLabel = " confirm code "
 )
 
 // ProtocolIdentity names the device-key version. It takes the place of Protocol
@@ -302,8 +307,37 @@ func deriveConfirmKey(shared, salt []byte, ours, theirs handshake) ([]byte, erro
 	return key, nil
 }
 
-// confirmMAC is the proof that the sender knows the shared secret.
+// confirmCode is the six-digit code the two screens compare when the devices
+// first meet.
 //
+// It is HKDF-SHA256 over the device-key transcript — the same bytes the confirm
+// MAC covers — under a label of its own, so both sides compute it from what
+// they have already recorded and neither sends it. It is a comparison, not a
+// secret: it proves nothing on its own, and anyone who reads the hellos off the
+// wire could compute it. What it buys is that a splice cannot make it agree —
+// the two legs of a man in the middle have different ephemeral keys, so each
+// leg derives a different code and the two screens show two different numbers.
+//
+// The shared-secret handshake has no code: every device holding the secret is
+// the same identity, so there is no pair whose agreement means anything.
+func confirmCode(ours, theirs handshake) (string, error) {
+	key, err := hkdf.Key(sha256.New, transcriptIdentity(ours, theirs), nil, confirmCodeLabel, 8)
+	if err != nil {
+		return "", fmt.Errorf("e2e: deriving the first-contact code: %w", err)
+	}
+
+	// 900000 six-digit values, from the top of the range so a code never starts
+	// with a zero: two leading zeros read as a shorter number out loud.
+	return formatCode(binary.BigEndian.Uint64(key)%900000 + 100000), nil
+}
+
+// formatCode writes a six-digit number as two groups of three, which is the
+// shape two people read aloud to each other.
+func formatCode(n uint64) string {
+	return fmt.Sprintf("%03d %03d", n/1000, n%1000)
+}
+
+// confirmMAC is the proof that the sender knows the shared secret.
 // It covers the transcript — both keys, both nonces, both names — and the
 // public key of the peer it is addressed to. The recipient is what stops a
 // reflection: a peer that is not the addressee cannot lift a confirm that was

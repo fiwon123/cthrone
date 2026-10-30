@@ -33,6 +33,11 @@ var checkVersion bool
 // Version is popualated when building with Makefile
 var Version = "vx.x.x"
 
+// launchGUI opens the window. It is a variable so a test can prove the
+// no-subcommand path reaches it: the failure this guards against is silent, so
+// a test that only ran the command would see exit 0 and learn nothing.
+var launchGUI = uicmd.Run
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "cthrone",
@@ -45,6 +50,12 @@ var rootCmd = &cobra.Command{
 			fmt.Println(Version)
 			return
 		}
+
+		// A command line with no subcommand opens the window. cthrone_gui is
+		// this same binary built with -tags gui and -H=windowsgui, so a
+		// double-click lands here with no console to explain itself: doing
+		// nothing was indistinguishable from a broken application.
+		launchGUI()
 
 	},
 }

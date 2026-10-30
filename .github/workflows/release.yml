@@ -521,13 +521,24 @@ jobs:
           # or copy the file to the device and tap it
           ```
 
-          The app has three tabs:
+          The app has four tabs:
 
           - **Chat** — the conversation, a send field and a stop button.
-          - **Setup** — the port, the shared secret, the transport (`NATS` or
-            websocket) and the TLS options, with **Host** and **Connect**.
-          - **Devices** — **Scan network** walks the local subnet for a host on
-            the chat port; tap a result to fill in its address.
+          - **Setup** — the port, the credential (device key by default, or a
+            shared secret), the transport (`NATS` or websocket) and the TLS
+            options, with **Host** and **Connect**. Encryption is on unless the
+            box is cleared, and the host's certificate is pinned on first
+            contact.
+          - **Devices** — **Scan network** walks the `/24` the default route uses
+            for a host on the chat port; tap a result to fill in its address. A
+            device that hosts is never listed in its own list — its address is
+            shown read-only under **Setup** instead, as *This device —
+            &lt;address&gt;:&lt;port&gt;*.
+          - **About** — the version this build reports, with a **Copy** button;
+            the repository link; which credential the next session will speak;
+            and **Check for updates**, which runs only when pressed. Nothing
+            polls on start-up, so a window still opens on a phone with no
+            signal.
 
           A phone that hosts shows its own fingerprint in a dialog — the other
           device connects and the two screens are compared, with nothing to
@@ -554,7 +565,7 @@ jobs:
             is visible in the process list.
 
           **Compatibility break:** a v0.6.0 peer speaks plaintext `ws://` and
-          will not connect to a v0.7.0 host. Start the v0.7.0 side with
+          will not connect to a @VERSION@ host. Start the @VERSION@ side with
           `--no-tls` — on both devices — while the older one is in use; the
           payload stays sealed end to end. `--tls` is still accepted, so an
           older command line runs unchanged.
@@ -564,6 +575,24 @@ jobs:
           EOF
 
           sed -i "s|@VERSION@|$VERSION|g; s|@COMMIT@|$COMMIT|g; s|@RUN@|$RUN_URL|g" header.md
+
+          # A value typed into the prose instead of interpolated goes stale as
+          # soon as the next release is cut: the published v0.8.0 body told
+          # readers about a host from the release before it (#141). Only two
+          # versions may appear in the rendered header — the one being built,
+          # and the compatibility peer — and a surviving @PLACEHOLDER@ means a
+          # misspelt token would ship verbatim. Either one fails the job rather
+          # than the release page.
+          if grep -nE '@[A-Z_]+@' header.md; then
+            echo "::error::header.md still carries an unsubstituted placeholder — use @VERSION@, @COMMIT@ or @RUN@"
+            exit 1
+          fi
+
+          stray="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' header.md | grep -vxF -e "$VERSION" -e "v0.6.0" || true)"
+          if [ -n "$stray" ]; then
+            echo "::error::a release version is typed into the header: $(printf '%s\n' "$stray" | sort -u | tr '\n' ' ')— use @VERSION@; v0.6.0 is the only literal (the compatibility peer)"
+            exit 1
+          fi
 
           # `releases/generate-notes` walks the commit graph from the previous
           # release tag to this commit, so a squash-merged release PR leaves
