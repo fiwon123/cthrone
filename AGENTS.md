@@ -404,23 +404,12 @@ main          ← release merges (CI runs here — dev→main PRs only)
 - Release: `dev` → `main` (a pull request — CI runs there)
 - Hotfixes: `fix/<issue>-<slug>` → merge to `dev`, cherry-pick to `main` if urgent
 
-### The legacy `feature/*` branches
+### The legacy `feature/*` branches (deleted)
 
-The repository still carries branches named `feature/<number>-<slug>` from
-before the convention changed. The branch gate rejects those names, so a pull
-request opened from one of them fails.
-
-None of them needs renaming — they are leftovers, not work in progress:
-
-| Branch | State |
-|---|---|
-| `feature/2-implement-nats` | already merged (as a squash) |
-| `feature/4-implement-security-on-websocket` | already merged, and identical to `dev` — the security work was never done |
-| `feature/5-implement-chat-same-terminal-websocket` | already merged (as a squash) |
-| `feature/1-implement-bluetooth-connection` | **abandoned** — the zeroconf dependency was removed on purpose |
-
-Deleting them is a separate decision and is not part of any pull request.
-Until they are gone, do not open a pull request from one.
+Branches named `feature/<number>-<slug>` predate the convention above. The
+branch gate still rejects that name, so a pull request opened from one fails.
+All of them have been deleted — they were merged (as squashes) or abandoned —
+and the remote carries only `dev` and `main`. Do not recreate one.
 
 ### Branch gate
 
