@@ -355,6 +355,22 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    name the device announces: `laptop (192.168.1.20)`, or the address alone
    when its broadcasts do not reach you.
 
+   A device on a **different** segment of the same network — a second Wi-Fi, a
+   VLAN, a wired segment on another prefix — is found by naming that segment:
+
+   ```bash
+   cthrone scan --subnet 192.168.1.0/24
+   cthrone scan --subnet 192.168.1.0/24 --subnet 10.0.0.0/24   # several
+   cthrone scan --all-subnets                                  # every interface
+   ```
+
+   This works when the router **routes** between the two segments. It cannot
+   cross a NAT (a second router behind the modem) or client isolation on the
+   access point: those segments answer nothing, and the scan says so rather
+   than claiming the network is empty. The device name comes from a broadcast
+   that does not cross a subnet, so a host on another segment is printed by
+   address alone.
+
 5. Prefer a broker? Add `--nats` to either side, and run a NATS server
    locally — the repository ships one in `docker-compose.yml` for that:
 
@@ -570,7 +586,7 @@ What the Android CLI does and does not give you:
 |---|---|
 | `cthrone host` | host the room: every device that joins sees the messages of the others |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
-| `cthrone scan` | scan the default route's `/24` for chat servers (shows device names when discovered) |
+| `cthrone scan` | scan the default route's `/24` for chat servers; `--subnet <cidr>` adds another segment, `--all-subnets` walks every local interface (shows device names when discovered) |
 | `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
@@ -579,6 +595,8 @@ What the Android CLI does and does not give you:
 | Flag | What it does |
 |---|---|
 | `-p`, `--port` | the port to use (default `8080`) |
+| `--subnet` | `cthrone scan`: an IPv4 CIDR to walk as well, e.g. `192.168.1.0/24`; repeat for several segments |
+| `--all-subnets` | `cthrone scan`: walk the `/24` of every local network interface |
 | `--nats` | use the NATS transport instead of the websocket one |
 | `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`); a `tls://` URL asks for an encrypted connection |
 | `--token` | a shared secret to use instead of pairing by device key — **visible in the process list**, so prefer the environment or the file |
@@ -809,9 +827,30 @@ An address that already carries a port is used as it is:
 machine is actually on, rather than the first private address an adapter lists,
 which on a machine with a docker bridge or a VPN is often the wrong one — and
 dials the chat port on every address. It falls back to the adapter list when
-there is no default route. It finds nothing when the server is on a different
-subnet, when a firewall blocks the port, or when the server is on the other side
-of a NAT.
+there is no default route.
+
+When the server is on **another** segment of the same network, name that
+segment and the scan will reach it if the router routes between the two:
+
+```bash
+cthrone scan --subnet 192.168.1.0/24   # repeat the flag for several
+cthrone scan --all-subnets             # the /24 of every local interface
+```
+
+A scan only finds what this device can route to. It still finds nothing when:
+
+- the other segment is behind a **NAT** (a second router plugged into the
+  modem) — the inner device has no route a scan can enter; use a port forward
+  on the inner router, or the NATS transport;
+- the access point **isolates clients**, so the two devices cannot reach each
+  other at all — that is a modem setting, not a code path;
+- a firewall blocks the chat port, or the server is not running.
+
+The scan reports a named subnet that answered nothing as exactly that, with the
+reason, so "nobody is there" is not confused with "this network cannot reach
+that one". A device name is announced by a broadcast that does not cross a
+subnet, so a host found on another segment is listed by address only until you
+connect.
 
 ### The broker says "Authorization Violation"
 

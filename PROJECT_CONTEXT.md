@@ -58,7 +58,13 @@ decide *how* the transport does it. `scan` walks the `/24` the default route
 uses — not the first private address an adapter happens to list, which on a
 machine with a docker bridge or a VPN is often the wrong one — and reports the
 addresses that answer on the chat port, never this device's own, so a host does
-not offer itself as a peer. `internal/pairing` decides *which credential* a
+not offer itself as a peer. `--subnet <cidr>` adds a segment the default route
+does not cover (repeatable), and `--all-subnets` walks the `/24` of every local
+interface; that reaches a second Wi-Fi, a VLAN or a wired segment **only when
+the router routes between them**, because the beacon's broadcast does not cross
+a subnet, and a scan cannot cross a NAT or client isolation. The walk is bounded
+by a worker pool and a hard cap on the address count, so a mistyped `/16` is
+refused rather than dialled. `internal/pairing` decides *which credential* a
 session speaks — the shared secret when the user named one, this device's key
 otherwise — so the transports cannot disagree.
 
@@ -182,7 +188,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), and a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), and `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when the user
