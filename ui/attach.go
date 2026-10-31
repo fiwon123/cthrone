@@ -378,7 +378,7 @@ func (g *gui) showFiles() {
 	ask := widgets.NewCheckRow("Ask before saving each file", nil, !g.mobile)
 	ask.SetChecked(settings.policy == saveAsk)
 
-	choose := widget.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
+	choose := widgets.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
 		picker := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
 			if err != nil {
 				g.showError(err)
@@ -394,7 +394,7 @@ func (g *gui) showFiles() {
 		}, g.win)
 		picker.Resize(g.dialogSize())
 		picker.Show()
-	})
+	}, g.copyLabel)
 
 	items := []*widget.FormItem{
 		// The picker is the normal way in on a phone, where typing a path is
@@ -616,7 +616,7 @@ func (g *gui) finishReceive() {
 // A row with no path on disk is a transfer that is still in flight, or one that
 // failed: neither has anything to save or to show, so both parts stay hidden
 // and the label carries the state.
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widget.Button) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyButton) {
 	if m.file == nil || m.file.path == "" {
 		pic.Hide()
 		save.Hide()
@@ -641,13 +641,13 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widget.Button)
 
 	switch m.file.state {
 	case transferSaved:
-		save.OnTapped = func() { g.saveAs(path) }
+		save.SetOnTapped(func() { g.saveAs(path) })
 		save.Show()
 
 	case transferPending:
 		name := filepath.Base(path)
 		note := m.file
-		save.OnTapped = func() { g.askWhereToSave(note, name, path) }
+		save.SetOnTapped(func() { g.askWhereToSave(note, name, path) })
 		save.Show()
 
 	default:

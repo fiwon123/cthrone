@@ -36,6 +36,7 @@ func newScreenGUI(t *testing.T, mobile bool) *gui {
 	}
 	g := &gui{app: app, win: win, mobile: mobile}
 	g.build()
+	t.Cleanup(g.stopCopyHint)
 
 	return g
 }
