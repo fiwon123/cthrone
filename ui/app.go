@@ -284,7 +284,7 @@ func (g *gui) build() {
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
 	// title bar to show it in, the copy confirmation, and the copy-all action.
-	g.copyHint = selectableLabel("")
+	g.copyHint = g.label("")
 
 	copyLabel := "Copy all"
 	if g.lay.Stack {
@@ -314,7 +314,7 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = selectableLabel("Ready — open Setup to connect or host.")
+	g.status = g.label("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
 
 	// One row per message, not one label holding the whole log: appending then
@@ -329,7 +329,7 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := selectableLabel("")
+			row := g.label("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
@@ -415,12 +415,12 @@ func (g *gui) build() {
 	g.natsURLEntry = widget.NewEntry()
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
-	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
+	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() }, !g.mobile)
 	// Encrypted is the default on the CLI, so the app starts the same way: a
 	// phone that has to find a switch before it is protected is not protected.
 	g.tlsCheck.SetChecked(true)
-	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil)
-	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil)
+	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil, !g.mobile)
+	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil, !g.mobile)
 
 	g.moreBtn = widget.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
@@ -442,18 +442,18 @@ func (g *gui) build() {
 
 	actions := container.NewGridWithColumns(2, g.hostBtn, g.connectBtn)
 
-	g.hint = selectableLabel("")
+	g.hint = g.label("")
 
-	g.thisDevice = selectableLabel("")
+	g.thisDevice = g.label("")
 	g.thisDevice.Hide()
 
-	g.credential = selectableLabel("")
+	g.credential = g.label("")
 
 	g.forgetSecret = widget.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile)
 	g.forgetSecret.Hide()
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
-		widgets.SelectableHeading("Quick Setup"),
+		g.heading("Quick Setup"),
 		g.tlsCheck,
 		g.insecureCheck,
 		g.formHolder,
@@ -493,7 +493,7 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	beaconHint := selectableLabel("UDP beacons on port 9999")
+	beaconHint := g.label("UDP beacons on port 9999")
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
 	} else {
@@ -585,29 +585,29 @@ func (g *gui) rebuildSetupForm() {
 	useNATS := g.natsCheck.Checked()
 	view := setupVisibility(useNATS, g.tlsCheck.Checked(), g.moreOptions)
 
-	items := []*widget.FormItem{
-		widgets.FormRow("Device name", g.nameEntry),
-		widgets.FormRow(labelConnectTo, g.hostEntry),
-		widgets.FormRow("Port", g.portEntry),
-		widgets.FormRow("Transport", g.transport),
+	rows := []widgets.Row{
+		{Caption: "Device name", Field: g.nameEntry},
+		{Caption: labelConnectTo, Field: g.hostEntry},
+		{Caption: "Port", Field: g.portEntry},
+		{Caption: "Transport", Field: g.transport},
 	}
 	if view.Options {
-		items = append(items, widgets.FormRow("Options", g.moreBtn))
+		rows = append(rows, widgets.Row{Caption: "Options", Field: g.moreBtn})
 	}
 	if view.SharedSecret {
-		items = append(items, widgets.FormRow("Shared secret", g.tokenEntry))
+		rows = append(rows, widgets.Row{Caption: "Shared secret", Field: g.tokenEntry})
 	}
 	if view.Fingerprint {
-		items = append(items, widgets.FormRow("Fingerprint", g.fingerprintEntry))
+		rows = append(rows, widgets.Row{Caption: "Fingerprint", Field: g.fingerprintEntry})
 	}
 	if view.NATSBroker {
-		items = append(items, widgets.FormRow("NATS URL", g.natsURLEntry))
+		rows = append(rows, widgets.Row{Caption: "NATS URL", Field: g.natsURLEntry})
 	}
 	if view.NATSSubject {
-		items = append(items, widgets.FormRow("NATS subject", g.subjectEntry))
+		rows = append(rows, widgets.Row{Caption: "NATS subject", Field: g.subjectEntry})
 	}
 	if view.BindAddress {
-		items = append(items, widgets.FormRow("Bind address", g.bindEntry))
+		rows = append(rows, widgets.Row{Caption: "Bind address", Field: g.bindEntry})
 	}
 
 	// A check row hides its caption with the box, so the whole row goes.
@@ -625,7 +625,7 @@ func (g *gui) rebuildSetupForm() {
 
 	g.hint.SetText(setupHint(useNATS))
 
-	g.formHolder.Objects = []fyne.CanvasObject{widget.NewForm(items...)}
+	g.formHolder.Objects = []fyne.CanvasObject{widgets.Form(g.lay.Stack, !g.mobile, rows)}
 	g.formHolder.Refresh()
 
 	g.refreshCredential()
@@ -1468,26 +1468,24 @@ func (g *gui) tokenFile() string {
 func (g *gui) buildAbout() fyne.CanvasObject {
 	version := aboutVersion(Version, g.app.Metadata().Version)
 
-	g.aboutCredential = selectableLabel("")
-	g.aboutNote = selectableLabel("")
+	g.aboutCredential = g.label("")
+	g.aboutNote = g.label("")
 
-	// No Copy button beside the version: the version is a selectable label like
-	// every other line here, so the button only repeated a selection the user
-	// can already make.
-	versionLine := container.NewHBox(
-		widgets.SelectableHeading("cthrone"),
-		selectableLabel(version),
-	)
+	// The name is the heading and the version sits under it, rather than the
+	// two sharing one line: at phone width "cthrone v0.8.3" in a horizontal box
+	// wraps mid-word or pushes the version off the edge, and a header that
+	// changes shape with the window is the thing that looked broken.
+	header := g.aboutHeader(version)
 
 	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
-	repoLine := container.NewBorder(nil, nil, nil, repoBtn, selectableLabel(RepositoryURL))
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.label(RepositoryURL))
 
 	g.updateBtn = widget.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates)
 
-	note := selectableLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
-		versionLine,
+		header,
 		repoLine,
 		widget.NewSeparator(),
 		g.aboutCredential,
@@ -1502,6 +1500,18 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.refreshCredential()
 
 	return container.NewVScroll(container.NewPadded(body))
+}
+
+// aboutHeader is the app's name above the version it is running.
+//
+// It is a block rather than one line so a phone and a desktop draw the same
+// header: side by side, a narrow window has to either wrap the name or push the
+// version out of the pane.
+func (g *gui) aboutHeader(version string) fyne.CanvasObject {
+	return container.NewVBox(
+		g.heading("cthrone"),
+		g.label(version),
+	)
 }
 
 // openRepository opens the project's page in the browser.

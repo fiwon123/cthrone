@@ -375,7 +375,7 @@ func (g *gui) showFiles() {
 	folder := widget.NewEntry()
 	folder.SetText(settings.folder)
 
-	ask := widgets.NewCheckRow("Ask before saving each file", nil)
+	ask := widgets.NewCheckRow("Ask before saving each file", nil, !g.mobile)
 	ask.SetChecked(settings.policy == saveAsk)
 
 	choose := widget.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
@@ -399,7 +399,7 @@ func (g *gui) showFiles() {
 	items := []*widget.FormItem{
 		// The picker is the normal way in on a phone, where typing a path is
 		// close to impossible; the field stays for a path pasted from a desktop.
-		widgets.FormRow("Folder", container.NewBorder(nil, nil, nil, choose, folder)),
+		widgets.FormRow("Folder", container.NewBorder(nil, nil, nil, choose, folder), !g.mobile),
 		{Text: "", Widget: ask},
 	}
 
