@@ -166,7 +166,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), and buttons and tab labels that copy on a long press. `v0.8.1` is the published release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when the user
@@ -189,14 +189,16 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - **The GUI widget tree is executed, not just compiled**: `make check` and the
   `CI (Go)` job run `CGO_ENABLED=0 go test -tags "gui ci" ./ui/...`, which
   swaps Fyne's GL driver for the software one, so a transfer progress row, an
-  inline decodable image, and a long press that copies a button or tab label
-  are asserted headless. A native rendered frame and the APK on a device are
+  inline decodable image, a long press that copies a button or tab label, and
+  the two regressions that broke a shipped GUI — the blank window (#186) and
+  the unclickable Setup tab (#189) — are asserted headless as painted-versus-
+  hit-test pixel checks. A native rendered frame and the APK on a device are
   still unverified (#155).
 - **Open**: see Backlog.
 
 ## Backlog
 
-1. Publish the `v0.8.2` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
+1. Publish the `v0.8.6` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
 2. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
 3. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
 
