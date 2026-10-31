@@ -3,6 +3,8 @@ package websocketcore
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,5 +225,114 @@ func TestOpenServerRefusesABrokenDeviceKey(t *testing.T) {
 
 	if _, err := OpenServer(app.New(8080), pairing.Options{}, auth.TLS{}, func(session.Session) {}); err == nil {
 		t.Fatal("a corrupt device key was replaced with a new identity")
+	}
+}
+
+// Ctrl-C ends a host, and the port goes back to the machine: a host that
+// returned while its listener stayed bound is the "address already in use" the
+// next Host reports. The stop is driven through the loop's quit flag, because a
+// test cannot press Ctrl-C on a tty.
+func TestHostReleasesThePortWhenTheUserQuits(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(auth.EnvToken, "")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	// A fixed port, so the test can bind the same number after the host ends.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	data := app.New(port)
+	data.Host = "127.0.0.1"
+	data.Name = "host"
+
+	original := runHost
+	t.Cleanup(func() { runHost = original })
+
+	// The loop holds the host open until the test has a peer in, then reports
+	// the user quit — the two halves of Ctrl-C, in the order a tty produces
+	// them.
+	entered := make(chan struct{}, 1)
+
+	quit := make(chan struct{})
+	runHost = func(session.Session) bool {
+		entered <- struct{}{}
+		<-quit
+
+		return true
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Host(data, pairing.Options{
+			KeyFile:  filepath.Join(home, "identity.key"),
+			PinsFile: filepath.Join(home, "peers.json"),
+		}, auth.TLS{})
+	}()
+
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	clientData := app.New(0)
+	clientData.Name = "client"
+
+	// The dial is what wakes the loop. The retry covers the bind, not a
+	// failure: the host is listening just after Host's own listen returns. The
+	// client stays open until the loop has it — closing it first would end the
+	// handshake before the host ever saw the peer.
+	var (
+		client    session.Session
+		clientErr error
+	)
+
+	for attempt := 0; attempt < 100; attempt++ {
+		client, clientErr = Dial([]string{address}, clientData, deviceOptions(t.TempDir()), auth.TLS{})
+		if clientErr != nil {
+			time.Sleep(20 * time.Millisecond)
+
+			continue
+		}
+
+		break
+	}
+
+	if clientErr != nil {
+		close(quit)
+		t.Fatalf("no peer ever reached the host, so the quit could not be exercised: %v", clientErr)
+	}
+
+	defer client.Close("done")
+
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		close(quit)
+		t.Fatal("the host never handed the authenticated session to the loop")
+	}
+
+	close(quit)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Host returned %v, want nil after a user quit", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Host did not return after the user quit the chat loop")
+	}
+
+	// The port is back: the next host binds the same number.
+	again, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("binding the port Host released: %v", err)
+	}
+
+	if err := again.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
