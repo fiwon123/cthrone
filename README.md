@@ -337,7 +337,9 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
 
    It walks the `/24` of the address your default route uses — the network the
    machine is actually on, not the first private address an adapter happens to
-   list — and prints the addresses that answer on the chat port.
+   list — and prints the addresses that answer on the chat port, each with the
+   name the device announces: `laptop (192.168.1.20)`, or the address alone
+   when its broadcasts do not reach you.
 
 5. Prefer a broker? Add `--nats` to either side, and run a NATS server
    locally — the repository ships one in `docker-compose.yml` for that:
@@ -467,7 +469,10 @@ adb install cthrone_<tag>_android_gui_arm64.apk
 
 The app has four tabs:
 
-- **Chat** — the conversation, a send field and a stop button. Tap a message to
+- **Chat** — the conversation, a send field and a stop button. An arriving
+  message is labelled with the device name and, on a websocket, the address it
+  came from — `laptop (192.168.1.20:51234)` — because a name alone does not say
+  which machine on the network it is. Tap a message to
   copy it, or drag to select a part of it; **Copy all** copies the whole
   conversation. Every message, address and error is selectable text, and an
   error dialog carries a **Copy** button, so a failure can be pasted into a bug
@@ -477,7 +482,10 @@ The app has four tabs:
   and **Connect**. Encryption is on unless the box is cleared, and the host's
   certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the `/24` the default route uses for a
-  host on the chat port; tap a result to fill in its address. A device that hosts
+  host on the chat port; tap a result to fill in its address. A row reads
+  `laptop — 192.168.1.20:8080` once the device has announced itself, and shows
+  the address alone until then — the address is always there, never replaced by
+  the name. A device that hosts
   is never listed in its own list — its address is shown read-only under
   **Setup** instead, as *This device — &lt;address&gt;:&lt;port&gt;*, limited to
   the addresses a peer on that network can reach.

@@ -120,6 +120,45 @@ func TestReceivePrintsTheSender(t *testing.T) {
 	}
 }
 
+// A websocket message knows where it came from as well as who sent it, and
+// both are printed: the name does not say which machine on the network it is.
+func TestReceivePrintsTheSenderAndItsAddress(t *testing.T) {
+	out := &bytes.Buffer{}
+	s := newFake("alice")
+
+	receive(s, &line{}, out)
+
+	s.NotifyMessage(session.Message{From: "bob", Addr: "192.168.1.20:51234", Payload: []byte("hello")})
+
+	if got := out.String(); !strings.Contains(got, "bob (192.168.1.20:51234): hello") {
+		t.Errorf("expected the sender, its address and the message, got %q", got)
+	}
+}
+
+// The label is the same rule everywhere it is rendered, so the terminal and the
+// GUI cannot disagree about who a message is from.
+func TestSenderLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  session.Message
+		want string
+	}{
+		{"a bus has no address", session.Message{From: "bob"}, "bob"},
+		{"name and address", session.Message{From: "bob", Addr: "192.168.1.20:51234"}, "bob (192.168.1.20:51234)"},
+		{"an address that is the name", session.Message{From: "bob", Addr: "bob"}, "bob"},
+		{"an unnamed peer with an address", session.Message{Addr: "192.168.1.20:51234"}, "peer (192.168.1.20:51234)"},
+		{"nothing at all", session.Message{}, "peer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := senderLabel(tt.msg); got != tt.want {
+				t.Errorf("senderLabel(%+v) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
 // An arriving message is put above the input line and the line comes back
 // intact: a message must not swallow what is being typed.
 func TestNoticeKeepsTheInputLine(t *testing.T) {

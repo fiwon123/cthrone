@@ -70,11 +70,38 @@ func isSelf(addr string, own []string) bool {
 	return false
 }
 
+// deviceLabel is how one row of the Devices list reads: the address the
+// connect uses, with the device name in front of it when one has been heard.
+//
+// The name is optional rather than a copy of the address. A scan finds
+// addresses, and a device whose beacon has not been heard has no name yet — it
+// must read as one address, not as a name that happens to be the address
+// printed twice.
+func deviceLabel(b discovery.Beacon) string {
+	addr := b.Addr + ":" + strconv.Itoa(b.Port)
+	if b.Name == "" {
+		return addr
+	}
+
+	return b.Name + " — " + addr
+}
+
 // upsertDevice records a beacon heard at now. A device already listed takes
 // its new state instead of appearing twice.
 func upsertDevice(list []device, b discovery.Beacon, now time.Time) []device {
 	for i := range list {
 		if list[i].Addr == b.Addr && list[i].Port == b.Port {
+			// A scan finds an address, not a name: it must not erase the one a
+			// beacon announced, or pressing Scan would make the list forget
+			// who the device is.
+			if b.Name == "" {
+				b.Name = list[i].Name
+			}
+
+			if b.Protocol == 0 {
+				b.Protocol = list[i].Protocol
+			}
+
 			list[i].Beacon = b
 			list[i].seen = now
 
@@ -101,10 +128,11 @@ func pruneDevices(list []device, now time.Time) []device {
 	return out
 }
 
-// addScanned lists the addresses a port scan found alive.
+// addScanned lists the addresses a port scan found alive. A scan knows the
+// address and nothing else, so the name stays empty until a beacon fills it in.
 func addScanned(list []device, addrs []string, port int, now time.Time) []device {
 	for _, addr := range addrs {
-		list = upsertDevice(list, discovery.Beacon{Name: addr, Addr: addr, Port: port}, now)
+		list = upsertDevice(list, discovery.Beacon{Addr: addr, Port: port}, now)
 	}
 
 	return list

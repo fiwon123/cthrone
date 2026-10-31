@@ -53,7 +53,10 @@ func newSession(p publisher, s subscriber, closeFn func(), subject string) (*nat
 		}
 
 		sess.NotifyMessage(session.Message{
-			From:    m.Subject,
+			From: m.Subject,
+			// No Addr: a subject is the same for every peer on a bus, so it
+			// identifies no sender. Leaving it empty is what keeps a caller
+			// from printing a subject as if it were an address.
 			Payload: payload,
 			Time:    time.Now(),
 		})

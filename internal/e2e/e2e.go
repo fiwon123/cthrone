@@ -691,7 +691,11 @@ func (c *Conn) receive(m session.Message) {
 		return
 	}
 
-	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Payload: plain, Time: m.Time})
+	// From is the name that authenticated the frame; Addr is the transport's
+	// own idea of where it came from, carried beside the name rather than
+	// replaced by it. A caller that shows only one of them loses either who
+	// the peer is or which machine it is.
+	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Addr: m.Addr, Payload: plain, Time: m.Time})
 }
 
 // senderName is what to call the peer a frame came from. The transport's From

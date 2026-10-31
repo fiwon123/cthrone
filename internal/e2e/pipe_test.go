@@ -59,7 +59,15 @@ func (p *pipeSession) Send(payload []byte) error {
 	}
 
 	for _, end := range links {
-		end.Deliver(frame)
+		// The address travels with the frame, the way a websocket reports it:
+		// it is where the frame came from, which is this end, not the end it
+		// is handed to.
+		end.DeliverMessage(session.Message{
+			From:    "peer",
+			Addr:    p.RemoteAddr(),
+			Payload: frame,
+			Time:    time.Now(),
+		})
 	}
 
 	return nil
@@ -68,7 +76,18 @@ func (p *pipeSession) Send(payload []byte) error {
 // Deliver hands payload to whatever handler is installed, or holds it until one
 // is, which is also how a test injects a frame the sender never produced.
 func (p *pipeSession) Deliver(payload []byte) {
-	message := session.Message{From: "peer", Payload: append([]byte(nil), payload...), Time: time.Now()}
+	p.DeliverMessage(session.Message{
+		From:    "peer",
+		Addr:    p.RemoteAddr(),
+		Payload: append([]byte(nil), payload...),
+		Time:    time.Now(),
+	})
+}
+
+// DeliverMessage is Deliver with the message's fields left to the caller, so a
+// test can say where a frame came from as well as what it carries.
+func (p *pipeSession) DeliverMessage(message session.Message) {
+	message.Payload = append([]byte(nil), message.Payload...)
 
 	p.mu.Lock()
 	handler := p.handler
