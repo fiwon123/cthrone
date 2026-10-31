@@ -74,6 +74,13 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # A file behind `//go:build windows` is not compiled by the Linux build
+      # above, so an unused import there passed CI and failed the Windows jobs
+      # in release.yml (#176). Compile that tree here; the native Fyne link
+      # still belongs to the release workflow.
+      - name: Cross-compile for Windows
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+
 # A `paths:` filter that the change does not touch means this workflow does not
 # trigger at all, and a triggered run whose jobs are all gated out reports
 # `skipped`, not `passed`. Skipped is not passed: run `make check` locally
