@@ -130,3 +130,20 @@ func TestEqualComparesTheWholeSecret(t *testing.T) {
 		t.Error("expected an empty secret not to be equal")
 	}
 }
+
+// The file an older version read without being asked is answered for, so a run
+// can say that it stopped applying — but it is never opened by this package.
+func TestLegacyFileIsInTheConfigurationDirectory(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	t.Setenv("HOME", t.TempDir())
+
+	path, err := LegacyFile()
+	if err != nil {
+		t.Fatalf("LegacyFile: %v", err)
+	}
+
+	if want := filepath.Join(config, "cthrone", "token"); path != want {
+		t.Errorf("LegacyFile() = %q, want %q", path, want)
+	}
+}

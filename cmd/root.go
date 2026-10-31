@@ -83,7 +83,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "the shared secret; it is visible in the process list, so prefer the environment or the file")
 	rootCmd.PersistentFlags().BoolVar(&useTLS, "tls", false, "encrypt the transport (the default); kept so a command line that passes it still runs")
 	rootCmd.PersistentFlags().BoolVar(&noTLS, "no-tls", false, "serve and dial plaintext ws:// instead of the default wss://; the payload stays sealed end to end")
-	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from (default: the user configuration directory)")
+	rootCmd.PersistentFlags().StringVar(&tokenFile, "token-file", "", "the file the shared secret is read from; no file is read unless it is named here")
 	rootCmd.PersistentFlags().StringVar(&certFingerprint, "cert-fingerprint", "", "the fingerprint of the certificate to pin by hand; without one it is pinned on first contact")
 	rootCmd.PersistentFlags().BoolVar(&insecure, "insecure", false, "accept any certificate; the traffic is still encrypted, but the peer's certificate is not checked")
 }

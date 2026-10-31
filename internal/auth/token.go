@@ -53,6 +53,10 @@ type Token struct {
 // more explicit the source, the more it was meant for this run. A file that
 // does not exist is not an error — it means no secret is configured, which is
 // the ordinary case now that a device pairs by its own key.
+//
+// filePath is the file the caller named. There is no default: a token file
+// nobody remembers writing used to decide the model in silence, and a device
+// that pairs by key was then refused with no explanation. See LegacyFile.
 func Resolve(flagValue, filePath string) (Token, error) {
 	if flagValue != "" {
 		return Token{Value: flagValue, Source: SourceFlag}, nil
@@ -83,9 +87,17 @@ func Resolve(flagValue, filePath string) (Token, error) {
 	return Token{Value: secret, Source: SourceFile, Path: filePath}, nil
 }
 
-// DefaultFile returns the path of the default token file: the token file
-// inside the user's configuration directory.
-func DefaultFile() (string, error) {
+// LegacyFile returns the token file older versions read without being asked:
+// the one inside the user's configuration directory.
+//
+// Nothing reads it any more. A secret is used only when it is named — the
+// flag, the environment, or a --token-file — because a file nobody remembered
+// writing used to move the device into the shared-secret model, which refuses
+// a peer that pairs by its key, and the only symptom was a connection that
+// never completed. The path is still answered for, so a run can say that an
+// old file stopped applying and a screen can offer to delete it. It is never
+// opened.
+func LegacyFile() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("finding the configuration directory: %w", err)

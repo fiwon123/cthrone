@@ -2,10 +2,12 @@ package websockethandler
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/session"
@@ -23,6 +25,17 @@ type Server struct {
 	onSession func(session.Session)
 	done      chan struct{}
 	serveErr  error
+
+	// listener is kept so Stop can close the socket itself. The http server
+	// closes the listeners it serves, but only once Serve has registered them;
+	// holding the listener makes the port release independent of that timing,
+	// and it is the one thing a caller asked for when it said "stop".
+	listener net.Listener
+
+	// stop is what makes Stop idempotent: a second call — the GUI's Stop, then
+	// the window closing — is a no-op instead of a double close.
+	stop    sync.Once
+	stopErr error
 }
 
 // OpenServer starts serving the chat endpoint and returns immediately.
@@ -47,6 +60,10 @@ func OpenServer(port int, bindAddress, token string, certFile, keyFile string, o
 	if err != nil {
 		return nil, err
 	}
+
+	// The bound socket is remembered before the TLS wrapper hides it, so Stop
+	// can release the port even when Serve has not registered the listener yet.
+	s.listener = listener
 
 	if certFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
@@ -81,23 +98,53 @@ func (s *Server) Addr() string { return s.addr }
 func (s *Server) Hub() *session.Hub { return s.hub }
 
 // Wait blocks until the server stops, and reports why it stopped. A clean
-// Stop is not an error.
+// Stop is not an error — and neither is the accept that fails because Stop
+// closed the socket under it, which is what a stop *is*.
 func (s *Server) Wait() error {
+	if s.done == nil {
+		return nil
+	}
+
 	<-s.done
 
-	if s.serveErr == nil || s.serveErr == http.ErrServerClosed {
+	if s.serveErr == nil || errors.Is(s.serveErr, http.ErrServerClosed) || errors.Is(s.serveErr, net.ErrClosed) {
 		return nil
 	}
 
 	return s.serveErr
 }
 
-// Stop closes the listener and every connected session.
+// Stop closes the listener and every connected session, and does not return
+// before the port is closed. The caller can bind it again the moment it
+// returns.
+//
+// It is idempotent: the GUI's Stop and the window closing both call it, and a
+// second call must be a no-op rather than a second close. A zero Server — the
+// stub a test uses to avoid binding a port — is stopped without a panic.
 func (s *Server) Stop() error {
-	err := s.httpSrv.Close()
-	<-s.done
+	s.stop.Do(func() {
+		// The http server closes the listeners it serves and drops the
+		// connections; the listener is closed here as well, because a stop that
+		// arrived before Serve registered it would otherwise leave the socket
+		// open with nothing left to close it.
+		if s.httpSrv != nil {
+			if err := s.httpSrv.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.stopErr = err
+			}
+		}
 
-	return err
+		if s.listener != nil {
+			if err := s.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) && s.stopErr == nil {
+				s.stopErr = err
+			}
+		}
+
+		if s.done != nil {
+			<-s.done
+		}
+	})
+
+	return s.stopErr
 }
 
 // handle upgrades the request when the client is allowed in and hands the

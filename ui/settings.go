@@ -159,41 +159,40 @@ func resolveConfigDir(mobile bool, storageRoot string) string {
 // credentialText is the Setup tab's read row: which credential the next Host or
 // Connect will speak, and where it came from.
 //
-// It exists because a token file the user forgot about is invisible: the device
-// joins the shared-secret model, which refuses a peer that pairs by key, and
-// the only symptom is a connection that will not complete. Naming the source is
-// what turns that into something a person can act on — and the file case is
-// also what the "Stop using the shared secret" button acts on.
-//
 // It never carries the secret itself. A source is what explains the model; the
 // value is the one thing that must not sit on a screen.
-func credentialText(typed string, envSet bool, filePath string, fileHasSecret bool) string {
+//
+// legacyPath names the token file an older version read without being asked;
+// legacy is whether it is still there. That file decides nothing any more —
+// a secret is used only when it is typed here or set in the environment — so
+// the row says so plainly. A leftover that used to decide the model is exactly
+// the thing a user cannot otherwise find: the device joins the shared-secret
+// path, refuses a peer that pairs by key, and the only symptom is a connection
+// that never completes.
+func credentialText(typed string, envSet bool, legacyPath string, legacy bool) string {
 	switch {
 	case strings.TrimSpace(typed) != "":
 		return "Credential: the shared secret typed above — a device that pairs by its key is refused. Clear the field to go back to key pairing."
 	case envSet:
 		return "Credential: the shared secret in " + auth.EnvToken + " — a device that pairs by its key is refused. Unset it to go back to key pairing."
-	case fileHasSecret:
-		return "Credential: the shared secret in " + filePath + " — a device that pairs by its key is refused. It is not shown; delete the file to go back to key pairing."
+	case legacy:
+		return "Credential: this device's key, pinned by the other device on first contact. The token file " + legacyPath + " from an older version is no longer read — type its secret above to use it, or delete it."
 	default:
 		return "Credential: this device's key, pinned by the other device on first contact. Compare the two fingerprints the screens show."
 	}
 }
 
-// secretFileHasValue reports whether path holds a secret this app would read.
+// secretFileExists reports whether path holds a file at all.
 //
-// The read is the same one auth.Resolve will do a moment later, so the line in
-// the Setup tab cannot promise a model the transport then disagrees with: an
-// empty file is no secret at all, and a missing one is the default.
-func secretFileHasValue(path string) bool {
+// Its content is not read. Nothing decides the credential by a file any more,
+// so the line only has to say that a leftover is there, and reading a secret
+// to decide what to print is a read that buys nothing.
+func secretFileExists(path string) bool {
 	if path == "" {
 		return false
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
+	_, err := os.Stat(path)
 
-	return strings.TrimSpace(string(data)) != ""
+	return err == nil
 }

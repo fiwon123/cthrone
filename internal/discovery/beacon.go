@@ -33,6 +33,11 @@ type Announcer struct {
 	name string
 	port int
 	stop chan struct{}
+
+	// stopOnce makes Stop idempotent: a host that is stopped twice — the Stop
+	// button, then the window closing — must not close the channel twice and
+	// panic the caller's goroutine.
+	stopOnce sync.Once
 }
 
 func NewAnnouncer(name string, port int) *Announcer {
@@ -62,8 +67,9 @@ func (a *Announcer) Start(interval time.Duration) {
 	}()
 }
 
+// Stop ends the announcement. It is safe to call more than once.
 func (a *Announcer) Stop() {
-	close(a.stop)
+	a.stopOnce.Do(func() { close(a.stop) })
 }
 
 // Listener listens for beacons and reports discovered devices.

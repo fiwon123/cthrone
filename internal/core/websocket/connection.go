@@ -24,6 +24,10 @@ var connect = websockethandler.Connect
 // test does not have to own a tty.
 var runTerminal = chat.Run
 
+// runHost is the same loop for a host, reporting whether the user quit it. It
+// is a variable for the same reason: a test cannot press Ctrl-C on a tty.
+var runHost = chat.RunHost
+
 // Connect connects to a host and runs the terminal chat loop until the peer
 // disconnects or the user presses Ctrl-C.
 func Connect(args []string, app *app.Data, opts pairing.Options, tlsConf auth.TLS) error {

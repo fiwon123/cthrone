@@ -59,6 +59,10 @@ On nats connection only host receive message and only connect device send messag
 		// key-paired peer is refused with no explanation.
 		fmt.Println("Credential:", pairing.DescribeOptions(opts))
 
+		if notice := pairing.LegacyTokenFileNotice(opts); notice != "" {
+			fmt.Println(notice)
+		}
+
 		if natsFlag {
 			natscore.Connect(args, app, opts, natsURLFlag, tlsConf)
 
