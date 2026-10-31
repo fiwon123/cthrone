@@ -81,6 +81,15 @@ func NewCheckRow(text string, changed func(bool), selectable bool) *CheckRow {
 // on its own, which would leave the caption behind on screen.
 func (r *CheckRow) Checked() bool { return r.box.Checked }
 
+// CreateRenderer makes the row a widget the toolkit draws.
+//
+// The paint walk enters a *fyne.Container or a fyne.Widget, and a struct that
+// embeds a container is neither: without this method the row — box, caption and
+// all — would be skipped and never painted.
+func (r *CheckRow) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(r.Container)
+}
+
 // SetChecked ticks or clears the box.
 func (r *CheckRow) SetChecked(checked bool) { r.box.SetChecked(checked) }
 

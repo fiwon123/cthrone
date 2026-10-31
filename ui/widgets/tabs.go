@@ -84,6 +84,15 @@ func NewTabs(stacked bool, onCopied func(string), items ...*container.TabItem) *
 	return t
 }
 
+// CreateRenderer makes the tab bar a widget the toolkit draws.
+//
+// This is the same rule CopyButton follows, and here it decides the whole
+// window: the bar is handed to SetContent, and a bar the paint walk cannot
+// enter leaves the screen blank rather than merely plain.
+func (t *Tabs) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.Container)
+}
+
 // SelectIndex shows the tab at index, and marks its label as the selected one.
 //
 // An index outside the bar is ignored rather than clamped: a caller that asked
