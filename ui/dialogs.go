@@ -13,18 +13,26 @@ import (
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
-// selectableLabel is the label this app uses wherever the text is something a
-// user might need to copy — a message, an address, a fingerprint, an error.
+// label is the app's text helper: a message, an address, a fingerprint, an
+// error.
 //
 // A Fyne label is inert by default: it cannot be selected, so the only way to
-// move its text is to retype it. Selectable turns the same widget into
-// drag-selectable text with the platform's copy shortcut, which is what a bug
-// report needs and what a phone has no keyboard to substitute for.
+// move its text is to retype it. On a desktop Selectable turns the same widget
+// into drag-selectable text with the platform's copy shortcut, which is what a
+// bug report needs. On a touch screen the same drag has to reach the scroll
+// container underneath, or a pane cannot be scrolled by starting the gesture on
+// text, so selection is off there and copying goes through a tap on the row or
+// an explicit Copy button.
 //
 // It delegates so the one definition of "selectable" lives in ui/widgets,
 // beside the caption and form helpers that need the same behaviour.
-func selectableLabel(text string) *widget.Label {
-	return widgets.SelectableLabel(text)
+func (g *gui) label(text string) *widget.Label {
+	return widgets.Label(text, !g.mobile)
+}
+
+// heading is label for a tab's or a section's title.
+func (g *gui) heading(text string) *widget.Label {
+	return widgets.Heading(text, !g.mobile)
 }
 
 // fitDialogText is the size of a dialog's message box, kept inside the window.
@@ -43,7 +51,7 @@ func (g *gui) fitDialogText() fyne.Size {
 // the user wants is usually all of it — and because a phone's copy gesture
 // needs a long press the message does not advertise.
 func (g *gui) copyableBody(message string) fyne.CanvasObject {
-	scroll := container.NewVScroll(selectableLabel(message))
+	scroll := container.NewVScroll(g.label(message))
 	scroll.SetMinSize(g.fitDialogText())
 
 	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), nil)
