@@ -175,7 +175,12 @@ func TestAboutHeaderStacksNameAboveVersion(t *testing.T) {
 func checkRowCaption(t *testing.T, row *widgets.CheckRow) *widget.Label {
 	t.Helper()
 
-	for _, object := range row.Objects {
+	content, ok := test.WidgetRenderer(row).Objects()[0].(*fyne.Container)
+	if !ok {
+		t.Fatalf("check row content is %T, want the container it draws", test.WidgetRenderer(row).Objects()[0])
+	}
+
+	for _, object := range content.Objects {
 		if caption, ok := object.(*widget.Label); ok {
 			return caption
 		}
