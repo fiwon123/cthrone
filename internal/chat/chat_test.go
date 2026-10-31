@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,7 +106,7 @@ func TestSendSendsAWholeLine(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		send(s, input, in, out)
+		send(s, input, in, out, &atomic.Bool{})
 		close(done)
 	}()
 
@@ -136,7 +137,7 @@ func TestSendHandlesBackspace(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		send(s, input, in, out)
+		send(s, input, in, out, &atomic.Bool{})
 		close(done)
 	}()
 
@@ -162,7 +163,7 @@ func TestSendClosesTheSessionOnCtrlC(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		send(s, &line{}, in, out)
+		send(s, &line{}, in, out, &atomic.Bool{})
 		close(done)
 	}()
 
@@ -216,7 +217,7 @@ func TestSendKeepsTheLineWhenTheSessionRefuses(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		send(f, &line{}, in, out)
+		send(f, &line{}, in, out, &atomic.Bool{})
 		close(done)
 	}()
 
@@ -326,5 +327,47 @@ func TestPeerNoticeNamesBothFingerprintsOnFirstContact(t *testing.T) {
 	secret := peerNotice(e2e.Peer{Device: "bob"}, "")
 	if secret != "Encrypted with bob" {
 		t.Fatalf("a shared-secret peer's notice = %q", secret)
+	}
+}
+
+// Ctrl-C is the user ending the loop, and a host has to be able to tell that
+// apart from a peer that left: the first releases the listening port, the
+// second leaves the host waiting for the next device.
+func TestRunHostReportsAUserQuit(t *testing.T) {
+	in, w, out := pipeTerminal(t)
+	s := newFake("alice")
+
+	quit := make(chan bool, 1)
+	go func() { quit <- run(s, in, out) }()
+
+	fmt.Fprint(w, "\x03")
+
+	select {
+	case got := <-quit:
+		if !got {
+			t.Error("RunHost did not report the Ctrl-C that ended the loop")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return after ctrl-c")
+	}
+}
+
+// A peer that leaves is not the user quitting: the host keeps waiting.
+func TestRunHostDoesNotReportAPeerLeaving(t *testing.T) {
+	in, _, out := pipeTerminal(t)
+	s := newFake("alice")
+
+	quit := make(chan bool, 1)
+	go func() { quit <- run(s, in, out) }()
+
+	s.Close("peer said goodbye")
+
+	select {
+	case got := <-quit:
+		if got {
+			t.Error("a peer leaving was reported as the user quitting")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return after the session closed")
 	}
 }

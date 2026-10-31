@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
@@ -32,8 +33,17 @@ func Run(s session.Session) {
 	run(s, os.Stdin, os.Stdout)
 }
 
+// RunHost is Run for a host, and reports whether the user ended it by pressing
+// Ctrl-C. A host holds something a client does not — a listening port — and
+// "the user quit" and "the peer left" have to be told apart: the second one
+// leaves the host waiting for the next device, the first one means the command
+// is over and the port must go back to the machine.
+func RunHost(s session.Session) bool {
+	return run(s, os.Stdin, os.Stdout)
+}
+
 // run is Run with the terminal handed in, so a test needs no real tty.
-func run(s session.Session, in *os.File, out io.Writer) {
+func run(s session.Session, in *os.File, out io.Writer) bool {
 	// What is being typed, shared with the printer: a message that arrives
 	// must not swallow half a line, and two goroutines touch it.
 	input := &line{}
@@ -76,9 +86,13 @@ func run(s session.Session, in *os.File, out io.Writer) {
 	// time the sender wants to print; send blocks on the terminal and goes
 	// aside.
 	receive(s, input, out)
-	go send(s, input, in, out)
+
+	var quit atomic.Bool
+	go send(s, input, in, out, &quit)
 
 	<-done
+
+	return quit.Load()
 }
 
 // peerNotice is what the terminal says when a peer completes the handshake.
@@ -110,7 +124,7 @@ func receive(s session.Session, input *line, out io.Writer) {
 }
 
 // send reads raw-mode input and sends a line when Enter is pressed.
-func send(s session.Session, input *line, in *os.File, out io.Writer) {
+func send(s session.Session, input *line, in *os.File, out io.Writer, quit *atomic.Bool) {
 	if oldState, err := term.MakeRaw(int(in.Fd())); err == nil {
 		defer term.Restore(int(in.Fd()), oldState)
 	}
@@ -127,6 +141,7 @@ func send(s session.Session, input *line, in *os.File, out io.Writer) {
 		switch buf[0] {
 		case ctrlC:
 			fmt.Fprintf(out, "\r\nExiting...\n")
+			quit.Store(true)
 			s.Close("goodbye")
 
 			return

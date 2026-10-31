@@ -80,6 +80,13 @@ type gui struct {
 	insecureCheck    *widgets.CheckRow
 	natsCheck        *widgets.CheckRow
 
+	// hostBtn and connectBtn are kept so they can be disabled while this device
+	// is already hosting or connected. A second Host binds a port the first one
+	// is holding, and the failure reads as "hosting is broken" rather than
+	// "one at a time".
+	hostBtn    *widget.Button
+	connectBtn *widget.Button
+
 	// setup layout: the form is rebuilt whenever the mode changes, because a
 	// Fyne Form always renders a row for every item it holds.
 	moreOptions bool
@@ -143,6 +150,18 @@ type gui struct {
 	mu     sync.Mutex
 	sess   session.Session
 	server liveServer
+
+	// starting and stopping guard the handover of the transport. While either
+	// is set, Host and Connect are disabled: a start that is still binding and a
+	// stop that is still closing the listener both own the port, and a second
+	// press would either bind it twice or meet it before it was released.
+	starting bool
+	stopping bool
+
+	// startSeq identifies the Host/Connect attempt in flight. A Stop bumps it,
+	// so an attempt that opens a host after the user already stopped is closed
+	// instead of being installed as the live one.
+	startSeq int
 }
 
 // Run starts the Fyne GUI.
@@ -203,6 +222,14 @@ func run() (err error) {
 	// a worse answer than a report: the panic propagates to the recover above.
 	g.build()
 
+	// Closing the window is a stop. The desktop process exits anyway, but the
+	// phone can outlive its window: a listener left bound there makes the next
+	// Host fail with "address already in use".
+	w.SetCloseIntercept(func() {
+		g.shutdown()
+		w.Close()
+	})
+
 	go g.pruneLoop()
 
 	if mobile {
@@ -222,6 +249,10 @@ func run() (err error) {
 	}
 
 	w.ShowAndRun()
+
+	// The close intercept may not run on every platform — a phone that kills
+	// the window rather than closing it — so the same release happens here.
+	g.shutdown()
 
 	return nil
 }
@@ -406,10 +437,10 @@ func (g *gui) build() {
 	// single row, so the visible subset becomes a fresh form instead.
 	g.formHolder = container.NewStack()
 
-	actions := container.NewGridWithColumns(2,
-		widget.NewButtonWithIcon("Host", theme.MediaPlayIcon(), g.host),
-		widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect),
-	)
+	g.hostBtn = widget.NewButtonWithIcon("Host", theme.MediaPlayIcon(), g.host)
+	g.connectBtn = widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect)
+
+	actions := container.NewGridWithColumns(2, g.hostBtn, g.connectBtn)
 
 	g.hint = selectableLabel("")
 
@@ -602,6 +633,47 @@ func (g *gui) rebuildSetupForm() {
 
 // --- actions ----------------------------------------------------------
 
+// beginStart reserves the transport for a Host or Connect attempt. It reports
+// the sequence number that identifies the attempt, and false when one is
+// already running or a host or a session already holds it. Both buttons are
+// disabled while it is reserved, so a second press cannot bind the same port
+// twice — the failure a user reads as "hosting is broken".
+func (g *gui) beginStart() (int, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.starting || g.stopping || g.sess != nil || g.server != nil {
+		return 0, false
+	}
+
+	g.startSeq++
+	g.starting = true
+
+	return g.startSeq, true
+}
+
+// finishStart ends attempt seq and, when it is still the current one, runs
+// install under the same lock — so the state it publishes cannot be seen
+// half-made, and a press that arrives in between is refused rather than
+// starting a second transport. false means Stop arrived first: whatever the
+// attempt opened must be closed instead of installed.
+func (g *gui) finishStart(seq int, install func()) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.starting = false
+
+	if g.startSeq != seq {
+		return false
+	}
+
+	if install != nil {
+		install()
+	}
+
+	return true
+}
+
 // connect joins a host (websocket) or a broker (NATS).
 func (g *gui) connect() {
 	host := strings.TrimSpace(g.hostEntry.Text)
@@ -613,6 +685,11 @@ func (g *gui) connect() {
 		return
 	}
 
+	seq, ok := g.beginStart()
+	if !ok {
+		return
+	}
+
 	data := g.data()
 	tlsConf := g.tls()
 	opts := g.pairingOptions()
@@ -621,6 +698,7 @@ func (g *gui) connect() {
 
 	g.setStatus("Connecting…")
 	g.tabs.SelectIndex(0)
+	g.updateButtons()
 
 	go func() {
 		var (
@@ -634,9 +712,21 @@ func (g *gui) connect() {
 			sess, err = websocketcore.Dial([]string{host}, data, opts, tlsConf)
 		}
 
+		if !g.finishStart(seq, func() { g.sess = sess }) {
+			// Stop arrived while the dial was in flight: a session nobody asked
+			// for is closed rather than attached, and its failure is not the
+			// user's to read — they stopped before it arrived.
+			if sess != nil {
+				sess.Close("cancelled")
+			}
+
+			return
+		}
+
 		if err != nil {
 			g.setStatus("Connection failed")
 			g.showError(err)
+			fyne.Do(g.updateButtons)
 
 			return
 		}
@@ -669,6 +759,11 @@ func (g *gui) noteFirstContact(sess session.Session) {
 
 // host starts a host (websocket) or joins the broker as a peer (NATS).
 func (g *gui) host() {
+	seq, ok := g.beginStart()
+	if !ok {
+		return
+	}
+
 	data := g.data()
 	tlsConf := g.tls()
 	opts := g.pairingOptions()
@@ -692,13 +787,25 @@ func (g *gui) host() {
 	}
 
 	g.setStatus("Starting…")
+	g.updateButtons()
 
 	go func() {
 		if useNATS {
 			sess, err := natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 			if err != nil {
+				if !g.finishStart(seq, nil) {
+					return
+				}
+
 				g.setStatus("Host failed")
 				g.showError(err)
+				fyne.Do(g.updateButtons)
+
+				return
+			}
+
+			if !g.finishStart(seq, func() { g.sess = sess }) {
+				sess.Close("cancelled")
 
 				return
 			}
@@ -715,15 +822,27 @@ func (g *gui) host() {
 			g.attach(sess)
 		}, g.confirmFirstContact)
 		if err != nil {
+			if !g.finishStart(seq, nil) {
+				return
+			}
+
 			g.setStatus("Host failed")
 			g.showError(err)
+			fyne.Do(g.updateButtons)
 
 			return
 		}
 
-		g.mu.Lock()
-		g.server = handle
-		g.mu.Unlock()
+		// The listener is bound already. A Stop that arrived while it was
+		// binding released the port it was told about, not this one, so this
+		// server closes itself: otherwise the app would be running a host with
+		// nobody holding the button that stops it.
+		if !g.finishStart(seq, func() { g.server = handle }) {
+			_ = handle.Stop()
+			fyne.Do(g.updateButtons)
+
+			return
+		}
 
 		fyne.Do(g.updateButtons)
 		g.showThisDevice(own)
@@ -828,23 +947,59 @@ func (g *gui) stop() {
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server = nil, nil
+
+	// A Start that is still in flight is cancelled: its server closes itself
+	// when it opens instead of becoming the live one. Until this stop has
+	// released the listener, neither Host nor Connect may run.
+	g.startSeq++
+	g.stopping = true
 	g.mu.Unlock()
 
 	g.finishReceive()
-
-	g.updateButtons()
 	g.hideThisDevice()
-	g.setStatus("Disconnected")
+	g.setStatus("Stopping…")
+	g.updateButtons()
 
 	go func() {
 		if sess != nil {
 			sess.Close("closed from the app")
 		}
 
+		// Stop does not return before the listening port is closed; the buttons
+		// come back only after it, so a Stop → Host cannot meet the old socket.
 		if server != nil {
 			_ = server.Stop()
 		}
+
+		g.mu.Lock()
+		g.stopping = false
+		g.mu.Unlock()
+
+		fyne.Do(func() {
+			g.updateButtons()
+			g.setStatus("Disconnected")
+		})
 	}()
+}
+
+// shutdown releases the transport without touching the widgets, for the window
+// closing: the port has to go back to the machine before the process does, and
+// on the phone the process can outlive the window. It is synchronous because
+// there is no event loop left to come back to.
+func (g *gui) shutdown() {
+	g.mu.Lock()
+	sess, server := g.sess, g.server
+	g.sess, g.server = nil, nil
+	g.startSeq++
+	g.mu.Unlock()
+
+	if sess != nil {
+		sess.Close("the app is closing")
+	}
+
+	if server != nil {
+		_ = server.Stop()
+	}
 }
 
 // send publishes the typed text to the live session.
@@ -1016,11 +1171,14 @@ func (g *gui) attach(sess session.Session) {
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
-// session; Stop also makes sense for a host with nobody connected yet.
+// session; Stop also makes sense for a host with nobody connected yet. Host and
+// Connect change what this device is, and there can be only one of them — so
+// they are off while a host, a session, or a start/stop still owns the port.
 func (g *gui) updateButtons() {
 	g.mu.Lock()
 	hasSession := g.sess != nil
 	hasServer := g.server != nil
+	busy := g.starting || g.stopping
 	g.mu.Unlock()
 
 	if hasSession {
@@ -1035,6 +1193,18 @@ func (g *gui) updateButtons() {
 		g.stopBtn.Enable()
 	} else {
 		g.stopBtn.Disable()
+	}
+
+	if g.hostBtn == nil || g.connectBtn == nil {
+		return
+	}
+
+	if busy || hasSession || hasServer {
+		g.hostBtn.Disable()
+		g.connectBtn.Disable()
+	} else {
+		g.hostBtn.Enable()
+		g.connectBtn.Enable()
 	}
 }
 

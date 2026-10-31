@@ -78,17 +78,46 @@ type Confirm func(e2e.FirstContact) bool
 // The bind address is empty by default, which means every interface: the tool
 // is a chat between two devices on the same network, and a host that only
 // listens on the loopback cannot be reached by the other device.
+//
+// Ctrl-C on the host's own terminal ends the host — the listener goes with it,
+// so the port is free the moment the command returns. A peer that leaves does
+// not: the host keeps waiting for the next device, which is what hosting is.
 func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS, confirm ...Confirm) error {
-	handle, err := OpenServer(app, opts, tlsConf, func(s session.Session) {
-		go runTerminal(s)
+	var (
+		handle *HostHandle
+		ready  = make(chan struct{})
+	)
+
+	h, err := OpenServer(app, opts, tlsConf, func(s session.Session) {
+		go func() {
+			// The handle is only returned after the listener is bound, and a
+			// client can connect in the meantime, so the stop waits for the
+			// close below — which is what makes the assignment visible.
+			<-ready
+
+			if runHost(s) {
+				_ = handle.Stop()
+			}
+		}()
 	}, confirm...)
 	if err != nil {
 		return err
 	}
 
+	handle = h
+	close(ready)
+
 	log.Println("WebSocket server listening on", handle.Addr(), "-", describeBind(app.Host))
 
-	return handle.Wait()
+	err = handle.Wait()
+
+	// Stopping here is what ends the announcement: a host that has returned
+	// must stop broadcasting its port, or the other devices keep listing a
+	// device that no longer answers. Stop is idempotent, so the path that
+	// stopped itself above pays nothing for it.
+	_ = handle.Stop()
+
+	return err
 }
 
 // OpenServer starts a host and returns a handle for a caller that is not the

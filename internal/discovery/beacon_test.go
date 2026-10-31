@@ -76,3 +76,13 @@ func TestListenerOnFoundReportsEveryHearing(t *testing.T) {
 		t.Fatalf("onFound called %d times, want one per hearing (2)", got)
 	}
 }
+
+// A host is stopped twice when the Stop button and the window closing both
+// fire. The second stop is a no-op; closing the channel twice would panic the
+// goroutine that runs it.
+func TestAnnouncerStopIsIdempotent(t *testing.T) {
+	a := NewAnnouncer("laptop", 8080)
+
+	a.Stop()
+	a.Stop()
+}
