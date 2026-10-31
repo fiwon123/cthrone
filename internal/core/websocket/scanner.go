@@ -79,7 +79,6 @@ func Scan(app *app.Data) []string {
 				mu.Lock()
 				found = append(found, ip)
 				mu.Unlock()
-				fmt.Println("Found chat server at:", ip)
 			}
 		}(ip)
 	}

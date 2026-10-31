@@ -136,6 +136,7 @@ func (s *connSession) readLoop() {
 
 		s.NotifyMessage(session.Message{
 			From:    s.RemoteAddr(),
+			Addr:    s.RemoteAddr(),
 			Payload: payload,
 			Time:    time.Now(),
 		})

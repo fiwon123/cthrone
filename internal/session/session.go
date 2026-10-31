@@ -9,7 +9,17 @@ import (
 
 // Message represents a chat message exchanged through a session.
 type Message struct {
-	From    string
+	// From is who sent it: the device name the handshake authenticated where
+	// the session has one, and the transport's own sender string otherwise.
+	From string
+
+	// Addr is where the frame came from at the transport — the peer's address
+	// on a websocket. It is empty when the transport has no per-peer address: a
+	// NATS subject is the same for every peer, so it tells one sender from
+	// another no better than nothing at all. It sits beside From rather than
+	// inside it because From is a name, and the address is what distinguishes
+	// two devices that happen to carry the same name.
+	Addr    string
 	Payload []byte
 	Time    time.Time
 }

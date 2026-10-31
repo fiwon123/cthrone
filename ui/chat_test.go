@@ -31,6 +31,32 @@ func TestChatMessageLine(t *testing.T) {
 	}
 }
 
+// TestSenderLabel checks how an arriving message is attributed: the name the
+// handshake authenticated, with the address beside it when the transport has
+// one — the same rule the terminal prints by.
+func TestSenderLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		from string
+		addr string
+		want string
+	}{
+		{"a bus has no address", "laptop", "", "laptop"},
+		{"name and address", "laptop", "192.168.1.20:51234", "laptop (192.168.1.20:51234)"},
+		{"an address that is the name", "laptop", "laptop", "laptop"},
+		{"an unnamed peer with an address", "", "192.168.1.20:51234", "peer (192.168.1.20:51234)"},
+		{"nothing at all", "", "", "peer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := senderLabel(tt.from, tt.addr); got != tt.want {
+				t.Errorf("senderLabel(%q, %q) = %q, want %q", tt.from, tt.addr, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestTranscript checks the whole-log copy: order kept, one line per message,
 // and nothing for an empty log.
 func TestTranscript(t *testing.T) {

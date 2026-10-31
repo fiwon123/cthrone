@@ -497,7 +497,7 @@ func (g *gui) build() {
 
 			beacon := g.beacons[id]
 			if lbl, ok := obj.(*widget.Label); ok {
-				lbl.SetText(fmt.Sprintf("%s — %s:%d", beacon.Name, beacon.Addr, beacon.Port))
+				lbl.SetText(deviceLabel(beacon.Beacon))
 			}
 		},
 	)
@@ -1108,7 +1108,7 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 		g.portEntry.SetText(strconv.Itoa(beacon.Port))
 	}
 
-	g.setStatus("Selected " + beacon.Name + " (" + beacon.Addr + ")")
+	g.setStatus("Selected " + deviceLabel(beacon.Beacon))
 	g.tabs.SelectIndex(1)
 	g.beaconList.UnselectAll()
 }
@@ -1167,16 +1167,13 @@ func (g *gui) attach(sess session.Session) {
 	sess.OnMessage(func(m session.Message) {
 		peer.learn(m.From)
 
-		from := m.From
-		if from == "" {
-			// An unnamed peer is still a peer: without this it would render as
-			// "You", which is the one sender it is not.
-			from = "peer"
-		}
-
+		// The sender string is the authenticated device name, and the address
+		// is carried beside it: the transcript shows both, so a name shared by
+		// two machines still says which one is talking.
+		//
 		// A payload is a chat message or a piece of a file: the envelope says
 		// which, and text that predates it still arrives as text.
-		g.receiveFrame(from, m.Payload)
+		g.receiveFrame(senderLabel(m.From, m.Addr), m.Payload)
 	})
 
 	sess.OnClose(func(reason string) {

@@ -108,9 +108,9 @@ func TestHandshakeCarriesMessages(t *testing.T) {
 func TestTheAuthenticatedPeerNamesTheSender(t *testing.T) {
 	p := newPair(t, secret, secret, Bus)
 
-	from := make(chan string, 1)
+	from := make(chan session.Message, 1)
 
-	p.a.OnMessage(func(m session.Message) { from <- m.From })
+	p.a.OnMessage(func(m session.Message) { from <- m })
 
 	if err := p.b.Send([]byte("hello")); err != nil {
 		t.Fatalf("bob sends: %v", err)
@@ -118,8 +118,14 @@ func TestTheAuthenticatedPeerNamesTheSender(t *testing.T) {
 
 	select {
 	case got := <-from:
-		if got != "bob" {
-			t.Errorf("sender is %q, want bob", got)
+		if got.From != "bob" {
+			t.Errorf("sender is %q, want bob", got.From)
+		}
+
+		// The name replaces the address in From, so the address is carried
+		// beside it: it is what says which machine the name belongs to.
+		if got.Addr != p.sb.RemoteAddr() {
+			t.Errorf("address is %q, want %q", got.Addr, p.sb.RemoteAddr())
 		}
 
 	case <-time.After(2 * time.Second):

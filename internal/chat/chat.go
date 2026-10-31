@@ -174,8 +174,29 @@ func peerNotice(p e2e.Peer, own string) string {
 // the reading; this only renders.
 func receive(s session.Session, input *line, out io.Writer) {
 	s.OnMessage(func(m session.Message) {
-		notice(out, input, m.From+": "+string(m.Payload))
+		notice(out, input, senderLabel(m)+": "+string(m.Payload))
 	})
+}
+
+// senderLabel is how a message is attributed: the device name, with the
+// address it came from when the transport knows one.
+//
+// A websocket session has both — the name is what the handshake authenticated,
+// the address is which machine on the network it is — and a name alone does not
+// tell two devices with the same hostname apart. On a bus there is no per-peer
+// address, so the name stands alone; an unnamed peer is still labelled, because
+// the one thing it must never render as is "You".
+func senderLabel(m session.Message) string {
+	from := m.From
+	if from == "" {
+		from = "peer"
+	}
+
+	if m.Addr == "" || m.Addr == from {
+		return from
+	}
+
+	return from + " (" + m.Addr + ")"
 }
 
 // send reads raw-mode input and sends a line when Enter is pressed.

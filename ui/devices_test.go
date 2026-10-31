@@ -103,8 +103,67 @@ func TestAddScannedListsNewAddresses(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("len = %d, want 2 — a rescan must not duplicate", len(list))
 	}
-	if list[0].Port != 8080 || list[0].Name != "192.168.1.20" {
+	if list[0].Port != 8080 || list[0].Addr != "192.168.1.20" {
 		t.Fatalf("row = %+v, want the scanned address on the scanned port", list[0])
+	}
+	if list[0].Name != "" {
+		t.Fatalf("name = %q, want no name: a scan finds an address, not a device name", list[0].Name)
+	}
+}
+
+// A scan must not erase what a beacon already told us. The row used to end up
+// with the address in the name field, so the list printed the address twice
+// and the device lost the name it had.
+func TestScanKeepsTheNameABeaconAnnounced(t *testing.T) {
+	list := upsertDevice(nil, discovery.Beacon{Name: "laptop", Addr: "192.168.1.20", Port: 8080, Protocol: 1}, deviceTime)
+	list = addScanned(list, []string{"192.168.1.20"}, 8080, deviceTime.Add(time.Second))
+
+	if len(list) != 1 {
+		t.Fatalf("len = %d, want 1", len(list))
+	}
+	if list[0].Name != "laptop" {
+		t.Fatalf("name = %q, want %q: a scan knows no name and must not overwrite one", list[0].Name, "laptop")
+	}
+	if list[0].Protocol != 1 {
+		t.Fatalf("protocol = %d, want the announced one kept", list[0].Protocol)
+	}
+	if !list[0].seen.Equal(deviceTime.Add(time.Second)) {
+		t.Fatal("the scan did not refresh when the device was last seen")
+	}
+}
+
+// The other order: the scan finds the host first, and the announcement that
+// follows names it.
+func TestABeaconNamesAScannedRow(t *testing.T) {
+	list := addScanned(nil, []string{"192.168.1.21"}, 8080, deviceTime)
+	list = upsertDevice(list, discovery.Beacon{Name: "phone", Addr: "192.168.1.21", Port: 8080}, deviceTime.Add(time.Second))
+
+	if len(list) != 1 {
+		t.Fatalf("len = %d, want 1", len(list))
+	}
+	if list[0].Name != "phone" {
+		t.Fatalf("name = %q, want the announced name", list[0].Name)
+	}
+}
+
+// The row shows the name beside the address, and an unnamed device shows its
+// address once — never twice.
+func TestDeviceLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		beacon discovery.Beacon
+		want   string
+	}{
+		{"named", discovery.Beacon{Name: "laptop", Addr: "192.168.1.20", Port: 8080}, "laptop — 192.168.1.20:8080"},
+		{"unnamed", discovery.Beacon{Addr: "192.168.1.21", Port: 8080}, "192.168.1.21:8080"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := deviceLabel(tt.beacon); got != tt.want {
+				t.Errorf("deviceLabel(%+v) = %q, want %q", tt.beacon, got, tt.want)
+			}
+		})
 	}
 }
 
