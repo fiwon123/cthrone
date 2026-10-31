@@ -142,8 +142,9 @@ files]` line and `make check` has no gap left to report.
   `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic), `ui/widgets` (the selectable-text helpers), and the
-  gui-tagged widget tree (headless — see below).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
+  copyable button and tab bar), and the gui-tagged widget tree (headless — see
+  below).
 
 So a green `make check` proves:
 

@@ -465,7 +465,7 @@ adb install cthrone_<tag>_android_gui_arm64.apk
 # or copy the file to the device and tap it
 ```
 
-The app has three tabs:
+The app has four tabs:
 
 - **Chat** — the conversation, a send field and a stop button. Tap a message to
   copy it, or drag to select a part of it; **Copy all** copies the whole
@@ -481,6 +481,12 @@ The app has three tabs:
   is never listed in its own list — its address is shown read-only under
   **Setup** instead, as *This device — &lt;address&gt;:&lt;port&gt;*, limited to
   the addresses a peer on that network can reach.
+- **About** — the build version, the repository link and a **Check for
+  updates** button that asks, and only reports, whether a newer release exists.
+
+Any button or tab label can be copied with a **long press**; on a desktop the
+same gesture is a right-click. A short **Copied** hint confirms it, and a
+normal tap still does what the button is for.
 
 A phone that hosts shows **its own fingerprint** in a dialog. Nothing is copied
 to the other device: connect to the phone and compare the fingerprints each
