@@ -23,9 +23,11 @@ status is evidence; "tests pass" is a claim.
 
 State the gate as it is, not more:
 
-- `make check` covers gofmt, vet, build, and the packages that HAVE tests.
+- `make check` covers gofmt, vet, build, the packages that HAVE tests, and the
+  gui-tagged widget tree headless (`-tags "gui ci"`, Fyne's software driver).
 - A package printed as `[no test files]` was NOT exercised — say so.
-- The GUI (`-tags gui`) does not build without GTK3/X11 here; only CI proves it.
+- The headless test asserts widget state, not pixels; a native link (CGO,
+  GTK3/X11) and a rendered frame still need CI or a machine with the toolkit.
 - Workflows are not covered by CI. A `release.yml` change is unverified until a
   run executes the job that exercises it.
 - A skipped job, a run that never happened, or an empty test target is

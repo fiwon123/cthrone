@@ -162,7 +162,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`). `v0.6.0` is the published release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`). `v0.8.1` is the published release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when one is
@@ -181,14 +181,18 @@ docker-compose.yml   the dev sandbox and a local NATS server
   layers protect the wire; on NATS the end-to-end layer protects the payload
   from the broker. The model is issue #125, superseding the "the secret is the
   identity" rule of #11/#109; the transport default is issue #124.
+- **The GUI widget tree is executed, not just compiled**: `make check` and the
+  `CI (Go)` job run `CGO_ENABLED=0 go test -tags "gui ci" ./ui/...`, which
+  swaps Fyne's GL driver for the software one, so a transfer progress row and
+  an inline decodable image are asserted headless. A native rendered frame and
+  the APK on a device are still unverified (#155).
 - **Open**: see Backlog.
 
 ## Backlog
 
-1. Publish the `v0.7.0` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
-2. Delete the leftover `feature/*` branches — the branch gate rejects their names.
-3. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
-4. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
+1. Publish the `v0.8.2` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
+2. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
+3. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
 
 ## Notes
 

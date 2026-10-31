@@ -54,6 +54,12 @@ GUI_WINDOWS_ZIP := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_windows_gui_amd64.zip
 GUI_DARWIN_TAR := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_darwin_gui_arm64.tar.gz
 GUI_ANDROID_APK := $(GUI_BUILD)/$(APP_NAME)_$(VERSION)_android_gui_arm64.apk
 
+# The gui-tagged widget tree is tested headless, which is the one GUI task that
+# needs none of those headers: Fyne's `ci` tag swaps the GL driver for the
+# software one, so this runs on any machine with Go. CI runs the same command,
+# so a green `make check` and a green CI step mean the same thing.
+GUI_TEST := CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...
+
 # The fyne CLI that packages the APK. Pinned: the packager shapes the Android
 # manifest and the signature, so an unpinned upgrade can change the artifact.
 FYNE_CLI_VERSION := v1.26.1
@@ -309,6 +315,10 @@ release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can pr
 # gofmt, vet, test, build — in that order, because a formatting failure hides
 # everything after it.
 #
+# The test stage runs twice: the plain tree, then the gui-tagged widget tree
+# headless (`GUI_TEST`). The second run is what proves a transfer row and an
+# inline image, not just that the GUI compiles.
+#
 # Two properties this target deliberately has:
 #
 #   - A missing toolchain FAILS the target. It does not skip. A gate that
@@ -335,6 +345,7 @@ check: ## gofmt, vet, test, build — the local verification gate
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi; \
 	go vet ./...; \
 	go test ./...; \
+	$(GUI_TEST); \
 	go build ./...; \
 	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$' || true)"; \
 	if [ -n "$$notested" ]; then \
@@ -342,6 +353,9 @@ check: ## gofmt, vet, test, build — the local verification gate
 		echo "NOTE: these packages have no test files — this run does not cover them:"; \
 		echo "$$notested" | sed 's/^/  /'; \
 	fi
+
+test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
+	$(GUI_TEST)
 
 # ---------------------------------------------------------------------------
 # Dev sandbox

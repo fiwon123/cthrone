@@ -9,6 +9,8 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // selectableLabel is the label this app uses wherever the text is something a
@@ -18,12 +20,11 @@ import (
 // move its text is to retype it. Selectable turns the same widget into
 // drag-selectable text with the platform's copy shortcut, which is what a bug
 // report needs and what a phone has no keyboard to substitute for.
+//
+// It delegates so the one definition of "selectable" lives in ui/widgets,
+// beside the caption and form helpers that need the same behaviour.
 func selectableLabel(text string) *widget.Label {
-	label := widget.NewLabel(text)
-	label.Wrapping = fyne.TextWrapWord
-	label.Selectable = true
-
-	return label
+	return widgets.SelectableLabel(text)
 }
 
 // fitDialogText is the size of a dialog's message box, kept inside the window.

@@ -131,31 +131,37 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 26 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 27 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (26 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (27 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
   `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`,
   `internal/core/nats`, `internal/core/websocket` (the scanner included),
   `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic; the Fyne widgets are still unverified).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers), and the
+  gui-tagged widget tree (headless — see below).
 
 So a green `make check` proves:
 
 - the code is `gofmt`-clean,
 - `go vet` found nothing,
 - the code compiles,
-- every package's tests passed.
+- every package's tests passed,
+- the gui-tagged widget tree's tests passed under Fyne's software driver.
 
 **A test file is not depth.** The newest ones are small — `cmd/assets`,
-`cmd/ui`, `internal/data/app` and `mobile` have one test function each — and
-the Fyne widgets are still only type-checked with `go build -tags "gui ci"
-./ui`, which `make check` does not run. Report what executed, not just that the
-package list is complete.
+`cmd/ui`, `internal/data/app` and `mobile` have one test function each. The
+gui-tagged widget tree is now **executed**, not just type-checked:
+`make check` and the `CI (Go)` job run
+`CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...`, which swaps
+Fyne's GL driver for the software one (`fyne.io/fyne/v2/app/app_software.go`)
+and needs no GTK/X11/GL. What that still does not prove is a rendered frame
+under the native driver, or the APK on a device (#155). Report what executed,
+not just that the package list is complete.
 
 `make check` prints the list of packages with no test file after the run, so a
 green run with no such list means every package was exercised.
@@ -398,23 +404,12 @@ main          ← release merges (CI runs here — dev→main PRs only)
 - Release: `dev` → `main` (a pull request — CI runs there)
 - Hotfixes: `fix/<issue>-<slug>` → merge to `dev`, cherry-pick to `main` if urgent
 
-### The legacy `feature/*` branches
+### The legacy `feature/*` branches (deleted)
 
-The repository still carries branches named `feature/<number>-<slug>` from
-before the convention changed. The branch gate rejects those names, so a pull
-request opened from one of them fails.
-
-None of them needs renaming — they are leftovers, not work in progress:
-
-| Branch | State |
-|---|---|
-| `feature/2-implement-nats` | already merged (as a squash) |
-| `feature/4-implement-security-on-websocket` | already merged, and identical to `dev` — the security work was never done |
-| `feature/5-implement-chat-same-terminal-websocket` | already merged (as a squash) |
-| `feature/1-implement-bluetooth-connection` | **abandoned** — the zeroconf dependency was removed on purpose |
-
-Deleting them is a separate decision and is not part of any pull request.
-Until they are gone, do not open a pull request from one.
+Branches named `feature/<number>-<slug>` predate the convention above. The
+branch gate still rejects that name, so a pull request opened from one fails.
+All of them have been deleted — they were merged (as squashes) or abandoned —
+and the remote carries only `dev` and `main`. Do not recreate one.
 
 ### Branch gate
 
@@ -444,8 +439,9 @@ a human who wants a differently named branch still has the convention above.
 
 A dependency pull request into `dev` gets the gate and **nothing else** — CI
 runs on release pull requests only. Verification of a bump is therefore the
-merger's local `make check`; a `gui`-tagged dependency (Fyne) cannot be built in
-this environment at all, so its PR body must say the change is unverified.
+merger's local `make check`; a `gui`-tagged dependency (Fyne) can be tested
+headless (`-tags "gui ci"`) but cannot be linked natively in this environment,
+so its PR body must say what was and was not verified.
 
 ### Repository settings (configure by hand)
 
