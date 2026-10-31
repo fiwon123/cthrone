@@ -166,7 +166,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`). `v0.8.1` is the published release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), and buttons and tab labels that copy on a long press. `v0.8.1` is the published release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when the user
@@ -188,9 +188,10 @@ docker-compose.yml   the dev sandbox and a local NATS server
   identity" rule of #11/#109; the transport default is issue #124.
 - **The GUI widget tree is executed, not just compiled**: `make check` and the
   `CI (Go)` job run `CGO_ENABLED=0 go test -tags "gui ci" ./ui/...`, which
-  swaps Fyne's GL driver for the software one, so a transfer progress row and
-  an inline decodable image are asserted headless. A native rendered frame and
-  the APK on a device are still unverified (#155).
+  swaps Fyne's GL driver for the software one, so a transfer progress row, an
+  inline decodable image, and a long press that copies a button or tab label
+  are asserted headless. A native rendered frame and the APK on a device are
+  still unverified (#155).
 - **Open**: see Backlog.
 
 ## Backlog

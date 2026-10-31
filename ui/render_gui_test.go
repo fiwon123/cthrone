@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // These tests drive the real widget tree with Fyne's headless test driver.
@@ -47,13 +48,14 @@ func newTestGUI(t *testing.T) *gui {
 	win := app.NewWindow("cthrone")
 	g := &gui{app: app, win: win}
 	g.build()
+	t.Cleanup(g.stopCopyHint)
 
 	return g
 }
 
 // chatRowObjects pulls a transcript row apart into its three parts: the
 // caption, the inline picture, and the Save action.
-func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas.Image, *widget.Button) {
+func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas.Image, *widgets.CopyButton) {
 	t.Helper()
 
 	box, ok := row.(*fyne.Container)
@@ -75,9 +77,9 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas
 		t.Fatalf("row[1] is %T, want *canvas.Image", box.Objects[1])
 	}
 
-	save, ok := box.Objects[2].(*widget.Button)
+	save, ok := box.Objects[2].(*widgets.CopyButton)
 	if !ok {
-		t.Fatalf("row[2] is %T, want *widget.Button", box.Objects[2])
+		t.Fatalf("row[2] is %T, want *widgets.CopyButton", box.Objects[2])
 	}
 
 	return label, pic, save

@@ -54,14 +54,14 @@ func (g *gui) copyableBody(message string) fyne.CanvasObject {
 	scroll := container.NewVScroll(g.label(message))
 	scroll.SetMinSize(g.fitDialogText())
 
-	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), nil)
-	copyBtn.OnTapped = func() {
+	copyBtn := widgets.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), nil, g.copyLabel)
+	copyBtn.SetOnTapped(func() {
 		if g.app != nil {
 			g.app.Clipboard().SetContent(message)
 		}
 
 		copyBtn.SetText("Copied")
-	}
+	})
 
 	return container.NewBorder(nil, container.NewHBox(layout.NewSpacer(), copyBtn), nil, nil, scroll)
 }
