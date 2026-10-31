@@ -75,7 +75,7 @@ decide which, and nothing falls back to plaintext.
 | Credential | When it is used | What pairs the two devices |
 |---|---|---|
 | **device key** | the default — no secret is configured | nothing is copied: both screens show a **six-digit code**, the host accepts it, and each device pins the other's key |
-| **shared secret** | `--token`, `CTHRONE_TOKEN` or a token file has a value | the secret itself — every device holding it is the same identity, which is how a v0.6.0 peer still connects |
+| **shared secret** | `--token`, `CTHRONE_TOKEN`, or a file named with `--token-file` | the secret itself — every device holding it is the same identity, which is how a v0.6.0 peer still connects |
 
 ### Pairing by device key (the default)
 
@@ -168,14 +168,20 @@ It is read from the first of these that has a value:
 |---|---|
 | `--token` | the flag — **visible in the process list** to every other process on the machine, so it is for a quick manual run, not for daily use |
 | `CTHRONE_TOKEN` | the environment — the one to use in a container or a script |
-| the token file | `--token-file <path>`, or `~/.config/cthrone/token` by default |
+| the token file | `--token-file <path>` — **no file is read unless it is named here** |
 
 `cthrone host` **no longer generates** a secret: a generated file would put
 every later run on this machine into this mode, and a fresh device pairing by
 key could then never join it. To use the secret path, supply a value of at
-least 16 bytes yourself, or point at a token file copied from a v0.6.0 device.
-A device that still has `~/.config/cthrone/token` from that version keeps using
-it — and keeps speaking the version-1 handshake — until the file is removed.
+least 16 bytes yourself, or point at a token file copied from a v0.6.0 device
+with `--token-file`.
+
+A `~/.config/cthrone/token` left by v0.6.0 is **not read any more**: reading it
+without being asked is what made an upgraded device ask a peer for a secret it
+never chose. Both `cthrone host` and `cthrone connect` print a note naming that
+file, `cthrone ui` says the same on its Setup tab and offers to delete it, and
+`--token-file ~/.config/cthrone/token` puts it back in charge if that is what
+you want. Nothing is deleted for you — the secret is yours.
 
 With a secret configured the websocket client presents it in a header, and one
 that does not is refused with a `401` before any session starts. It does two
@@ -311,8 +317,12 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    same one:
 
    ```bash
-   CTHRONE_TOKEN="$(cat ~/.config/cthrone/token)" cthrone connect 192.168.0.42
+   # a token file kept from v0.6.0 is read only where you point at it
+   cthrone connect 192.168.0.42 --token-file ~/.config/cthrone/token
    ```
+
+   and on the host `cthrone host --token-file ~/.config/cthrone/token`. The
+   environment works the same way: `CTHRONE_TOKEN="$(cat <file>)"`.
 
    The connection is already encrypted (`wss://`), and the host's certificate
    was pinned on first contact, so there is nothing to copy. Only a v0.6.0
@@ -544,7 +554,7 @@ What the Android CLI does and does not give you:
 | `--nats` | use the NATS transport instead of the websocket one |
 | `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`); a `tls://` URL asks for an encrypted connection |
 | `--token` | a shared secret to use instead of pairing by device key — **visible in the process list**, so prefer the environment or the file |
-| `--token-file` | the file the shared secret is read from (default `~/.config/cthrone/token`) |
+| `--token-file` | the file the shared secret is read from — no file is read unless it is named here |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
 | `--name` | device name shown to the peer in an encrypted session; the host also announces it on the network |
 | `--no-tls` | serve and dial plaintext `ws://` instead of the default `wss://`; the payload stays sealed end to end |
@@ -732,15 +742,16 @@ An address that already carries a port is used as it is:
 
 - **the two devices speak different versions** — one side has a shared secret
   and the other is pairing by device key, and the handshake version gates the
-  two modes. A host that still has `~/.config/cthrone/token` from v0.6.0 uses
-  the secret: give the client the same value, or remove the token file on both
-  sides so they pair by key.
+  two modes. A side that uses the secret was given one with `--token`,
+  `CTHRONE_TOKEN` or `--token-file`: give the other side the same value, or
+  clear it so both pair by key. A `~/.config/cthrone/token` from v0.6.0 does
+  **not** put a device in this mode any more — the run says so when it finds
+  one, and `--token-file ~/.config/cthrone/token` is how to use it.
 - **"e2e: peer identity refused"** — the name is pinned to a different key.
   The device reinstalled, or something else is answering under that name. If
   the change is expected, `cthrone peers forget <name>` and pair again.
 - **"it needs the shared secret"** — the two devices do not have the same
-  secret. Copy `~/.config/cthrone/token` from the host, or set
-  `CTHRONE_TOKEN` to the same value on both sides.
+  secret. Give both the same `CTHRONE_TOKEN`, or the same `--token-file`.
 - **"e2e: unusable shared secret"** — the secret on one side is shorter than
   16 bytes, so it is not used as a key. Give both devices the same long value.
 - **"e2e: handshake MAC mismatch"** — the handshake reached a device with a

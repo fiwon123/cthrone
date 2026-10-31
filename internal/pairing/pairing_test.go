@@ -451,3 +451,112 @@ func TestDescribeOptionsMatchesTheLoad(t *testing.T) {
 		t.Errorf("DescribeOptions() = %q, want it to report the failure", got)
 	}
 }
+
+// A token file in the configuration directory is not a credential any more. It
+// used to be read without being asked, so a device that was upgraded from
+// v0.6.0 silently joined the shared-secret model — which refuses a peer that
+// pairs by key — and the only symptom was a connection that never completed.
+func TestLoadIgnoresTheLegacyTokenFile(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "cthrone")
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv(auth.EnvToken, "")
+
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	secret := strings.Repeat("s", 32)
+	legacy := filepath.Join(configDir, "token")
+
+	if err := os.WriteFile(legacy, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cred, err := Load(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cred.HasSecret() {
+		t.Fatal("a token file nobody named still decided the credential")
+	}
+
+	if cred.Source() != SourceDeviceKey {
+		t.Errorf("source = %q, want %q", cred.Source(), SourceDeviceKey)
+	}
+
+	// The notice is how the user learns what happened. It names the file and
+	// never reads it.
+	notice := LegacyTokenFileNotice(Options{})
+	if !strings.Contains(notice, legacy) {
+		t.Errorf("the notice = %q, want it to name %q", notice, legacy)
+	}
+
+	if strings.Contains(notice, secret) {
+		t.Errorf("the notice carries the secret: %q", notice)
+	}
+
+	// Named, the same file is the credential again: nothing was deleted, and a
+	// user who wants the file is one flag away.
+	named, err := Load(Options{TokenFile: legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if named.Secret() != secret {
+		t.Errorf("the named file gave %q, want the secret in it", named.Secret())
+	}
+}
+
+// The notice is only for the case it explains: a legacy file with no secret
+// already in force. A user who named a secret is not told about a file that
+// changes nothing.
+func TestLegacyTokenFileNoticeStaysQuietWhenASecretIsInForce(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, ".config", "cthrone")
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, "token"), []byte(strings.Repeat("s", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		opts Options
+		env  string
+	}{
+		{"the flag is in force", Options{FlagToken: strings.Repeat("f", 32)}, ""},
+		{"the environment is in force", Options{}, strings.Repeat("e", 32)},
+		{"a file is named", Options{TokenFile: filepath.Join(t.TempDir(), "absent")}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(auth.EnvToken, tt.env)
+
+			if notice := LegacyTokenFileNotice(tt.opts); notice != "" {
+				t.Errorf("a notice was printed with a secret in force: %q", notice)
+			}
+		})
+	}
+}
+
+// With no legacy file there is nothing to explain.
+func TestLegacyTokenFileNoticeNeedsAFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), ".config"))
+	t.Setenv(auth.EnvToken, "")
+
+	if notice := LegacyTokenFileNotice(Options{}); notice != "" {
+		t.Errorf("a notice was printed with no legacy file: %q", notice)
+	}
+}

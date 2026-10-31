@@ -69,10 +69,17 @@ On nats connection only host receive message and only connect device send messag
 		opts := pairing.Options{FlagToken: secret, TokenFile: secretFile}
 
 		// Name the credential and where it came from before the transport
-		// starts. A token file nobody remembers writing switches the device
+		// starts. A token file named on the command line switches the device
 		// into the shared-secret model, which refuses a peer that pairs by
 		// key, and nothing on screen used to say so.
 		fmt.Println("Credential:", pairing.DescribeOptions(opts))
+
+		// The file an older version read without being asked is not read any
+		// more. Saying so is what turns a connection that suddenly asks for a
+		// secret into an explained change.
+		if notice := pairing.LegacyTokenFileNotice(opts); notice != "" {
+			fmt.Println(notice)
+		}
 
 		if natsFlag {
 			natscore.Host(args, app, opts, natsURLFlag, tlsConf)

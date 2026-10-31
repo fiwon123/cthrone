@@ -236,19 +236,19 @@ func TestThisDeviceText(t *testing.T) {
 	}
 }
 
-// The Setup tab names the credential in force and where it came from. A token
-// file a user forgot about is otherwise invisible: it switches the device into
-// the shared-secret model, which refuses a key-paired peer, and the only
-// symptom is a connection that never completes.
+// The Setup tab names the credential in force and where it came from, and says
+// plainly that a token file an older version read no longer decides anything:
+// a user who is told that is the one who can stop looking for the cause of a
+// connection that will not complete in the wrong place.
 func TestCredentialText(t *testing.T) {
 	tests := []struct {
-		name          string
-		typed         string
-		envSet        bool
-		filePath      string
-		fileHasSecret bool
-		want          string
-		notWant       []string
+		name    string
+		typed   string
+		envSet  bool
+		path    string
+		legacy  bool
+		want    string
+		notWant []string
 	}{
 		{
 			name:    "the device key is the default",
@@ -261,29 +261,29 @@ func TestCredentialText(t *testing.T) {
 			want:  "typed above",
 		},
 		{
-			name:          "what is typed wins over the file",
-			typed:         "typed-secret",
-			filePath:      "/home/u/.config/cthrone/token",
-			fileHasSecret: true,
-			want:          "typed above",
+			name:   "what is typed wins over the old file",
+			typed:  "typed-secret",
+			path:   "/home/u/.config/cthrone/token",
+			legacy: true,
+			want:   "typed above",
 		},
 		{
-			name:          "the environment beats the file",
-			envSet:        true,
-			filePath:      "/home/u/.config/cthrone/token",
-			fileHasSecret: true,
-			want:          "CTHRONE_TOKEN",
+			name:   "the environment beats the old file",
+			envSet: true,
+			path:   "/home/u/.config/cthrone/token",
+			legacy: true,
+			want:   "CTHRONE_TOKEN",
 		},
 		{
-			name:          "the file is named",
-			filePath:      "/home/u/.config/cthrone/token",
-			fileHasSecret: true,
-			want:          "/home/u/.config/cthrone/token",
+			name:   "the old file is named and reported inert",
+			path:   "/home/u/.config/cthrone/token",
+			legacy: true,
+			want:   "/home/u/.config/cthrone/token",
 		},
 		{
-			name:     "an empty file is no secret",
-			filePath: "/home/u/.config/cthrone/token",
-			want:     "this device's key",
+			name: "an old file that is not there is not mentioned",
+			path: "/home/u/.config/cthrone/token",
+			want: "this device's key",
 		},
 		{
 			name:  "blank typing is not a secret",
@@ -294,7 +294,7 @@ func TestCredentialText(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := credentialText(tt.typed, tt.envSet, tt.filePath, tt.fileHasSecret)
+			got := credentialText(tt.typed, tt.envSet, tt.path, tt.legacy)
 
 			if !strings.Contains(got, tt.want) {
 				t.Errorf("credentialText() = %q, want it to name %q", got, tt.want)
@@ -316,10 +316,10 @@ func TestCredentialText(t *testing.T) {
 	}
 }
 
-// The "Stop using the shared secret" button is offered only while the file is
-// what decides the credential, so deleting it must be detectable without a
-// window: an empty file is no secret, and a missing one is the default.
-func TestSecretFileHasValue(t *testing.T) {
+// The "Delete the old token file" button is offered whenever that file is
+// still there, so its presence has to be detectable without reading a secret:
+// nothing decides the credential by a file any more.
+func TestSecretFileExists(t *testing.T) {
 	dir := t.TempDir()
 
 	withSecret := filepath.Join(dir, "token")
@@ -332,27 +332,21 @@ func TestSecretFileHasValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blank := filepath.Join(dir, "blank")
-	if err := os.WriteFile(blank, []byte("  \n\t\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	tests := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{"a secret", withSecret, true},
-		{"an empty file", empty, false},
-		{"whitespace only", blank, false},
+		{"a file with a secret", withSecret, true},
+		{"an empty file", empty, true},
 		{"a missing file", filepath.Join(dir, "absent"), false},
 		{"no path at all", "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := secretFileHasValue(tt.path); got != tt.want {
-				t.Errorf("secretFileHasValue(%q) = %v, want %v", tt.path, got, tt.want)
+			if got := secretFileExists(tt.path); got != tt.want {
+				t.Errorf("secretFileExists(%q) = %v, want %v", tt.path, got, tt.want)
 			}
 		})
 	}

@@ -248,10 +248,15 @@ given. The model is the one issue #125 decided, superseding #11/#109:
     NATS subject has no host and no single person to ask, so a first contact
     there is pinned without a prompt, and a terminal host with no tty accepts
     and pins and prints why;
-  - **the shared secret**, when a flag, `CTHRONE_TOKEN` or a token file has a
-    value — the compatibility path a v0.6.0 peer speaks. Nothing generates one
-    any more: a minted token file would force every later run on that machine
-    into secret mode, and a fresh device pairing by key could not join it;
+  - **the shared secret**, when the user names one: `--token`, `CTHRONE_TOKEN`,
+    or a file passed to `--token-file` — the compatibility path a v0.6.0 peer
+    speaks. Nothing generates one any more: a minted token file would force
+    every later run on that machine into secret mode, and a fresh device
+    pairing by key could not join it. A file in the configuration directory is
+    **not** read on its own (issue #163): a `token` left by v0.6.0 used to move
+    the device into secret mode in silence, and the peer was then asked for a
+    value nobody chose. The run names that file, offers to delete it, and never
+    opens it;
 - the handshake **version gates the models**: v1 is the shared secret, v2 is
   the device key, and a peer that speaks the other one is refused rather than
   downgraded. `internal/e2e` wraps every session either way: X25519, HKDF per
@@ -313,13 +318,14 @@ The rules that come with it:
 - The user's configuration directory holds what the tool writes for itself:
   this device's key (`identity.key`, `0600`), the pins it trusts
   (`peers.json`, `0600` — public keys and certificate fingerprints, but who you
-  talk to is nobody else's business), the TLS material (`cert.pem` and
-  `key.pem`, the key `0600`), and, only when one is configured, the shared
-  secret (`token`, `0600`). They are written on first use and never committed.
-  The secret and the device key are the two things that must not be shared;
-  `peers.json` is the record that makes the second one meaningful, and the
-  certificate pins in it are what make `wss://` the default without a value to
-  copy.
+  talk to is nobody else's business), and the TLS material (`cert.pem` and
+  `key.pem`, the key `0600`). They are written on first use and never
+  committed. The tool writes **no** `token` file: a v0.6.0 installation may
+  still have one there, and nothing reads it unless a run passes
+  `--token-file`. The secret and the device key are the two things that must
+  not be shared; `peers.json` is the record that makes the second one
+  meaningful, and the certificate pins in it are what make `wss://` the default
+  without a value to copy.
 - That directory is the one the **platform** provides, not a hard-coded
   `~/.config`: `internal/discovery.ConfigDir` asks `os.UserConfigDir` and
   appends `cthrone`, so it is `~/.config/cthrone` on Linux,
