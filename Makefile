@@ -334,6 +334,12 @@ release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can pr
 #     stage chained with `;` hands its exit status to the next command and the
 #     final `if` would report success over a failing vet, test or build. A gate
 #     that cannot fail is worse than no gate.
+#
+#   - The Windows tree is cross-compiled too (CGO off). A file behind
+#     `//go:build windows` is not compiled by a plain Linux `go build`, so an
+#     unused import there stayed green here while the Windows release archives
+#     could not be built at all (#176). This compiles that tree; the native
+#     Fyne link stays the release workflow's job.
 # ---------------------------------------------------------------------------
 check: ## gofmt, vet, test, build — the local verification gate
 	@set -e; \
@@ -347,6 +353,7 @@ check: ## gofmt, vet, test, build — the local verification gate
 	go test ./...; \
 	$(GUI_TEST); \
 	go build ./...; \
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...; \
 	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$' || true)"; \
 	if [ -n "$$notested" ]; then \
 		echo ""; \
