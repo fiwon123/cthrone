@@ -1,9 +1,11 @@
 package widgets
 
 import (
+	"reflect"
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
 )
@@ -22,6 +24,20 @@ func TestSelectableLabelCanBeSelected(t *testing.T) {
 	}
 }
 
+func TestLabelCanBeInertForTouch(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	label := Label("scroll past me", false)
+
+	if label.Selectable {
+		t.Error("label is selectable; a drag has to reach the pane that scrolls")
+	}
+	if label.Wrapping != fyne.TextWrapWord {
+		t.Error("label does not wrap; a long line would run off a phone")
+	}
+}
+
 func TestSelectableHeadingIsBold(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
@@ -36,12 +52,26 @@ func TestSelectableHeadingIsBold(t *testing.T) {
 	}
 }
 
+func TestHeadingCanBeInertForTouch(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	heading := Heading("Quick Setup", false)
+
+	if heading.Selectable {
+		t.Error("heading is selectable; a drag has to reach the pane that scrolls")
+	}
+	if !heading.TextStyle.Bold {
+		t.Error("heading is not bold")
+	}
+}
+
 func TestNewCheckRowKeepsTheCaptionOutOfTheBox(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
 	changed := 0
-	row := NewCheckRow("Encrypt with TLS", func(bool) { changed++ })
+	row := NewCheckRow("Encrypt with TLS", func(bool) { changed++ }, true)
 
 	if row.box.Text != "" {
 		t.Errorf("check text = %q, want the caption to live in a label instead", row.box.Text)
@@ -68,11 +98,22 @@ func TestNewCheckRowKeepsTheCaptionOutOfTheBox(t *testing.T) {
 	}
 }
 
+func TestCheckRowCaptionCanBeInertForTouch(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	row := NewCheckRow("Use NATS instead of websocket", nil, false)
+
+	if caption := captionOf(t, row.Container); caption.Selectable {
+		t.Error("caption is selectable; a drag has to reach the pane that scrolls")
+	}
+}
+
 func TestCheckRowCheckedRoundTrips(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
-	row := NewCheckRow("Use NATS instead of websocket", nil)
+	row := NewCheckRow("Use NATS instead of websocket", nil, true)
 
 	row.SetChecked(true)
 	if !row.Checked() {
@@ -89,7 +130,7 @@ func TestCheckRowHidesTheCaptionToo(t *testing.T) {
 	app := test.NewApp()
 	defer app.Quit()
 
-	row := NewCheckRow("Skip the certificate check (insecure)", nil)
+	row := NewCheckRow("Skip the certificate check (insecure)", nil, true)
 	caption := captionOf(t, row.Container)
 
 	row.Hide()
@@ -106,7 +147,7 @@ func TestFormRowPutsTheCaptionAboveTheField(t *testing.T) {
 	defer app.Quit()
 
 	field := widget.NewEntry()
-	item := FormRow("Device name", field)
+	item := FormRow("Device name", field, true)
 
 	if item.Text != "" {
 		t.Errorf("FormItem.Text = %q, want it empty so the form draws no label of its own", item.Text)
@@ -124,8 +165,8 @@ func TestFormRowPutsTheCaptionAboveTheField(t *testing.T) {
 	if !caption.Selectable {
 		t.Error("caption is not selectable")
 	}
-	if !caption.TextStyle.Bold {
-		t.Error("caption is not bold")
+	if caption.TextStyle.Bold {
+		t.Error("caption is bold; a dialog row is a label, not a section heading")
 	}
 	if caption.Text != "Device name" {
 		t.Errorf("caption = %q, want %q", caption.Text, "Device name")
@@ -135,7 +176,82 @@ func TestFormRowPutsTheCaptionAboveTheField(t *testing.T) {
 	}
 }
 
-// captionOf returns the selectable caption a CheckRow wraps its box in.
+func TestFormUsesTwoColumnsWhenWide(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	name, port := widget.NewEntry(), widget.NewEntry()
+	form := Form(false, true, []Row{
+		{Caption: "Device name", Field: name},
+		{Caption: "Port", Field: port},
+	})
+
+	box, ok := form.(*fyne.Container)
+	if !ok {
+		t.Fatalf("form is %T, want a container", form)
+	}
+	if reflect.TypeOf(box.Layout) != reflect.TypeOf(layout.NewFormLayout()) {
+		t.Fatalf("layout is %T, want the form's two columns", box.Layout)
+	}
+	if len(box.Objects) != 4 {
+		t.Fatalf("form holds %d objects, want a caption and a field per row", len(box.Objects))
+	}
+
+	caption, ok := box.Objects[0].(*widget.Label)
+	if !ok {
+		t.Fatalf("first cell is %T, want the caption", box.Objects[0])
+	}
+	if !caption.Selectable {
+		t.Error("caption is not selectable on a desktop")
+	}
+	if caption.Text != "Device name" {
+		t.Errorf("first caption = %q, want %q", caption.Text, "Device name")
+	}
+	if box.Objects[1] != fyne.CanvasObject(name) || box.Objects[3] != fyne.CanvasObject(port) {
+		t.Error("the fields do not follow their captions")
+	}
+}
+
+func TestFormStacksWhenNarrow(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	form := Form(true, false, []Row{
+		{Caption: "Device name", Field: widget.NewEntry()},
+		{Caption: "Port", Field: widget.NewEntry()},
+	})
+
+	box, ok := form.(*fyne.Container)
+	if !ok {
+		t.Fatalf("form is %T, want a container", form)
+	}
+	if reflect.TypeOf(box.Layout) != reflect.TypeOf(layout.NewVBoxLayout()) {
+		t.Fatalf("layout is %T, want one stacked line per row", box.Layout)
+	}
+	if len(box.Objects) != 2 {
+		t.Fatalf("box holds %d objects, want one line per row", len(box.Objects))
+	}
+
+	for i, object := range box.Objects {
+		line, ok := object.(*fyne.Container)
+		if !ok {
+			t.Fatalf("line %d is %T, want a container", i, object)
+		}
+		if len(line.Objects) != 2 {
+			t.Fatalf("line %d holds %d objects, want the caption above the field", i, len(line.Objects))
+		}
+
+		caption, ok := line.Objects[0].(*widget.Label)
+		if !ok {
+			t.Fatalf("line %d starts with %T, want the caption", i, line.Objects[0])
+		}
+		if caption.Selectable {
+			t.Errorf("caption %q is selectable on touch", caption.Text)
+		}
+	}
+}
+
+// captionOf returns the caption a CheckRow wraps its box in.
 func captionOf(t *testing.T, row *fyne.Container) *widget.Label {
 	t.Helper()
 

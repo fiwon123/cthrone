@@ -48,6 +48,9 @@ import (
 // screen. A tap that shows nothing reads as a tap that did nothing.
 const copyHintDuration = 2 * time.Second
 
+// copyHintMargin keeps the "Copied" popup off the bottom edge of the window.
+const copyHintMargin = 48
+
 // liveServer is the part of a websocket host the GUI needs. Keeping it an
 // interface means the UI does not import the handler package.
 type liveServer interface {
@@ -84,13 +87,13 @@ type gui struct {
 	// is already hosting or connected. A second Host binds a port the first one
 	// is holding, and the failure reads as "hosting is broken" rather than
 	// "one at a time".
-	hostBtn    *widget.Button
-	connectBtn *widget.Button
+	hostBtn    *widgets.CopyButton
+	connectBtn *widgets.CopyButton
 
 	// setup layout: the form is rebuilt whenever the mode changes, because a
 	// Fyne Form always renders a row for every item it holds.
 	moreOptions bool
-	moreBtn     *widget.Button
+	moreBtn     *widgets.CopyButton
 	formHolder  *fyne.Container
 	transport   *widget.Select
 	hint        *widget.Label
@@ -110,7 +113,7 @@ type gui struct {
 	// forgetSecret deletes the token file an older version read. It decides
 	// nothing now, so the button is an offer to remove a leftover that used to
 	// decide the model, not a switch.
-	forgetSecret *widget.Button
+	forgetSecret *widgets.CopyButton
 
 	// about is the read-only tab: which build this is, where it comes from,
 	// and — on a press, never on a start — whether there is a newer release.
@@ -118,18 +121,25 @@ type gui struct {
 	// in?" belongs on the screen a bug report is written from.
 	aboutCredential *widget.Label
 	aboutNote       *widget.Label
-	updateBtn       *widget.Button
+	updateBtn       *widgets.CopyButton
 
 	// chat
-	tabs      *container.AppTabs
+	tabs      *widgets.Tabs
 	status    *widget.Label
 	chatList  *widget.List
 	entry     *widget.Entry
-	sendBtn   *widget.Button
-	stopBtn   *widget.Button
-	attachBtn *widget.Button
+	sendBtn   *widgets.CopyButton
+	stopBtn   *widgets.CopyButton
+	attachBtn *widgets.CopyButton
 	copyHint  *widget.Label
 	messages  []chatMessage
+
+	// copyPopup is the "Copied" hint a label copy raises, and copyTimer takes
+	// it away again. The chat tab has its own line for the transcript's copy
+	// buttons; a button on Setup, Devices, or About has no such line, so the
+	// confirmation has to float above whichever tab is open.
+	copyPopup *widget.PopUp
+	copyTimer *time.Timer
 
 	// transfers
 	//
@@ -144,7 +154,7 @@ type gui struct {
 	// devices
 	beacons    []device
 	beaconList *widget.List
-	scanBtn    *widget.Button
+	scanBtn    *widgets.CopyButton
 	listener   *discovery.Listener
 
 	mu     sync.Mutex
@@ -284,7 +294,7 @@ func (g *gui) build() {
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
 	// title bar to show it in, the copy confirmation, and the copy-all action.
-	g.copyHint = selectableLabel("")
+	g.copyHint = g.label("")
 
 	copyLabel := "Copy all"
 	if g.lay.Stack {
@@ -292,7 +302,8 @@ func (g *gui) build() {
 		copyLabel = ""
 	}
 
-	copyBtn := widget.NewButtonWithIcon(copyLabel, theme.ContentCopyIcon(), g.copyAll)
+	copyBtn := widgets.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), g.copyAll, g.copyLabel)
+	copyBtn.SetText(copyLabel)
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -302,7 +313,8 @@ func (g *gui) build() {
 		filesLabel = ""
 	}
 
-	filesBtn := widget.NewButtonWithIcon(filesLabel, theme.FolderIcon(), g.showFiles)
+	filesBtn := widgets.NewButtonWithIcon("Files", theme.FolderIcon(), g.showFiles, g.copyLabel)
+	filesBtn.SetText(filesLabel)
 
 	header := container.NewHBox()
 	if g.mobile {
@@ -314,7 +326,7 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = selectableLabel("Ready — open Setup to connect or host.")
+	g.status = g.label("Ready — open Setup to connect or host.")
 	g.status.TextStyle = fyne.TextStyle{Bold: true}
 
 	// One row per message, not one label holding the whole log: appending then
@@ -329,13 +341,13 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := selectableLabel("")
+			row := g.label("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
 			pic.Hide()
 
-			save := widget.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil)
+			save := widgets.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil, g.copyLabel)
 			save.Hide()
 
 			return container.NewVBox(row, pic, save)
@@ -348,10 +360,10 @@ func (g *gui) build() {
 	g.entry.SetPlaceHolder("Type a message…")
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
-	g.sendBtn = widget.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) })
+	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
 	g.sendBtn.Disable()
 
-	g.stopBtn = widget.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop)
+	g.stopBtn = widgets.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop, g.copyLabel)
 	g.stopBtn.Disable()
 
 	attachLabel := "Attach"
@@ -360,7 +372,8 @@ func (g *gui) build() {
 		attachLabel = ""
 	}
 
-	g.attachBtn = widget.NewButtonWithIcon(attachLabel, theme.MailAttachmentIcon(), g.pickFile)
+	g.attachBtn = widgets.NewButtonWithIcon("Attach", theme.MailAttachmentIcon(), g.pickFile, g.copyLabel)
+	g.attachBtn.SetText(attachLabel)
 	g.attachBtn.Disable()
 
 	// The queue starts with the window and outlives any one session: a file
@@ -415,17 +428,17 @@ func (g *gui) build() {
 	g.natsURLEntry = widget.NewEntry()
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
-	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() })
+	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() }, !g.mobile)
 	// Encrypted is the default on the CLI, so the app starts the same way: a
 	// phone that has to find a switch before it is protected is not protected.
 	g.tlsCheck.SetChecked(true)
-	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil)
-	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil)
+	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil, !g.mobile)
+	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil, !g.mobile)
 
-	g.moreBtn = widget.NewButton("More options", func() {
+	g.moreBtn = widgets.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
 		g.rebuildSetupForm()
-	})
+	}, g.copyLabel)
 
 	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
 		g.natsCheck.SetChecked(s == "NATS")
@@ -437,23 +450,23 @@ func (g *gui) build() {
 	// single row, so the visible subset becomes a fresh form instead.
 	g.formHolder = container.NewStack()
 
-	g.hostBtn = widget.NewButtonWithIcon("Host", theme.MediaPlayIcon(), g.host)
-	g.connectBtn = widget.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect)
+	g.hostBtn = widgets.NewButtonWithIcon("Host", theme.MediaPlayIcon(), g.host, g.copyLabel)
+	g.connectBtn = widgets.NewButtonWithIcon("Connect", theme.LoginIcon(), g.connect, g.copyLabel)
 
 	actions := container.NewGridWithColumns(2, g.hostBtn, g.connectBtn)
 
-	g.hint = selectableLabel("")
+	g.hint = g.label("")
 
-	g.thisDevice = selectableLabel("")
+	g.thisDevice = g.label("")
 	g.thisDevice.Hide()
 
-	g.credential = selectableLabel("")
+	g.credential = g.label("")
 
-	g.forgetSecret = widget.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile)
+	g.forgetSecret = widgets.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile, g.copyLabel)
 	g.forgetSecret.Hide()
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
-		widgets.SelectableHeading("Quick Setup"),
+		g.heading("Quick Setup"),
 		g.tlsCheck,
 		g.insecureCheck,
 		g.formHolder,
@@ -468,7 +481,7 @@ func (g *gui) build() {
 	g.rebuildSetupForm()
 
 	// --- devices ------------------------------------------------------
-	g.scanBtn = widget.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan)
+	g.scanBtn = widgets.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan, g.copyLabel)
 
 	// A beacon row stays a plain label: the list gives it one fixed line, and a
 	// wrapping selectable label would clip there. The address is copyable from
@@ -493,7 +506,7 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	beaconHint := selectableLabel("UDP beacons on port 9999")
+	beaconHint := g.label("UDP beacons on port 9999")
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
 	} else {
@@ -520,7 +533,7 @@ func (g *gui) build() {
 		return container.NewTabItemWithIcon(label, icon, content)
 	}
 
-	g.tabs = container.NewAppTabs(
+	g.tabs = widgets.NewTabs(g.lay.Stack, g.copyLabel,
 		tab("Chat", theme.MailComposeIcon(), chat),
 		tab("Setup", theme.SettingsIcon(), setup),
 		tab("Devices", theme.ComputerIcon(), devices),
@@ -585,29 +598,29 @@ func (g *gui) rebuildSetupForm() {
 	useNATS := g.natsCheck.Checked()
 	view := setupVisibility(useNATS, g.tlsCheck.Checked(), g.moreOptions)
 
-	items := []*widget.FormItem{
-		widgets.FormRow("Device name", g.nameEntry),
-		widgets.FormRow(labelConnectTo, g.hostEntry),
-		widgets.FormRow("Port", g.portEntry),
-		widgets.FormRow("Transport", g.transport),
+	rows := []widgets.Row{
+		{Caption: "Device name", Field: g.nameEntry},
+		{Caption: labelConnectTo, Field: g.hostEntry},
+		{Caption: "Port", Field: g.portEntry},
+		{Caption: "Transport", Field: g.transport},
 	}
 	if view.Options {
-		items = append(items, widgets.FormRow("Options", g.moreBtn))
+		rows = append(rows, widgets.Row{Caption: "Options", Field: g.moreBtn})
 	}
 	if view.SharedSecret {
-		items = append(items, widgets.FormRow("Shared secret", g.tokenEntry))
+		rows = append(rows, widgets.Row{Caption: "Shared secret", Field: g.tokenEntry})
 	}
 	if view.Fingerprint {
-		items = append(items, widgets.FormRow("Fingerprint", g.fingerprintEntry))
+		rows = append(rows, widgets.Row{Caption: "Fingerprint", Field: g.fingerprintEntry})
 	}
 	if view.NATSBroker {
-		items = append(items, widgets.FormRow("NATS URL", g.natsURLEntry))
+		rows = append(rows, widgets.Row{Caption: "NATS URL", Field: g.natsURLEntry})
 	}
 	if view.NATSSubject {
-		items = append(items, widgets.FormRow("NATS subject", g.subjectEntry))
+		rows = append(rows, widgets.Row{Caption: "NATS subject", Field: g.subjectEntry})
 	}
 	if view.BindAddress {
-		items = append(items, widgets.FormRow("Bind address", g.bindEntry))
+		rows = append(rows, widgets.Row{Caption: "Bind address", Field: g.bindEntry})
 	}
 
 	// A check row hides its caption with the box, so the whole row goes.
@@ -619,13 +632,15 @@ func (g *gui) rebuildSetupForm() {
 
 	if g.moreOptions {
 		g.moreBtn.SetText("Fewer options")
+		g.moreBtn.SetCopyText("Fewer options")
 	} else {
 		g.moreBtn.SetText("More options")
+		g.moreBtn.SetCopyText("More options")
 	}
 
 	g.hint.SetText(setupHint(useNATS))
 
-	g.formHolder.Objects = []fyne.CanvasObject{widget.NewForm(items...)}
+	g.formHolder.Objects = []fyne.CanvasObject{widgets.Form(g.lay.Stack, !g.mobile, rows)}
 	g.formHolder.Refresh()
 
 	g.refreshCredential()
@@ -987,6 +1002,8 @@ func (g *gui) stop() {
 // on the phone the process can outlive the window. It is synchronous because
 // there is no event loop left to come back to.
 func (g *gui) shutdown() {
+	g.stopCopyHint()
+
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server = nil, nil
@@ -1110,12 +1127,19 @@ func (g *gui) attach(sess session.Session) {
 
 	fyne.Do(g.updateButtons)
 
+	// The close notice is the one line that has to name the peer after the
+	// session is gone, so the name is captured here rather than read from a
+	// session that may already be closed.
+	peer := &peerName{}
+
 	// A sealed session reports a peer the moment its handshake authenticates,
 	// and a bus refusal that dropped one peer without ending the room. Both
 	// belong on the status line: a silent drop looks like a peer that never
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			peer.set(p.Name())
+
 			if p.First && p.Fingerprint != "" {
 				// First contact is the one moment the fingerprint can be
 				// compared, so it goes on screen and in the transcript; a
@@ -1141,6 +1165,8 @@ func (g *gui) attach(sess session.Session) {
 	}
 
 	sess.OnMessage(func(m session.Message) {
+		peer.learn(m.From)
+
 		from := m.From
 		if from == "" {
 			// An unnamed peer is still a peer: without this it would render as
@@ -1163,6 +1189,12 @@ func (g *gui) attach(sess session.Session) {
 
 		if closed {
 			g.finishReceive()
+
+			// A session the user ended is not a peer who left: Stop clears the
+			// live session before it closes it, so only a close that arrives
+			// while this session is still the live one leaves a line. That is
+			// exactly the case a host has to be able to read afterwards.
+			g.addMessage(chatMessage{from: "system", text: disconnectLine(peer.get(), reason)})
 		}
 
 		fyne.Do(g.updateButtons)
@@ -1266,7 +1298,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	label, _ := row.Objects[0].(*widget.Label)
 	pic, _ := row.Objects[1].(*canvas.Image)
-	save, _ := row.Objects[2].(*widget.Button)
+	save, _ := row.Objects[2].(*widgets.CopyButton)
 
 	if label == nil || pic == nil || save == nil {
 		return
@@ -1326,6 +1358,68 @@ func (g *gui) copyToClipboard(text string) {
 	time.AfterFunc(copyHintDuration, func() {
 		fyne.Do(func() { g.copyHint.SetText("") })
 	})
+}
+
+// copyLabel is the onCopied hook every CopyButton carries.
+//
+// The widget has already put the label on the clipboard; this is the part that
+// says so. It cannot use the chat header's line, because the button may be on
+// Setup, Devices, or About, where that line is not on screen.
+func (g *gui) copyLabel(string) {
+	g.showCopied()
+}
+
+// showCopied floats a short "Copied" above whatever tab is open.
+//
+// A popup rather than a toast because Fyne has no toast, and it is non-modal:
+// a single tap anywhere takes it away, so it never stands between the user and
+// the next action. Repeated copies reuse the popup and restart its timer
+// instead of stacking one hint per press.
+func (g *gui) showCopied() {
+	if g.win == nil || g.win.Canvas() == nil {
+		return
+	}
+
+	fyne.Do(func() {
+		if g.copyPopup == nil {
+			hint := widget.NewLabel("Copied")
+			hint.Alignment = fyne.TextAlignCenter
+			g.copyPopup = widget.NewPopUp(hint, g.win.Canvas())
+		}
+
+		size := g.copyPopup.MinSize()
+		canvasSize := g.win.Canvas().Size()
+		g.copyPopup.ShowAtPosition(fyne.NewPos(
+			fyne.Max(0, (canvasSize.Width-size.Width)/2),
+			fyne.Max(0, canvasSize.Height-size.Height-copyHintMargin),
+		))
+
+		if g.copyTimer != nil {
+			g.copyTimer.Stop()
+		}
+
+		g.copyTimer = time.AfterFunc(copyHintDuration, func() {
+			fyne.Do(func() {
+				if g.copyPopup != nil {
+					g.copyPopup.Hide()
+				}
+			})
+		})
+	})
+}
+
+// stopCopyHint takes the hint down and stops its timer. It runs when the window
+// closes and from the tests, so a timer that would fire into a canvas nobody is
+// drawing is cancelled with the window it belongs to.
+func (g *gui) stopCopyHint() {
+	if g.copyTimer != nil {
+		g.copyTimer.Stop()
+		g.copyTimer = nil
+	}
+
+	if g.copyPopup != nil {
+		g.copyPopup.Hide()
+	}
 }
 
 // showError reports a failure in a dialog whose message can be copied.
@@ -1453,26 +1547,24 @@ func (g *gui) tokenFile() string {
 func (g *gui) buildAbout() fyne.CanvasObject {
 	version := aboutVersion(Version, g.app.Metadata().Version)
 
-	g.aboutCredential = selectableLabel("")
-	g.aboutNote = selectableLabel("")
+	g.aboutCredential = g.label("")
+	g.aboutNote = g.label("")
 
-	// No Copy button beside the version: the version is a selectable label like
-	// every other line here, so the button only repeated a selection the user
-	// can already make.
-	versionLine := container.NewHBox(
-		widgets.SelectableHeading("cthrone"),
-		selectableLabel(version),
-	)
+	// The name is the heading and the version sits under it, rather than the
+	// two sharing one line: at phone width "cthrone v0.8.3" in a horizontal box
+	// wraps mid-word or pushes the version off the edge, and a header that
+	// changes shape with the window is the thing that looked broken.
+	header := g.aboutHeader(version)
 
-	repoBtn := widget.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository)
-	repoLine := container.NewBorder(nil, nil, nil, repoBtn, selectableLabel(RepositoryURL))
+	repoBtn := widgets.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository, g.copyLabel)
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.label(RepositoryURL))
 
-	g.updateBtn = widget.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates)
+	g.updateBtn = widgets.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates, g.copyLabel)
 
-	note := selectableLabel("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
-		versionLine,
+		header,
 		repoLine,
 		widget.NewSeparator(),
 		g.aboutCredential,
@@ -1487,6 +1579,18 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.refreshCredential()
 
 	return container.NewVScroll(container.NewPadded(body))
+}
+
+// aboutHeader is the app's name above the version it is running.
+//
+// It is a block rather than one line so a phone and a desktop draw the same
+// header: side by side, a narrow window has to either wrap the name or push the
+// version out of the pane.
+func (g *gui) aboutHeader(version string) fyne.CanvasObject {
+	return container.NewVBox(
+		g.heading("cthrone"),
+		g.label(version),
+	)
 }
 
 // openRepository opens the project's page in the browser.

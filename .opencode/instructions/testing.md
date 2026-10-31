@@ -40,8 +40,8 @@ packages in the module carry tests and `go test ./...` prints no
   `internal/discovery`, `internal/e2e`, `internal/exec`,
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic), `ui/widgets` (the selectable-text helpers), and the
-  gui-tagged widget tree (headless).
+  non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
+  copyable button and tab bar), and the gui-tagged widget tree (headless).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
 nothing, it compiles, every package's tests passed, and the gui-tagged widget

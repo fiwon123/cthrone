@@ -15,6 +15,9 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/test"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // These tests drive the real widget tree with Fyne's headless test driver.
@@ -45,13 +48,14 @@ func newTestGUI(t *testing.T) *gui {
 	win := app.NewWindow("cthrone")
 	g := &gui{app: app, win: win}
 	g.build()
+	t.Cleanup(g.stopCopyHint)
 
 	return g
 }
 
 // chatRowObjects pulls a transcript row apart into its three parts: the
 // caption, the inline picture, and the Save action.
-func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas.Image, *widget.Button) {
+func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas.Image, *widgets.CopyButton) {
 	t.Helper()
 
 	box, ok := row.(*fyne.Container)
@@ -73,9 +77,9 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas
 		t.Fatalf("row[1] is %T, want *canvas.Image", box.Objects[1])
 	}
 
-	save, ok := box.Objects[2].(*widget.Button)
+	save, ok := box.Objects[2].(*widgets.CopyButton)
 	if !ok {
-		t.Fatalf("row[2] is %T, want *widget.Button", box.Objects[2])
+		t.Fatalf("row[2] is %T, want *widgets.CopyButton", box.Objects[2])
 	}
 
 	return label, pic, save
@@ -237,4 +241,60 @@ func testFileSize(t *testing.T, path string) int64 {
 	}
 
 	return info.Size()
+}
+
+// guiStubSession is a session the widget tree can attach to without a socket.
+type guiStubSession struct {
+	*session.Base
+}
+
+func (s *guiStubSession) Send([]byte) error   { return nil }
+func (s *guiStubSession) Close(reason string) { s.NotifyClose(reason) }
+
+// TestAttachReportsAPeerDisconnect checks that a peer leaving leaves a line in
+// the transcript: the status line changes, but a host reading the chat after
+// the room is empty needs the conversation to say who left.
+func TestAttachReportsAPeerDisconnect(t *testing.T) {
+	g := newTestGUI(t)
+	s := &guiStubSession{Base: session.NewBase("id", "192.168.1.5:5555")}
+
+	g.attach(s)
+	s.NotifyMessage(session.Message{From: "laptop", Payload: []byte("hello")})
+	s.Close("peer said goodbye")
+
+	last := g.messages[len(g.messages)-1]
+	if last.from != "system" {
+		t.Fatalf("last message is from %q, want the system", last.from)
+	}
+
+	if !strings.Contains(last.text, "laptop disconnected") {
+		t.Errorf("last message = %q, want the disconnect notice", last.text)
+	}
+
+	if !strings.Contains(last.text, "peer said goodbye") {
+		t.Errorf("last message = %q, want the reason", last.text)
+	}
+}
+
+// TestStopLeavesNoDisconnectLine checks the other side of it: a session the
+// user ended is not a peer that left, so Stop must not report one.
+func TestStopLeavesNoDisconnectLine(t *testing.T) {
+	g := newTestGUI(t)
+	s := &guiStubSession{Base: session.NewBase("id", "192.168.1.5:5555")}
+
+	g.attach(s)
+
+	before := len(g.messages)
+
+	// stop() clears the live session before it closes it; the callback must see
+	// that this session was no longer the live one and say nothing.
+	g.mu.Lock()
+	g.sess = nil
+	g.mu.Unlock()
+
+	s.Close("closed from the app")
+
+	if after := len(g.messages); after != before {
+		t.Errorf("transcript grew from %d to %d messages after a user stop", before, after)
+	}
 }
