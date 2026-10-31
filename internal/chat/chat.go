@@ -42,8 +42,29 @@ func RunHost(s session.Session) bool {
 	return run(s, os.Stdin, os.Stdout)
 }
 
+// lockedWriter serializes the loop's writes.
+//
+// receive prints a message from the transport's goroutine while send echoes a
+// keystroke from the input goroutine, and the loop prints the disconnect line
+// once the peer is gone. Two writers to one terminal must not interleave half a
+// line, and a writer that is not an *os.File — a test's buffer — is not safe
+// for concurrent writes at all.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.w.Write(p)
+}
+
 // run is Run with the terminal handed in, so a test needs no real tty.
 func run(s session.Session, in *os.File, out io.Writer) bool {
+	out = &lockedWriter{w: out}
+
 	// What is being typed, shared with the printer: a message that arrives
 	// must not swallow half a line, and two goroutines touch it.
 	input := &line{}
@@ -55,7 +76,14 @@ func run(s session.Session, in *os.File, out io.Writer) bool {
 	done := make(chan struct{})
 	finished := func() { once.Do(func() { close(done) }) }
 
-	s.OnClose(func(string) { finished() })
+	// The reason is kept for the line printed when a peer leaves: the callback
+	// is the only place it arrives, and by the time the loop returns the close
+	// has already happened.
+	var closeReason atomic.Value
+	s.OnClose(func(reason string) {
+		closeReason.Store(reason)
+		finished()
+	})
 
 	// A session that closed before the callback was installed will not report
 	// it again, and waiting for a reason that already happened is a hang.
@@ -92,7 +120,34 @@ func run(s session.Session, in *os.File, out io.Writer) bool {
 
 	<-done
 
-	return quit.Load()
+	// "Exiting..." already says the user quit; anything else is a peer that
+	// left, and the terminal has to say so or the host looks like it is still
+	// talking to someone.
+	if userQuit := quit.Load(); !userQuit {
+		reason, _ := closeReason.Load().(string)
+		if reason == "" {
+			if closed, ok := s.(interface{ Reason() string }); ok {
+				reason = closed.Reason()
+			}
+		}
+
+		clearLine(out)
+		fmt.Fprintln(out, disconnectNotice(reason))
+
+		return false
+	}
+
+	return true
+}
+
+// disconnectNotice is what the terminal says when the peer ended the session.
+// It is not printed for a Ctrl-C: that is the user asking to leave.
+func disconnectNotice(reason string) string {
+	if reason == "" {
+		return "Disconnected"
+	}
+
+	return "Disconnected: " + reason
 }
 
 // peerNotice is what the terminal says when a peer completes the handshake.

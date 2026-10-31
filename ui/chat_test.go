@@ -104,3 +104,59 @@ func TestAppendMessageKeepsTheCap(t *testing.T) {
 		t.Errorf("transcript has %d lines, want %d", strings.Count(joined, "\n")+1, maxMessages)
 	}
 }
+
+// TestDisconnectLine checks the transcript line a close leaves behind: it names
+// the peer that left and keeps the reason when there is one.
+func TestDisconnectLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		peer   string
+		reason string
+		want   string
+	}{
+		{"named", "laptop", "peer said goodbye", "laptop disconnected: peer said goodbye"},
+		{"unnamed", "", "EOF", "peer disconnected: EOF"},
+		{"no reason", "laptop", "", "laptop disconnected"},
+		{"nothing", "", "", "peer disconnected"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := disconnectLine(tt.peer, tt.reason); got != tt.want {
+				t.Errorf("disconnectLine(%q, %q) = %q, want %q", tt.peer, tt.reason, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPeerNamePrefersTheHandshake checks the name a close reports: the handshake
+// is authoritative, a sender fills the gap, and an unnamed session still has a
+// word to print.
+func TestPeerNamePrefersTheHandshake(t *testing.T) {
+	t.Run("handshake wins", func(t *testing.T) {
+		p := &peerName{}
+
+		p.learn("192.168.1.5:5555")
+		p.set("laptop")
+		p.learn("192.168.1.5:5555")
+
+		if got := p.get(); got != "laptop" {
+			t.Errorf("peer name = %q, want %q", got, "laptop")
+		}
+	})
+
+	t.Run("sender fills the gap", func(t *testing.T) {
+		p := &peerName{}
+		p.learn("192.168.1.5:5555")
+
+		if got := p.get(); got != "192.168.1.5:5555" {
+			t.Errorf("peer name = %q, want the sender", got)
+		}
+	})
+
+	t.Run("nothing names it", func(t *testing.T) {
+		if got := (&peerName{}).get(); got != "peer" {
+			t.Errorf("peer name = %q, want %q", got, "peer")
+		}
+	})
+}
