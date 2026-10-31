@@ -49,9 +49,30 @@ func (f *fakeSession) outgoing() [][]byte {
 	return append([][]byte(nil), f.sent...)
 }
 
+// syncBuffer is a bytes.Buffer safe for the loop's writer goroutines and the
+// test's reader: the loop writes from more than one goroutine.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
 // pipeTerminal gives a test the two ends of an input pipe and a buffer for the
 // output. The write end is the test's, the read end is the loop's.
-func pipeTerminal(t *testing.T) (*os.File, *os.File, *bytes.Buffer) {
+func pipeTerminal(t *testing.T) (*os.File, *os.File, *syncBuffer) {
 	t.Helper()
 
 	r, w, err := os.Pipe()
@@ -64,7 +85,24 @@ func pipeTerminal(t *testing.T) (*os.File, *os.File, *bytes.Buffer) {
 		_ = w.Close()
 	})
 
-	return r, w, &bytes.Buffer{}
+	return r, w, &syncBuffer{}
+}
+
+// waitForOutput waits until the loop has written text. The prompt is written
+// after the input goroutine has used the file, so waiting for it keeps a test
+// that closes the session from racing that goroutine's start-up.
+func waitForOutput(t *testing.T, out *syncBuffer, text string) {
+	t.Helper()
+
+	for i := 0; i < 400; i++ {
+		if strings.Contains(out.String(), text) {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %q; output is %q", text, out.String())
 }
 
 // A message that arrives is printed with the name of its sender, which is what
@@ -205,6 +243,78 @@ func TestRunReturnsWhenTheSessionCloses(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not return after the session closed")
+	}
+}
+
+// A peer that leaves is said out loud: a host that printed nothing would look
+// like it is still talking to a device that is gone.
+func TestRunReportsAPeerLeaving(t *testing.T) {
+	in, _, out := pipeTerminal(t)
+	s := newFake("alice")
+
+	done := make(chan struct{})
+	go func() {
+		run(s, in, out)
+		close(done)
+	}()
+
+	waitForOutput(t, out, "> ")
+
+	s.Close("peer said goodbye")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return after the session closed")
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Disconnected: peer said goodbye") {
+		t.Errorf("expected the disconnect notice, got %q", got)
+	}
+}
+
+// Ctrl-C is the user ending the loop, not a peer leaving: the notice would
+// report a disconnect the user asked for.
+func TestRunDoesNotReportTheUsersQuit(t *testing.T) {
+	in, w, out := pipeTerminal(t)
+	s := newFake("alice")
+
+	done := make(chan struct{})
+	go func() {
+		run(s, in, out)
+		close(done)
+	}()
+
+	fmt.Fprint(w, "\x03")
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run did not return after ctrl-c")
+	}
+
+	if got := out.String(); strings.Contains(got, "Disconnected") {
+		t.Errorf("a user quits on purpose, not as a disconnect, got %q", got)
+	}
+}
+
+func TestDisconnectNotice(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		want   string
+	}{
+		{"reason", "peer said goodbye", "Disconnected: peer said goodbye"},
+		{"no reason", "", "Disconnected"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := disconnectNotice(tt.reason); got != tt.want {
+				t.Errorf("disconnectNotice(%q) = %q, want %q", tt.reason, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -359,6 +469,8 @@ func TestRunHostDoesNotReportAPeerLeaving(t *testing.T) {
 
 	quit := make(chan bool, 1)
 	go func() { quit <- run(s, in, out) }()
+
+	waitForOutput(t, out, "> ")
 
 	s.Close("peer said goodbye")
 

@@ -1,6 +1,9 @@
 package ui
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // maxMessages bounds the transcript: a window left open for hours must not grow
 // without limit. The oldest line and its row are dropped together.
@@ -41,6 +44,71 @@ func transcript(messages []chatMessage) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// peerName is the display name a close notice reports: the peer the sealed
+// handshake authenticated, else the last sender, else "peer".
+//
+// The transport's callbacks write it and the close callback reads it, so every
+// access holds the lock.
+type peerName struct {
+	mu   sync.Mutex
+	name string
+}
+
+// set records the name the handshake authenticated. It is authoritative: a
+// later frame carries a sender string too, and that one must not rename a
+// peer the handshake already named.
+func (p *peerName) set(name string) {
+	if name == "" {
+		return
+	}
+
+	p.mu.Lock()
+	p.name = name
+	p.mu.Unlock()
+}
+
+// learn records a sender from a message, and is used only until the handshake
+// names the peer: a session that never reports a peer still has a name to
+// report when it closes.
+func (p *peerName) learn(name string) {
+	if name == "" {
+		return
+	}
+
+	p.mu.Lock()
+	if p.name == "" {
+		p.name = name
+	}
+	p.mu.Unlock()
+}
+
+// get is the name to print, or "peer" when nothing named it.
+func (p *peerName) get() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.name == "" {
+		return "peer"
+	}
+
+	return p.name
+}
+
+// disconnectLine is the transcript line a session's close leaves behind: who
+// left, and why. The status line carries the reason too, but the transcript is
+// the record a host reads after the room is empty.
+func disconnectLine(peer, reason string) string {
+	if peer == "" {
+		peer = "peer"
+	}
+
+	if reason == "" {
+		return peer + " disconnected"
+	}
+
+	return peer + " disconnected: " + reason
 }
 
 // appendMessage adds m to the log and drops the oldest line beyond maxMessages.

@@ -1110,12 +1110,19 @@ func (g *gui) attach(sess session.Session) {
 
 	fyne.Do(g.updateButtons)
 
+	// The close notice is the one line that has to name the peer after the
+	// session is gone, so the name is captured here rather than read from a
+	// session that may already be closed.
+	peer := &peerName{}
+
 	// A sealed session reports a peer the moment its handshake authenticates,
 	// and a bus refusal that dropped one peer without ending the room. Both
 	// belong on the status line: a silent drop looks like a peer that never
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			peer.set(p.Name())
+
 			if p.First && p.Fingerprint != "" {
 				// First contact is the one moment the fingerprint can be
 				// compared, so it goes on screen and in the transcript; a
@@ -1141,6 +1148,8 @@ func (g *gui) attach(sess session.Session) {
 	}
 
 	sess.OnMessage(func(m session.Message) {
+		peer.learn(m.From)
+
 		from := m.From
 		if from == "" {
 			// An unnamed peer is still a peer: without this it would render as
@@ -1163,6 +1172,12 @@ func (g *gui) attach(sess session.Session) {
 
 		if closed {
 			g.finishReceive()
+
+			// A session the user ended is not a peer who left: Stop clears the
+			// live session before it closes it, so only a close that arrives
+			// while this session is still the live one leaves a line. That is
+			// exactly the case a host has to be able to read afterwards.
+			g.addMessage(chatMessage{from: "system", text: disconnectLine(peer.get(), reason)})
 		}
 
 		fyne.Do(g.updateButtons)
