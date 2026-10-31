@@ -24,9 +24,10 @@ var connect = websockethandler.Connect
 // test does not have to own a tty.
 var runTerminal = chat.Run
 
-// runHost is the same loop for a host, reporting whether the user quit it. It
-// is a variable for the same reason: a test cannot press Ctrl-C on a tty.
-var runHost = chat.RunHost
+// runRoom is the console a host runs on: one stdin, every device in the room.
+// It reports whether the user quit. It is a variable for the same reason: a
+// test cannot press Ctrl-C on a tty.
+var runRoom = chat.RunRoom
 
 // Connect connects to a host and runs the terminal chat loop until the peer
 // disconnects or the user presses Ctrl-C.

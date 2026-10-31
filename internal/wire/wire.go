@@ -101,6 +101,14 @@ type Header struct {
 	Index  int    `json:"index,omitempty"`
 	Chunks int    `json:"chunks,omitempty"`
 	SHA256 string `json:"sha256,omitempty"`
+
+	// Sender is who sent a frame a host relayed, when it was not the host. A
+	// file has no line to prefix the way text does, so the name travels in the
+	// header. It is optional and additive: a peer built before this field
+	// existed ignores it and still reads the frame, which is why it is a field
+	// rather than a new frame kind — a new kind would make an older peer refuse
+	// the transfer.
+	Sender string `json:"sender,omitempty"`
 }
 
 // Frame is a parsed message: the header and the bytes it describes.

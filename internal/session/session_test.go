@@ -1,8 +1,11 @@
 package session
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
 type fakeSession struct {
@@ -135,5 +138,220 @@ func TestBaseCapsWhatItHolds(t *testing.T) {
 		if m.Payload[0] != byte(i) {
 			t.Fatalf("held message %d carries %d, want them in arrival order", i, m.Payload[0])
 		}
+	}
+}
+
+// brokenSession fails every send, the way a peer whose socket died does.
+type brokenSession struct{ *Base }
+
+func (b *brokenSession) Send([]byte) error { return errors.New("socket gone") }
+func (b *brokenSession) Close(string)      {}
+
+// A room is a fan-out: a message from one device reaches every other device,
+// and never comes back to the one that sent it.
+func TestHubRelaysToEveryOtherSession(t *testing.T) {
+	h := NewHub()
+
+	a, b, c := newFake("a", "1.1.1.1"), newFake("b", "2.2.2.2"), newFake("c", "3.3.3.3")
+	h.Register(a)
+	h.Register(b)
+	h.Register(c)
+
+	a.NotifyMessage(Message{From: "alice", Addr: "1.1.1.1", Payload: []byte("hello")})
+
+	want := "alice (1.1.1.1): hello"
+
+	for _, s := range []*fakeSession{b, c} {
+		if len(s.sent) != 1 || string(s.sent[0]) != want {
+			t.Fatalf("%s received %q, want %q", s.ID(), s.sent, want)
+		}
+	}
+
+	if len(a.sent) != 0 {
+		t.Fatalf("the sender received its own message back: %q", a.sent)
+	}
+}
+
+// A relayed file carries the sender in its header, because a file has no line
+// to prefix. The chunk itself must arrive unchanged.
+func TestRelayedPayloadNamesTheSenderOfAFile(t *testing.T) {
+	frame, err := wire.Encode(wire.Header{
+		Kind:   wire.KindFile,
+		ID:     "f1",
+		Name:   "notes.txt",
+		Size:   3,
+		Chunks: 1,
+	}, []byte("abc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	relayed := RelayedPayload(Message{From: "alice", Addr: "192.168.0.5", Payload: frame})
+
+	parsed, err := wire.Parse(relayed)
+	if err != nil {
+		t.Fatalf("the relayed frame does not parse: %v", err)
+	}
+
+	if parsed.Header.Sender != "alice (192.168.0.5)" {
+		t.Errorf("sender = %q, want %q", parsed.Header.Sender, "alice (192.168.0.5)")
+	}
+
+	if string(parsed.Payload) != "abc" {
+		t.Errorf("chunk = %q, want abc", parsed.Payload)
+	}
+}
+
+func TestRelayedPayloadPrefixesText(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  Message
+		want string
+	}{
+		{"name and address", Message{From: "alice", Addr: "192.168.0.5", Payload: []byte("hello")}, "alice (192.168.0.5): hello"},
+		{"name only", Message{From: "alice", Payload: []byte("hello")}, "alice: hello"},
+		{"unnamed peer", Message{Payload: []byte("hello")}, "peer: hello"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := string(RelayedPayload(tt.msg)); got != tt.want {
+				t.Errorf("RelayedPayload = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// One send failing must not stop the message reaching the rest: a device whose
+// socket died is not the room's problem.
+func TestBroadcastKeepsGoingWhenOneSendFails(t *testing.T) {
+	h := NewHub()
+
+	dead := &brokenSession{Base: NewBase("dead", "0.0.0.0")}
+	live := newFake("live", "1.1.1.1")
+
+	h.Register(dead)
+	h.Register(live)
+
+	if sent := h.Broadcast("", []byte("hello")); sent != 1 {
+		t.Fatalf("Broadcast delivered to %d sessions, want 1", sent)
+	}
+
+	if len(live.sent) != 1 {
+		t.Fatalf("the live session received %q, want one message", live.sent)
+	}
+}
+
+// A session that is already closed is skipped rather than written to.
+func TestBroadcastSkipsAClosedSession(t *testing.T) {
+	h := NewHub()
+
+	closed := newFake("closed", "0.0.0.0")
+	closed.NotifyClose("gone")
+
+	h.Register(closed)
+
+	if sent := h.Broadcast("", []byte("hello")); sent != 0 {
+		t.Fatalf("Broadcast delivered to %d sessions, want none", sent)
+	}
+
+	if len(closed.sent) != 0 {
+		t.Fatalf("a closed session was written to: %q", closed.sent)
+	}
+}
+
+// A device that leaves is taken out of the room, so the next message does not
+// go to it.
+func TestHubUnregistersOnClose(t *testing.T) {
+	h := NewHub()
+
+	a, b := newFake("a", "1.1.1.1"), newFake("b", "2.2.2.2")
+	h.Register(a)
+	h.Register(b)
+
+	b.Close("peer said goodbye")
+
+	if got := h.Count(); got != 1 {
+		t.Fatalf("the room holds %d sessions after a departure, want 1", got)
+	}
+
+	h.Broadcast("", []byte("hello"))
+
+	if len(b.sent) != 0 {
+		t.Fatalf("a departed session received a message: %q", b.sent)
+	}
+
+	if len(a.sent) != 1 {
+		t.Fatalf("the remaining session received %q, want one message", a.sent)
+	}
+}
+
+// The consumer and an added handler both see every message: a relay must not
+// take the printer's place, and the printer must not take the relay's.
+func TestAddMessageHandlerRunsBesideTheConsumer(t *testing.T) {
+	b := NewBase("x", "r")
+
+	var consumer, extra []string
+
+	b.OnMessage(func(m Message) { consumer = append(consumer, string(m.Payload)) })
+	b.AddMessageHandler(func(m Message) { extra = append(extra, string(m.Payload)) })
+
+	b.NotifyMessage(Message{Payload: []byte("one")})
+
+	if len(consumer) != 1 || consumer[0] != "one" {
+		t.Fatalf("consumer saw %v, want [one]", consumer)
+	}
+
+	if len(extra) != 1 || extra[0] != "one" {
+		t.Fatalf("added handler saw %v, want [one]", extra)
+	}
+}
+
+// A handler added after frames arrived still gets them: the relay is installed
+// on a session that may already have delivered a frame.
+func TestAddMessageHandlerReplaysHeldMessages(t *testing.T) {
+	b := NewBase("x", "r")
+
+	b.NotifyMessage(Message{Payload: []byte("first")})
+	b.NotifyMessage(Message{Payload: []byte("second")})
+
+	var got []string
+
+	b.AddMessageHandler(func(m Message) { got = append(got, string(m.Payload)) })
+
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("added handler saw %v, want [first second]", got)
+	}
+}
+
+func TestAddCloseHandlerRunsBesideTheConsumer(t *testing.T) {
+	b := NewBase("x", "r")
+
+	var consumer, extra string
+
+	b.OnClose(func(reason string) { consumer = reason })
+	b.AddCloseHandler(func(reason string) { extra = reason })
+
+	b.NotifyClose("bye")
+
+	if consumer != "bye" || extra != "bye" {
+		t.Fatalf("close handlers saw consumer=%q extra=%q, want both bye", consumer, extra)
+	}
+}
+
+// A caller that installs its hooks after the listener bound must still learn
+// about a device that joined in between.
+func TestOnJoinReplaysTheSessionsAlreadyInTheRoom(t *testing.T) {
+	h := NewHub()
+
+	a := newFake("a", "1.1.1.1")
+	h.Register(a)
+
+	var joined []string
+
+	h.OnJoin(func(s Session) { joined = append(joined, s.ID()) })
+
+	if len(joined) != 1 || joined[0] != "a" {
+		t.Fatalf("OnJoin replayed %v, want [a]", joined)
 	}
 }

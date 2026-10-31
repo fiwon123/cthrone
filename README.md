@@ -32,9 +32,9 @@
 
 ## About
 
-cthrone is a chat tool for the terminal. One device hosts a chat server, another
-connects to it, and the two exchange messages in the terminal — no account, no
-GUI, no configuration file.
+cthrone is a chat tool for the terminal. One device hosts a chat server, any
+number of devices connect to it, and everyone in the room sees what everyone
+says — no account, no GUI, no configuration file.
 
 There are two transports, and the command set is the same either way:
 
@@ -329,6 +329,20 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    peer — which speaks plaintext — needs `--no-tls` on both sides; see
    [Security](#security).
 
+   A host is a **room**, not a pair: a third device joins with the same
+   command, and a message from any device reaches every other device in it.
+   What one device sends is printed once, on every screen, with its sender
+   named — `alice (192.168.0.5): hello` — and the host relays it rather than
+   keeping it. Files relay the same way; the sender's name travels in the
+   frame's header, because a file has no line to prefix. On a device that is
+   connected to a host the line reads `host: alice (192.168.0.5): hello`: the
+   first name is the device it is connected to, the second is who spoke.
+
+   The host's terminal is one console for the whole room, so its own line goes
+   to every device and two devices never compete for the keyboard. A device
+   that leaves does not end the host; Ctrl-C at the host does, and the port
+   goes back to the machine.
+
 4. Do not know the address? Scan the local subnet for a chat server:
 
    ```bash
@@ -554,7 +568,7 @@ What the Android CLI does and does not give you:
 
 | Command | What it does |
 |---|---|
-| `cthrone host` | host the chat server and wait for a client |
+| `cthrone host` | host the room: every device that joins sees the messages of the others |
 | `cthrone connect <ip>` | connect to a device's chat server and chat |
 | `cthrone scan` | scan the default route's `/24` for chat servers (shows device names when discovered) |
 | `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |

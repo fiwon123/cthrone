@@ -253,17 +253,24 @@ func TestHostReleasesThePortWhenTheUserQuits(t *testing.T) {
 	data.Host = "127.0.0.1"
 	data.Name = "host"
 
-	original := runHost
-	t.Cleanup(func() { runHost = original })
+	original := runRoom
+	t.Cleanup(func() { runRoom = original })
 
-	// The loop holds the host open until the test has a peer in, then reports
-	// the user quit — the two halves of Ctrl-C, in the order a tty produces
-	// them.
+	// The console holds the host open until a device has joined the room, then
+	// reports the user quit — the two halves of Ctrl-C, in the order a tty
+	// produces them. OnJoin replays a device that joined before the hook was
+	// installed, so the wait cannot miss one.
 	entered := make(chan struct{}, 1)
 
 	quit := make(chan struct{})
-	runHost = func(session.Session) bool {
-		entered <- struct{}{}
+	runRoom = func(hub *session.Hub) bool {
+		hub.OnJoin(func(session.Session) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		})
+
 		<-quit
 
 		return true
