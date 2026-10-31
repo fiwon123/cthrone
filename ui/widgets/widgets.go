@@ -54,10 +54,16 @@ func SelectableHeading(text string) *widget.Label {
 // so the caption becomes a label beside a check with no text. The box is the
 // only thing that toggles: a caption that toggled on tap could not also be
 // selected by dragging across it, and selecting it is the point of the row.
+//
+// The row holds its content; it is not the content. A struct that both embedded
+// the container and returned it from CreateRenderer had the container's
+// position counted twice by the driver's walk, so the row painted one line
+// below the line it reacted on.
 type CheckRow struct {
-	*fyne.Container
+	widget.BaseWidget
 
-	box *widget.Check
+	content *fyne.Container
+	box     *widget.Check
 }
 
 // NewCheckRow builds a check whose caption can be dragged and copied where the
@@ -68,11 +74,14 @@ type CheckRow struct {
 // "Skip the certificate check (insecure)" on one line.
 func NewCheckRow(text string, changed func(bool), selectable bool) *CheckRow {
 	box := widget.NewCheck("", changed)
+	row := &CheckRow{box: box}
+	// ExtendBaseWidget links the embedding struct to the renderer cache; it has
+	// to run before anything can ask this widget for its renderer.
+	row.ExtendBaseWidget(row)
 
-	return &CheckRow{
-		Container: container.NewBorder(nil, nil, box, nil, Label(text, selectable)),
-		box:       box,
-	}
+	row.content = container.NewBorder(nil, nil, box, nil, Label(text, selectable))
+
+	return row
 }
 
 // Checked reports whether the box is ticked.
@@ -87,7 +96,7 @@ func (r *CheckRow) Checked() bool { return r.box.Checked }
 // embeds a container is neither: without this method the row — box, caption and
 // all — would be skipped and never painted.
 func (r *CheckRow) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(r.Container)
+	return widget.NewSimpleRenderer(r.content)
 }
 
 // SetChecked ticks or clears the box.
@@ -129,8 +138,24 @@ func Form(stack, selectable bool, rows []Row) fyne.CanvasObject {
 
 	cells := make([]fyne.CanvasObject, 0, len(rows)*2)
 	for _, row := range rows {
-		cells = append(cells, Label(row.Caption, selectable), row.Field)
+		cells = append(cells, formCaption(row.Caption, selectable), row.Field)
 	}
 
 	return container.New(layout.NewFormLayout(), cells...)
+}
+
+// formCaption is a caption for the two-column branch.
+//
+// It must not wrap in its own minimum size. A wrapping label reports a minimum
+// width of two inner paddings, and layout.FormLayout sizes the label column
+// from that: the whole column then collapsed to 16 px and every caption was
+// clipped to a sliver, with the fields starting almost at the left edge. The
+// column is as wide as the longest caption and every other caption is aligned
+// in it, so a caption does not need to wrap; that is the same shape Fyne's own
+// widget.Form uses for its labels.
+func formCaption(text string, selectable bool) *widget.Label {
+	caption := Label(text, selectable)
+	caption.Wrapping = fyne.TextWrapOff
+
+	return caption
 }
