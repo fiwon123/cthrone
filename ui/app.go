@@ -101,15 +101,15 @@ type gui struct {
 	thisDevice *widget.Label
 
 	// credential is the read-only line that names the credential in force and
-	// where it came from — this device's key, or a shared secret from the
-	// field, the environment or the token file. A token file a user forgot
-	// about otherwise switches the device into the secret model in silence,
-	// and a key-paired peer is then refused with no explanation on screen.
+	// where it came from — this device's key, or a shared secret typed here or
+	// set in the environment. It also reports a token file an older version
+	// left behind: that file decides nothing now, and a user who is told so is
+	// the one who can stop looking for the cause in the wrong place.
 	credential *widget.Label
 
-	// forgetSecret deletes the token file that is in charge. It is shown only
-	// while that file is what decides the credential, because deleting it in
-	// any other case would change nothing the user could see.
+	// forgetSecret deletes the token file an older version read. It decides
+	// nothing now, so the button is an offer to remove a leftover that used to
+	// decide the model, not a switch.
 	forgetSecret *widget.Button
 
 	// about is the read-only tab: which build this is, where it comes from,
@@ -403,7 +403,7 @@ func (g *gui) build() {
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
-	g.tokenEntry.SetPlaceHolder("empty: the token file, else key pairing")
+	g.tokenEntry.SetPlaceHolder("empty: pair by key, with nothing to copy")
 	g.tokenEntry.OnChanged = func(string) { g.refreshCredential() }
 
 	g.fingerprintEntry = widget.NewEntry()
@@ -449,7 +449,7 @@ func (g *gui) build() {
 
 	g.credential = selectableLabel("")
 
-	g.forgetSecret = widget.NewButtonWithIcon("Stop using the shared secret", theme.ContentClearIcon(), g.forgetSecretFile)
+	g.forgetSecret = widget.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile)
 	g.forgetSecret.Hide()
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
@@ -1436,6 +1436,9 @@ func (g *gui) tls() auth.TLS {
 	}
 }
 
+// tokenFile is the token file older versions read without being asked. This
+// build never opens it: it is named on the Setup tab so a user can see that a
+// leftover is there, and deleted by a press of the button beside that line.
 func (g *gui) tokenFile() string {
 	return filepath.Join(g.configDir(), "token")
 }
@@ -1548,12 +1551,13 @@ func (g *gui) setAboutNote(text string) {
 }
 
 // refreshCredential keeps the Setup tab saying which credential the next Host
-// or Connect will speak, and offers to delete the token file while that file is
-// the thing in charge.
+// or Connect will speak, and offers to delete the token file an older version
+// left behind.
 //
-// The button is hidden when a typed secret or the environment already wins:
-// deleting the file would then change nothing the user could see, and a button
-// that does nothing is worse than no button.
+// The button is shown whenever that file exists, whatever the credential in
+// force: the file no longer decides anything, so it is litter that used to
+// decide something, and a user who has just been told it is no longer read is
+// the one who wants it gone.
 func (g *gui) refreshCredential() {
 	if g.credential == nil || g.tokenEntry == nil {
 		return
@@ -1562,34 +1566,35 @@ func (g *gui) refreshCredential() {
 	typed := strings.TrimSpace(g.tokenEntry.Text)
 	envSet := os.Getenv(auth.EnvToken) != ""
 	path := g.tokenFile()
-	fromFile := secretFileHasValue(path)
+	legacy := secretFileExists(path)
 
-	text := credentialText(typed, envSet, path, fromFile)
+	text := credentialText(typed, envSet, path, legacy)
 	g.credential.SetText(text)
 
 	if g.aboutCredential != nil {
 		g.aboutCredential.SetText(text)
 	}
 
-	if fromFile && typed == "" && !envSet {
+	if legacy {
 		g.forgetSecret.Show()
 	} else {
 		g.forgetSecret.Hide()
 	}
 }
 
-// forgetSecretFile deletes the token file after a confirmation, which is what
-// puts this device back on key pairing.
+// forgetSecretFile deletes the token file an older version left behind.
 //
-// It asks first because the file is the only place that secret exists: a device
-// that still holds it will not connect afterwards, and the deletion cannot be
-// undone from this screen.
+// The file is not read by this build, so deleting it changes no connection by
+// itself; it removes the last trace of a secret that stopped applying, which is
+// what stops the next person from looking for the cause in the wrong place. A
+// typed secret or the environment is untouched — this deletes a file, nothing
+// else.
 func (g *gui) forgetSecretFile() {
 	path := g.tokenFile()
 
 	g.showCopyableConfirm(
-		"Stop using the shared secret",
-		"The shared secret in\n"+path+"\nwill be deleted.\n\nThis device will pair by its key again. A device that still holds the secret has to clear it too before the two connect.",
+		"Delete the old token file",
+		"The file\n"+path+"\nis no longer read by this version.\n\nDeleting it changes no connection here: this device pairs by its key, and a shared secret has to be typed on the Setup tab. Delete the leftover file?",
 		"Delete",
 		"Cancel",
 		func(confirmed bool) {
@@ -1604,7 +1609,7 @@ func (g *gui) forgetSecretFile() {
 			}
 
 			g.refreshCredential()
-			g.setStatus("Deleted " + path + " — this device pairs by its key again.")
+			g.setStatus("Deleted " + path + " — this device pairs by its key.")
 		},
 	)
 }
@@ -1614,12 +1619,16 @@ func (g *gui) forgetSecretFile() {
 // They live in configDir rather than at the CLI's default, because a phone has
 // no ~/.config to rely on; on the desktop configDir is that same directory, so
 // the GUI and the CLI share one identity and one pin store.
+//
+// No token file is passed: the app reads a shared secret only from the field
+// on the Setup tab, so a file left behind by an older version cannot move the
+// device into the secret model on its own. g.tokenFile is named on screen and
+// offered for deletion instead.
 func (g *gui) pairingOptions() pairing.Options {
 	dir := g.configDir()
 
 	return pairing.Options{
 		FlagToken: strings.TrimSpace(g.tokenEntry.Text),
-		TokenFile: g.tokenFile(),
 		KeyFile:   filepath.Join(dir, "identity.key"),
 		PinsFile:  filepath.Join(dir, "peers.json"),
 	}

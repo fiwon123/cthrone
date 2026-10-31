@@ -2,10 +2,12 @@
 //
 // There are two, and exactly one is used:
 //
-//   - a shared secret, when one is configured — a flag, the environment or a
-//     file. Every device that holds it is the same identity, which is what
-//     v0.6.0 peers know, so a session with a secret keeps speaking the v1
-//     handshake;
+//   - a shared secret, when one is configured — the flag, the environment, or
+//     a token file named with --token-file. A file in the configuration
+//     directory is not read unless it is named: a secret nobody remembered
+//     writing must not decide the model. Every device that holds the secret is
+//     the same identity, which is what v0.6.0 peers know, so a session with one
+//     keeps speaking the v1 handshake;
 //   - this device's own key, when no secret is configured. The key is never
 //     distributed: a peer pins it on first contact and refuses a different one
 //     under the same name. That is what lets two devices pair with no value
@@ -18,6 +20,7 @@ package pairing
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/discovery"
@@ -85,6 +88,33 @@ func DescribeOptions(opts Options) string {
 	return cred.Describe()
 }
 
+// LegacyTokenFileNotice explains a token file that an older version read and
+// this build does not: the file is still in the configuration directory, but
+// nothing opens it, so the device pairs by its key and a peer that expects the
+// shared secret is refused.
+//
+// Silence would hide a behaviour change behind a connection that will not
+// complete, which is the failure this change exists to end. The notice is
+// empty when there is nothing to say: no such file, or a secret already in
+// force from a source the user named. It never reads the file — the path is
+// not the secret.
+func LegacyTokenFileNotice(opts Options) string {
+	if opts.FlagToken != "" || opts.TokenFile != "" || os.Getenv(auth.EnvToken) != "" {
+		return ""
+	}
+
+	path, err := auth.LegacyFile()
+	if err != nil || path == "" {
+		return ""
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("Note: %s is no longer read — this device pairs by its key. Pass --token-file %s to use that secret, or delete the file.", path, path)
+}
+
 // Describe names the credential and where it came from, for the line a run
 // prints when it starts.
 //
@@ -142,15 +172,19 @@ func (c Credential) Config(mode e2e.Mode, name string) e2e.Config {
 	return e2e.Config{Identity: c.identity, Pins: c.pins, Name: name, Mode: mode}
 }
 
-// Options names every source a credential may come from. An empty path means
-// the default file for that kind, which is what the CLI uses; the GUI passes
-// its own directory because a phone has no ~/.config to rely on.
+// Options names every source a credential may come from. An empty KeyFile or
+// PinsFile means the default one for the platform, which is what the CLI uses;
+// the GUI passes its own directory because a phone has no ~/.config to rely on.
+// An empty TokenFile means no secret file at all.
 type Options struct {
 	// FlagToken is the --token value. It is the least private source, and the
 	// most explicit, so it wins.
 	FlagToken string
 
-	// TokenFile is the file the shared secret is read from.
+	// TokenFile is the file the shared secret is read from — and only one the
+	// caller named. There is no default: the file in the configuration
+	// directory is not read, because a secret nobody remembers writing would
+	// otherwise decide the model. See auth.LegacyFile.
 	TokenFile string
 
 	// KeyFile is this device's long-term key, generated on first use.
@@ -171,12 +205,7 @@ type Options struct {
 // to fall back to pairing: the user meant to use the secret, and a device that
 // quietly paired instead would have a pin store nobody asked for.
 func Load(opts Options) (Credential, error) {
-	tokenFile, err := tokenPath(opts.TokenFile)
-	if err != nil {
-		return Credential{}, err
-	}
-
-	token, err := auth.Resolve(opts.FlagToken, tokenFile)
+	token, err := auth.Resolve(opts.FlagToken, opts.TokenFile)
 	if err != nil {
 		return Credential{}, err
 	}
@@ -219,17 +248,6 @@ func Load(opts Options) (Credential, error) {
 		pins:     pins,
 		source:   SourceDeviceKey,
 	}, nil
-}
-
-// tokenPath is the file a shared secret is read from. A caller that names no
-// file gets the default one, so the host and the client on one machine agree
-// without a flag.
-func tokenPath(configured string) (string, error) {
-	if configured != "" {
-		return configured, nil
-	}
-
-	return auth.DefaultFile()
 }
 
 // keyPath is this device's key file.

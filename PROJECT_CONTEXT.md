@@ -32,7 +32,7 @@ through a NATS broker.
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
-- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--peers-file`, `--no-tls`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The websocket transport is encrypted by default, `--no-tls` is the opt-out, and `--tls` is accepted as a no-op so a v0.6.0 command line still runs. What the tool writes for itself lives in the platform's user configuration directory — `~/.config/cthrone` on Linux, `~/Library/Application Support/cthrone` on macOS, `%AppData%\cthrone` on Windows — for the CLI and the desktop GUI, and in the app's private storage on Android: this device's key, the pins it trusts (device keys and host certificates), the TLS material, and — only when one is configured — the shared secret
+- **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--peers-file`, `--no-tls`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The websocket transport is encrypted by default, `--no-tls` is the opt-out, and `--tls` is accepted as a no-op so a v0.6.0 command line still runs. What the tool writes for itself lives in the platform's user configuration directory — `~/.config/cthrone` on Linux, `~/Library/Application Support/cthrone` on macOS, `%AppData%\cthrone` on Windows — for the CLI and the desktop GUI, and in the app's private storage on Android: this device's key, the pins it trusts (device keys and host certificates), and the TLS material. A shared secret is used only when it is named — `--token`, `CTHRONE_TOKEN` or `--token-file` — and the tool writes no `token` file; one left by v0.6.0 is reported, never read on its own (issue #163)
 - **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container. The APK is the exception: it needs the Android SDK, an NDK and the `fyne` CLI, so it is built in CI
 
 ## Architecture
@@ -59,7 +59,7 @@ uses — not the first private address an adapter happens to list, which on a
 machine with a docker bridge or a VPN is often the wrong one — and reports the
 addresses that answer on the chat port, never this device's own, so a host does
 not offer itself as a peer. `internal/pairing` decides *which credential* a
-session speaks — the shared secret when one is configured, this device's key
+session speaks — the shared secret when the user named one, this device's key
 otherwise — so the transports cannot disagree.
 
 The GUI is not a fourth transport: `ui/` reads and writes through the same
@@ -78,9 +78,8 @@ and write.
 - **No configuration file** — settings come from flags and the environment, so
   there is no state to migrate. What the tool writes for itself — in the
   platform user configuration directory (`identity.key`, `peers.json`,
-  `cert.pem`/`key.pem`, and a `token` only when a secret is configured) — is
-  generated on first use and is device state or secret material, not
-  configuration. (2026-01, corrected 2026-10)
+  `cert.pem`/`key.pem`) — is generated on first use and is device state or
+  secret material, not configuration. (2026-01, corrected 2026-10)
 - **The `ct` short alias ships next to the `cthrone` binary** — a name typed
   many times a day should be short. (2026-01)
 - **The release archive carries the README and the licenses** — a download has
@@ -108,6 +107,11 @@ and write.
   issue #145; a NATS subject has no host to ask, so a first contact there is
   pinned without a prompt.) The shared secret stays for one release so a
   v0.6.0 peer still connects, and the handshake version gates the two models.
+  A secret counts only when it is named — `--token`, `CTHRONE_TOKEN` or
+  `--token-file`; a `token` file in the configuration directory is no longer
+  read on its own, because a file nobody remembered writing silently moved an
+  upgraded device into the secret model and asked the peer for a value nobody
+  chose (2026-10, issue #163).
   Pairing by key is what makes the tool usable from a phone, which has no
   terminal and no clipboard that crosses devices. (2026-10, issue #125;
   supersedes the "the secret is the identity" rule of #11/#109)
@@ -165,8 +169,9 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, and pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`). `v0.8.1` is the published release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
-  ed25519 key when no secret is configured, or the shared secret when one is
-  (the v0.6.0 path). X25519 + HKDF per direction, AES-256-GCM, a sequence
+  ed25519 key when no secret is configured, or the shared secret when the user
+  names one — `--token`, `CTHRONE_TOKEN` or `--token-file` — which is the
+  v0.6.0 path. X25519 + HKDF per direction, AES-256-GCM, a sequence
   number that fails a replay, and a handshake version that gates the two
   models: a peer speaking the other one is refused, never downgraded. There is
   no plaintext or anonymous mode. The websocket **connection** is encrypted
@@ -219,15 +224,17 @@ docker-compose.yml   the dev sandbox and a local NATS server
 - The tool writes its device state into the platform's user configuration
   directory (`internal/discovery.ConfigDir`, i.e. `os.UserConfigDir` +
   `cthrone`): this device's key (`identity.key`, `0600`), the pins
-  (`peers.json`, `0600` — device keys and host certificate fingerprints), the
-  TLS material (`cert.pem`, and `key.pem` at `0600`), and — only when one is
-  configured — the shared secret (`token`, `0600`). None of it is ever
-  committed; see `AGENTS.md` → Environment and Secret-File Rules.
+  (`peers.json`, `0600` — device keys and host certificate fingerprints), and
+  the TLS material (`cert.pem`, and `key.pem` at `0600`). None of it is ever
+  committed; see `AGENTS.md` → Environment and Secret-File Rules. The tool
+  writes **no** `token` file: a v0.6.0 installation may still have one there,
+  and nothing reads it unless a run names it with `--token-file`.
 - The Android app writes the same material into its **own private storage**,
   because a phone has no user configuration directory it can rely on. A phone
   that hosts shows its own fingerprint in a dialog and copies nothing: the
   other device connects and the two screens are compared. A shared secret is
-  shown and copied to the clipboard instead, and only when one is configured.
+  shown and copied to the clipboard instead, and only when the user typed one
+  on the Setup tab.
 - **The APK is built, not observed.** Nothing in CI installs it on a device or
   an emulator; `make gui-android` and the release job prove that it packages,
   and that it carries an `AndroidManifest.xml` and an arm64 library, and no
