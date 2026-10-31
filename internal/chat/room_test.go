@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
 // A room reads stdin once and sends the line to every device in it: two
@@ -61,6 +62,73 @@ func TestRoomRelaysAMessageToTheOtherDevices(t *testing.T) {
 
 	if sent := alice.outgoing(); len(sent) != 0 {
 		t.Fatalf("the sender was sent its own message: %q", sent)
+	}
+}
+
+// A line typed into the room that begins with the wire magic goes out wrapped:
+// every device reads the line, and none of them mistakes it for a damaged
+// frame — which is what would close a session.
+func TestRoomWrapsALineThatBeginsWithTheMagic(t *testing.T) {
+	hub := session.NewHub()
+
+	alice := newFake("alice")
+	hub.Register(alice)
+
+	in, w, out := pipeTerminal(t)
+	room := newRoom(hub, in, out)
+
+	go room.Run()
+
+	waitForOutput(t, out, "> ")
+	fmt.Fprint(w, "CTH1 hello\r")
+
+	waitForOutput(t, out, "You: CTH1 hello")
+
+	sent := alice.outgoing()
+	if len(sent) != 1 {
+		t.Fatalf("alice received %d payloads, want one", len(sent))
+	}
+
+	if !wire.IsFrame(sent[0]) {
+		t.Fatalf("the line was sent unwrapped, so a device would read it as a frame: %q", sent[0])
+	}
+
+	frame, err := wire.Parse(sent[0])
+	if err != nil {
+		t.Fatalf("the sent payload does not parse: %v", err)
+	}
+
+	if frame.Header.Kind != wire.KindText || string(frame.Payload) != "CTH1 hello" {
+		t.Fatalf("sent %q (%q), want the line as text", frame.Header.Kind, frame.Payload)
+	}
+}
+
+// A wrapped line from a device is printed and relayed as a line, labelled like
+// any other text: the wrapper is the sender's problem, not the room's.
+func TestRoomRelaysWrappedTextAsALine(t *testing.T) {
+	hub := session.NewHub()
+
+	alice, bob := newFake("alice"), newFake("bob")
+	hub.Register(alice)
+	hub.Register(bob)
+
+	in, _, out := pipeTerminal(t)
+	room := newRoom(hub, in, out)
+
+	go room.Run()
+
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte("CTH1 hello"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	alice.NotifyMessage(session.Message{From: "alice", Addr: "192.168.0.5:1234", Payload: payload})
+
+	waitForOutput(t, out, "alice (192.168.0.5:1234): CTH1 hello")
+
+	got := bob.outgoing()
+	if len(got) != 1 || string(got[0]) != "alice (192.168.0.5:1234): CTH1 hello" {
+		t.Fatalf("bob received %q, want the relayed line", got)
 	}
 }
 

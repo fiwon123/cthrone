@@ -17,6 +17,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 	"golang.org/x/term"
 )
 
@@ -151,8 +152,29 @@ func peerNotice(p e2e.Peer, own string) string {
 // the reading; this only renders.
 func receive(s session.Session, input *line, out io.Writer) {
 	s.OnMessage(func(m session.Message) {
-		notice(out, input, senderLabel(m)+": "+string(m.Payload))
+		notice(out, input, senderLabel(m)+": "+messageText(m.Payload))
 	})
+}
+
+// messageText is what a message says.
+//
+// Text is the bytes that arrived, byte for byte. The one sentence a sender has
+// to wrap is the one that begins with the wire magic — the receiver would read
+// it as a frame — so a text frame is unwrapped here and printed as the line it
+// carries. A file frame is not text and is left as it arrived: the terminal has
+// no file support, and turning a transfer into a sentence would be worse than
+// the noise it already is.
+func messageText(payload []byte) string {
+	if !wire.IsFrame(payload) {
+		return string(payload)
+	}
+
+	frame, err := wire.Parse(payload)
+	if err != nil || frame.Header.Kind != wire.KindText {
+		return string(payload)
+	}
+
+	return string(frame.Payload)
 }
 
 // announceSealed prints what a sealed session has to say above the input line:
@@ -217,7 +239,19 @@ func send(s session.Session, input *line, in *os.File, out io.Writer, quit *atom
 		case enter:
 			msg := input.take()
 
-			if err := s.Send([]byte(msg)); err != nil {
+			// The one line that cannot go out as it was typed is the one that
+			// begins with the wire magic: the peer would read it as a frame,
+			// and a damaged frame closes the session. Encode wraps it in a text
+			// frame, which the peer unwraps, so the sentence arrives whole.
+			payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(msg))
+			if err != nil {
+				input.put(msg)
+				notice(out, input, "Not sent: "+err.Error())
+
+				break
+			}
+
+			if err := s.Send(payload); err != nil {
 				// The handshake may not have finished yet, and a send that
 				// fails must not take the terminal with it: keep the text so
 				// the user can press Enter again, and say why nothing went.

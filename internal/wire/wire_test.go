@@ -225,12 +225,6 @@ func TestEncodeRefusesToBuildBadFrames(t *testing.T) {
 		want    error
 	}{
 		{
-			name:    "text that starts with the magic",
-			header:  Header{Kind: KindText},
-			payload: []byte("CTH1 says hello"),
-			want:    ErrFrame,
-		},
-		{
 			name:   "unknown kind",
 			header: Header{Kind: "blob"},
 			want:   ErrHeader,
@@ -317,6 +311,66 @@ func TestEncodeRefusesToBuildBadFrames(t *testing.T) {
 				t.Errorf("Encode() error = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestEncodeWrapsTextThatBeginsWithTheMagic is the rule for the one sentence a
+// sender cannot hand over unwrapped: the receiver reads anything that starts
+// with the magic as a frame, so a sentence that does is carried inside a text
+// frame and arrives as the sentence it is.
+func TestEncodeWrapsTextThatBeginsWithTheMagic(t *testing.T) {
+	// A sentence that also looks like a header — magic, a length, JSON — is
+	// the case that made a GUI call a chat message a damaged transfer.
+	tests := []struct {
+		name string
+		text []byte
+	}{
+		{"the magic alone", []byte(Magic)},
+		{"a sentence", []byte("CTH1 says hello")},
+		{"a sentence that looks like a header", append([]byte(Magic), 0x00, 0x00, 0x00, 0x02, '{', '}')},
+		{"text that is not UTF-8", append([]byte(Magic), 0xff, 0xfe)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := Encode(Header{Kind: KindText}, tt.text)
+			if err != nil {
+				t.Fatalf("Encode() error = %v", err)
+			}
+
+			if !IsFrame(data) {
+				t.Fatalf("Encode() returned text that a receiver would not wrap back: %q", data)
+			}
+
+			got, err := Parse(data)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			if got.Header.Kind != KindText {
+				t.Errorf("kind = %q, want %q", got.Header.Kind, KindText)
+			}
+
+			if !bytes.Equal(got.Payload, tt.text) {
+				t.Errorf("payload = %q, want %q", got.Payload, tt.text)
+			}
+		})
+	}
+}
+
+// TestEncodeLeavesOrdinaryTextAlone is the compatibility promise from the other
+// side: only the sentence that needs wrapping is wrapped, so a peer that
+// predates the envelope reads everything else byte for byte.
+func TestEncodeLeavesOrdinaryTextAlone(t *testing.T) {
+	for _, text := range [][]byte{nil, []byte("hello"), []byte("CTH"), []byte("CTH0 is not the magic")} {
+		data, err := Encode(Header{Kind: KindText}, text)
+		if err != nil {
+			t.Fatalf("Encode(%q) error = %v", text, err)
+		}
+
+		if !bytes.Equal(data, text) {
+			t.Errorf("Encode(%q) = %q, want the text unchanged", text, data)
+		}
 	}
 }
 

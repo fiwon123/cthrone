@@ -460,6 +460,14 @@ func RelayedPayload(m Message) []byte {
 	if wire.IsFrame(m.Payload) {
 		frame, err := wire.Parse(m.Payload)
 		if err == nil {
+			// A text frame is a sentence the sender had to wrap because it
+			// began with the magic. Unwrapping it here keeps the rule for
+			// text — the label goes in front of the sentence — and an older
+			// peer reads it as ordinary text.
+			if frame.Header.Kind == wire.KindText {
+				return []byte(label + ": " + string(frame.Payload))
+			}
+
 			frame.Header.Sender = label
 
 			if encoded, err := wire.Encode(frame.Header, frame.Payload); err == nil {

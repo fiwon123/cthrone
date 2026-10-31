@@ -9,6 +9,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 	"golang.org/x/term"
 )
 
@@ -51,7 +52,7 @@ func newRoom(hub *session.Hub, in *os.File, out io.Writer) *Room {
 	// The hooks are installed here, not in Run, so a device that joins the
 	// instant the listener binds is still reported: Run may not have started.
 	hub.OnMessage(func(m session.Message) {
-		notice(r.out, r.input, senderLabel(m)+": "+string(m.Payload))
+		notice(r.out, r.input, senderLabel(m)+": "+messageText(m.Payload))
 	})
 
 	hub.OnJoin(func(s session.Session) {
@@ -148,7 +149,19 @@ func (r *Room) say() {
 		return
 	}
 
-	if sent := r.hub.Broadcast("", []byte(msg)); sent == 0 {
+	// A sentence that begins with the wire magic cannot go out as it was
+	// typed: a device would read it as a frame, and a damaged frame closes its
+	// session. Encode wraps it in a text frame, which the receiver unwraps, so
+	// the line arrives as the text it is.
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(msg))
+	if err != nil {
+		r.input.put(msg)
+		notice(r.out, r.input, "Not sent: "+err.Error())
+
+		return
+	}
+
+	if sent := r.hub.Broadcast("", payload); sent == 0 {
 		r.input.put(msg)
 		notice(r.out, r.input, "Not sent: no device is connected")
 
