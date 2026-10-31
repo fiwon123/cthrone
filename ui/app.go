@@ -1036,11 +1036,11 @@ func (g *gui) send(text string) {
 		return
 	}
 
-	// Text goes through the envelope so the one string the receiver would
-	// misread — a message beginning with the magic — is refused here, where the
-	// user can be told, instead of arriving as a damaged frame. For every other
-	// message Encode hands the bytes back unchanged, so a peer that predates the
-	// envelope still reads it.
+	// Text goes through the envelope, which is what keeps the one string the
+	// receiver would misread — a message beginning with the magic — from
+	// arriving as a damaged frame: Encode wraps that line in a text frame, and
+	// the receiver unwraps it. For every other message Encode hands the bytes
+	// back unchanged, so a peer that predates the envelope still reads it.
 	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(text))
 	if err != nil {
 		g.setStatus("Not sent: " + err.Error())

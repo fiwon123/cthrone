@@ -202,6 +202,27 @@ func TestRelayedPayloadNamesTheSenderOfAFile(t *testing.T) {
 	}
 }
 
+// TestRelayedPayloadUnwrapsATextFrame covers the sentence a sender had to wrap
+// because it begins with the magic: the label rule is the same for it as for
+// any other line, and an older peer that knows nothing of the wrapper reads a
+// sentence rather than a frame.
+func TestRelayedPayloadUnwrapsATextFrame(t *testing.T) {
+	frame, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte("CTH1 says hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	relayed := RelayedPayload(Message{From: "alice", Addr: "192.168.0.5", Payload: frame})
+
+	if got := string(relayed); got != "alice (192.168.0.5): CTH1 says hello" {
+		t.Errorf("RelayedPayload = %q, want the labelled line", got)
+	}
+
+	if wire.IsFrame(relayed) {
+		t.Errorf("the relayed line is still a frame: %q", relayed)
+	}
+}
+
 func TestRelayedPayloadPrefixesText(t *testing.T) {
 	tests := []struct {
 		name string
