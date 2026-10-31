@@ -16,8 +16,13 @@ import (
 //
 // It accepts *container.TabItem so a caller lays its tabs out exactly as it
 // would for AppTabs.
+//
+// The bar holds its content; it is not the content. A struct that both embedded
+// the container and returned it from CreateRenderer had the container's
+// position counted twice by the driver's walk, so the whole window painted four
+// pixels inside itself.
 type Tabs struct {
-	*fyne.Container
+	widget.BaseWidget
 
 	// Items are the tabs, in bar order. The field is exported because the
 	// keyboard shortcut needs the count, just as it did on AppTabs.
@@ -26,6 +31,7 @@ type Tabs struct {
 	// OnSelected runs after the selected tab changes.
 	OnSelected func(*container.TabItem)
 
+	content  *fyne.Container
 	bar      *fyne.Container
 	stack    *fyne.Container
 	buttons  []*CopyButton
@@ -44,6 +50,9 @@ func NewTabs(stacked bool, onCopied func(string), items ...*container.TabItem) *
 		selected: -1,
 		buttons:  make([]*CopyButton, len(items)),
 	}
+	// ExtendBaseWidget links the embedding struct to the renderer cache; it has
+	// to run before anything can ask the bar for its renderer.
+	t.ExtendBaseWidget(t)
 
 	barObjects := make([]fyne.CanvasObject, len(items))
 	contents := make([]fyne.CanvasObject, 0, len(items))
@@ -71,7 +80,7 @@ func NewTabs(stacked bool, onCopied func(string), items ...*container.TabItem) *
 	}
 
 	t.stack = container.NewStack(contents...)
-	t.Container = container.NewBorder(
+	t.content = container.NewBorder(
 		container.NewVBox(container.NewPadded(t.bar), widget.NewSeparator()),
 		nil, nil, nil,
 		t.stack,
@@ -90,7 +99,7 @@ func NewTabs(stacked bool, onCopied func(string), items ...*container.TabItem) *
 // window: the bar is handed to SetContent, and a bar the paint walk cannot
 // enter leaves the screen blank rather than merely plain.
 func (t *Tabs) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(t.Container)
+	return widget.NewSimpleRenderer(t.content)
 }
 
 // SelectIndex shows the tab at index, and marks its label as the selected one.

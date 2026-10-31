@@ -19,17 +19,19 @@ import (
 // goes to the clipboard and a short hint says so, while a normal press still
 // runs the button.
 //
-// The widget is a container rather than an embedded *widget.Button on purpose.
-// A wrapper struct that embeds the button would share the button's methods but
-// not its renderer: Refresh and Enable would act on the embedded object while
-// the canvas kept painting the outer one. Here the real button stays the
-// object that draws itself, and an invisible catcher above it decides which
-// gesture arrived.
+// The widget is not a container. It holds one, and the toolkit draws that
+// container: a wrapper struct that both embedded the container and returned it
+// from CreateRenderer would have the container's position counted twice by the
+// driver's walk — once as the widget, once as the renderer object — and every
+// child would paint at its hit position plus the widget's own position. The
+// container therefore stays private and sits at the widget's origin; the button
+// and the catcher inside it are the objects that draw.
 type CopyButton struct {
-	*fyne.Container
+	widget.BaseWidget
 
 	button   *widget.Button
 	catcher  *copyCatcher
+	content  *fyne.Container
 	copyText string
 	onCopied func(string)
 }
@@ -59,23 +61,28 @@ func newCopyButton(button *widget.Button, text string, onCopied func(string)) *C
 		copyText: text,
 		onCopied: onCopied,
 	}
+	// ExtendBaseWidget links the embedding struct to the renderer cache; it has
+	// to run before anything can ask this widget for its renderer.
+	b.ExtendBaseWidget(b)
+
 	b.catcher = &copyCatcher{
 		Rectangle: canvas.NewRectangle(color.Transparent),
 		owner:     b,
 	}
-	b.Container = container.NewStack(button, b.catcher)
+	b.content = container.NewStack(button, b.catcher)
 
 	return b
 }
 
 // CreateRenderer makes the button a widget the toolkit draws.
 //
-// The paint walk descends into a node only when it is a *fyne.Container or a
-// fyne.Widget — a struct that embeds a container is neither. Without this
-// method every button in the app is a leaf the walker cannot enter, and it
-// paints nothing at all: a window full of invisible buttons and a blank screen.
+// The container is the renderer's object, not the widget itself: the driver
+// enters a fyne.Widget or a *fyne.Container, and a struct that embeds a
+// container is neither. Without this method every button in the app is a leaf
+// the walker cannot enter, and it paints nothing at all: a window full of
+// invisible buttons and a blank screen.
 func (b *CopyButton) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(b.Container)
+	return widget.NewSimpleRenderer(b.content)
 }
 
 // Tapped runs the button. The catcher above the button receives the tap first,

@@ -7,6 +7,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -77,7 +78,7 @@ func TestNewCheckRowKeepsTheCaptionOutOfTheBox(t *testing.T) {
 		t.Errorf("check text = %q, want the caption to live in a label instead", row.box.Text)
 	}
 
-	caption := captionOf(t, row.Container)
+	caption := captionOf(t, row.content)
 	if !caption.Selectable {
 		t.Error("caption is not selectable")
 	}
@@ -104,7 +105,7 @@ func TestCheckRowCaptionCanBeInertForTouch(t *testing.T) {
 
 	row := NewCheckRow("Use NATS instead of websocket", nil, false)
 
-	if caption := captionOf(t, row.Container); caption.Selectable {
+	if caption := captionOf(t, row.content); caption.Selectable {
 		t.Error("caption is selectable; a drag has to reach the pane that scrolls")
 	}
 }
@@ -131,7 +132,7 @@ func TestCheckRowHidesTheCaptionToo(t *testing.T) {
 	defer app.Quit()
 
 	row := NewCheckRow("Skip the certificate check (insecure)", nil, true)
-	caption := captionOf(t, row.Container)
+	caption := captionOf(t, row.content)
 
 	row.Hide()
 	if row.Visible() {
@@ -209,6 +210,47 @@ func TestFormUsesTwoColumnsWhenWide(t *testing.T) {
 	}
 	if box.Objects[1] != fyne.CanvasObject(name) || box.Objects[3] != fyne.CanvasObject(port) {
 		t.Error("the fields do not follow their captions")
+	}
+}
+
+// TestFormTwoColumnCaptionsKeepTheirWidth pins the regression v0.8.4 shipped:
+// the caption column of the desktop Setup form collapsed to the width of the
+// padding, so every caption was clipped to a sliver and the fields started
+// almost at the left edge.
+//
+// layout.FormLayout sizes the label column from each caption's minimum width.
+// A wrapping label reports only two inner paddings there, so the two-column
+// captions must not wrap in their own minimum size — the same shape Fyne's own
+// widget.Form uses for its labels.
+func TestFormTwoColumnCaptionsKeepTheirWidth(t *testing.T) {
+	app := test.NewApp()
+	defer app.Quit()
+
+	field := widget.NewEntry()
+	form := Form(false, true, []Row{{Caption: "Certificate fingerprint", Field: field}})
+
+	box, ok := form.(*fyne.Container)
+	if !ok {
+		t.Fatalf("form is %T, want a container", form)
+	}
+
+	caption, ok := box.Objects[0].(*widget.Label)
+	if !ok {
+		t.Fatalf("first cell is %T, want the caption", box.Objects[0])
+	}
+
+	collapsed := 2 * theme.InnerPadding()
+	if got := caption.MinSize().Width; got <= collapsed {
+		t.Fatalf("caption minimum width = %v, want more than %v: the label column collapses to the padding", got, collapsed)
+	}
+
+	box.Resize(fyne.NewSize(600, 200))
+
+	if caption.Size().Width < caption.MinSize().Width {
+		t.Errorf("caption laid out %v wide, narrower than its minimum %v", caption.Size().Width, caption.MinSize().Width)
+	}
+	if field.Position().X < caption.Size().Width {
+		t.Errorf("field starts at x=%v, inside the caption column (%v wide)", field.Position().X, caption.Size().Width)
 	}
 }
 

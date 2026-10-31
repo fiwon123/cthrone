@@ -34,15 +34,15 @@ func TestCopyButtonPlacesTheCatcherAboveTheButton(t *testing.T) {
 
 	button := NewButton("Host", nil, nil)
 
-	if len(button.Objects) != 2 {
-		t.Fatalf("button holds %d objects, want the button and the catcher", len(button.Objects))
+	if len(button.content.Objects) != 2 {
+		t.Fatalf("button holds %d objects, want the button and the catcher", len(button.content.Objects))
 	}
 
-	if button.Objects[0] != fyne.CanvasObject(button.button) {
+	if button.content.Objects[0] != fyne.CanvasObject(button.button) {
 		t.Error("the real button is not the first object")
 	}
 
-	if button.Objects[1] != fyne.CanvasObject(button.catcher) {
+	if button.content.Objects[1] != fyne.CanvasObject(button.catcher) {
 		t.Error("the catcher is not the last object; the driver would stop at the button")
 	}
 
