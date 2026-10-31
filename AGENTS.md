@@ -56,6 +56,14 @@ and its absence selects the websocket path. Both paths meet at the same
 `internal/chat` loop over the same sealed `session.Session`, so the two
 transports are interchangeable from the user's point of view.
 
+A host is a room rather than a pair: `internal/session.Hub` holds every
+authenticated session and relays what one sends to all the others with the
+sender named, and `internal/chat`'s `Room` is the terminal's single console for
+that room — one stdin, so two devices never compete for the keyboard. The GUI
+reads the same hub. Attribution is in-band: text is prefixed with the sender's
+label, and a file frame carries it in an optional `wire.Header.Sender` field
+that an older peer ignores.
+
 The GUI sits beside the commands rather than inside them: `ui/` builds on the
 same `session.Session` the terminal loops use, and `mobile/` is a second `main`
 that starts that GUI on Android (and, later, iOS). The terminal and the GUI
@@ -72,10 +80,10 @@ internal/data/app/   the in-memory configuration
 internal/pairing/    the credential a session uses: the shared secret, or this device's key
 internal/auth/       the shared secret and the TLS material: where they come from, how they are compared
 internal/discovery/  the device identity on disk, the beacon, and the pins trusted on first contact
-internal/chat/       the terminal loop both transports run a session on
+internal/chat/       the terminal loop, and the console a host runs its room on
 internal/e2e/        the end-to-end layer every session is wrapped in
 internal/wire/       the CTH1 envelope and the file chunk arithmetic
-internal/session/    the transport-agnostic session the CLI and the GUI share
+internal/session/    the transport-agnostic session and hub the CLI and the GUI share
 ui/                  the Fyne GUI, behind the `gui` build tag
 mobile/              the Android/iOS entry point: a second `main` that starts `ui`
 scripts/             add_to_path installers + the dev sandbox runtime

@@ -33,15 +33,6 @@ func Run(s session.Session) {
 	run(s, os.Stdin, os.Stdout)
 }
 
-// RunHost is Run for a host, and reports whether the user ended it by pressing
-// Ctrl-C. A host holds something a client does not — a listening port — and
-// "the user quit" and "the peer left" have to be told apart: the second one
-// leaves the host waiting for the next device, the first one means the command
-// is over and the port must go back to the machine.
-func RunHost(s session.Session) bool {
-	return run(s, os.Stdin, os.Stdout)
-}
-
 // lockedWriter serializes the loop's writes.
 //
 // receive prints a message from the transport's goroutine while send echoes a
@@ -93,22 +84,8 @@ func run(s session.Session, in *os.File, out io.Writer) bool {
 
 	// A sealed session says when a peer authenticated and when it refused one;
 	// both belong on the terminal, above the input line.
-	if sealed, ok := s.(*e2e.Conn); ok {
-		// The two fingerprints are compared at first contact, so this device's
-		// own must be on screen as well: the peer's arrives with the notice,
-		// and a value nobody printed cannot be compared with anything.
-		if own := sealed.Fingerprint(); own != "" {
-			notice(out, input, "This device's fingerprint is "+own+" — the other screen shows the same value for this device")
-		}
-
-		sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
-		sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
-
-		// The code a first contact is compared by arrives before the peer is
-		// accepted, and on both sides: the side that is waiting has nothing
-		// else to go on.
-		sealed.OnFirstContact(func(c e2e.FirstContact) { notice(out, input, FirstContactNotice(c)) })
-	}
+	var own sync.Once
+	announceSealed(s, out, input, &own)
 
 	// receive only installs the printer on the session, so it is done by the
 	// time the sender wants to print; send blocks on the terminal and goes
@@ -178,25 +155,40 @@ func receive(s session.Session, input *line, out io.Writer) {
 	})
 }
 
-// senderLabel is how a message is attributed: the device name, with the
-// address it came from when the transport knows one.
+// announceSealed prints what a sealed session has to say above the input line:
+// this device's fingerprint once, then the peer's notices as they arrive.
 //
-// A websocket session has both — the name is what the handshake authenticated,
-// the address is which machine on the network it is — and a name alone does not
-// tell two devices with the same hostname apart. On a bus there is no per-peer
-// address, so the name stands alone; an unnamed peer is still labelled, because
-// the one thing it must never render as is "You".
+// own is shared by every session a console holds: a room has several peers and
+// one fingerprint, and printing it once per device would bury the line that
+// matters — the one the other screen has to be compared with.
+func announceSealed(s session.Session, out io.Writer, input *line, own *sync.Once) {
+	sealed, ok := s.(*e2e.Conn)
+	if !ok {
+		return
+	}
+
+	// The two fingerprints are compared at first contact, so this device's own
+	// must be on screen as well: the peer's arrives with the notice, and a
+	// value nobody printed cannot be compared with anything.
+	own.Do(func() {
+		if fingerprint := sealed.Fingerprint(); fingerprint != "" {
+			notice(out, input, "This device's fingerprint is "+fingerprint+" — the other screen shows the same value for this device")
+		}
+	})
+
+	sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
+	sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
+
+	// The code a first contact is compared by arrives before the peer is
+	// accepted, and on both sides: the side that is waiting has nothing else to
+	// go on.
+	sealed.OnFirstContact(func(c e2e.FirstContact) { notice(out, input, FirstContactNotice(c)) })
+}
+
+// senderLabel is how a message is attributed. The rule lives on the message
+// itself, because a relay names the sender the same way the terminal prints it.
 func senderLabel(m session.Message) string {
-	from := m.From
-	if from == "" {
-		from = "peer"
-	}
-
-	if m.Addr == "" || m.Addr == from {
-		return from
-	}
-
-	return from + " (" + m.Addr + ")"
+	return m.Label()
 }
 
 // send reads raw-mode input and sends a line when Enter is pressed.

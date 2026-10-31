@@ -50,7 +50,7 @@ internal/handlers/<transport>/  the rules: the websocket and NATS sessions
   ↓
 internal/e2e/               the end-to-end layer every session is wrapped in
   ↓
-internal/chat/ + ui/        the terminal loop and the GUI, over one session.Session
+internal/chat/ + ui/        the terminal loop and the GUI, over one session.Session and one hub
 ```
 
 `internal/core` decides *what* to do (`connect`, `host`, `scan`); the handlers
@@ -61,6 +61,14 @@ addresses that answer on the chat port, never this device's own, so a host does
 not offer itself as a peer. `internal/pairing` decides *which credential* a
 session speaks — the shared secret when the user named one, this device's key
 otherwise — so the transports cannot disagree.
+
+A host is a **room**, not a set of two-party conversations: `session.Hub` holds
+every authenticated session, relays each message to all the others with the
+sender named, and reports joins and departures. The terminal console
+(`chat.Room`) is one reader of that room — one stdin, so two devices never
+compete for the keyboard — and the GUI is another. Relay attribution is
+in-band: text is prefixed with the sender's label, and a file frame carries the
+label in an optional `wire.Header.Sender` field, which an older peer ignores.
 
 The GUI is not a fourth transport: `ui/` reads and writes through the same
 `internal/session.Session` the terminal loops use, and `mobile/` is a second
@@ -73,6 +81,14 @@ and write.
 - **Two interchangeable transports behind one command set** — the user picks
   the transport with a flag, and the chat experience is the same either way.
   (2026-01)
+- **A host is a room, and a message reaches every device in it** — the host
+  relays what one device sends to all the others with the sender named, rather
+  than pairing two devices in private. Text carries the name in-band, because
+  the wire has no metadata slot for an unwrapped line; a file carries it in an
+  optional header field, so an older peer still joins and still reads the
+  files. The terminal host has one console for the room, so two devices never
+  compete for the keyboard, and the same `session.Hub` is what the GUI reads.
+  (2026-10, issue #199)
 - **The websocket transport is the default** — it needs nothing but the two
   binaries, while NATS needs a broker. (2026-01)
 - **No configuration file** — settings come from flags and the environment, so
@@ -135,12 +151,12 @@ internal/handlers/   one package per transport (websocket, nats)
 internal/data/app/   the in-memory configuration
 internal/pairing/    the credential a session uses: the shared secret, or this device's key
 internal/auth/       the shared secret and the TLS material
-internal/chat/       the terminal loop both transports run a session on
+internal/chat/       the terminal loop, and the console a host runs its room on
 internal/e2e/        the end-to-end layer every session is wrapped in
 internal/wire/       the CTH1 envelope and the file chunk arithmetic
 internal/discovery/  the device identity kept on disk and the pins trusted on first contact
 internal/exec/       the allowlist behind `recv`/`exec`
-internal/session/    the message hub the GUI uses
+internal/session/    the transport-agnostic session and hub the CLI and the GUI share
 internal/shutdown/   graceful stop and terminal restore
 ui/                  the Fyne GUI, behind the `gui` build tag
 mobile/              the Android/iOS entry point: a second `main` that starts `ui`
@@ -166,7 +182,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), and a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
 - **Encrypted and authenticated by default**: every session is sealed on both
   transports, and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when the user

@@ -51,6 +51,11 @@ type HostHandle struct {
 // Addr is the address the host is listening on.
 func (h *HostHandle) Addr() string { return h.server.Addr() }
 
+// Hub is the room every authenticated device joins. The terminal console reads
+// it; a GUI can too, so both present the same room rather than two
+// implementations of one.
+func (h *HostHandle) Hub() *session.Hub { return h.server.Hub() }
+
 // Wait blocks until the host stops serving.
 func (h *HostHandle) Wait() error { return h.server.Wait() }
 
@@ -73,49 +78,46 @@ func (h *HostHandle) Stop() error {
 // been pinned before, and only once per device.
 type Confirm func(e2e.FirstContact) bool
 
-// Host serves the chat endpoint with the terminal as its consumer.
+// Host serves the chat endpoint with the terminal as its console.
 //
 // The bind address is empty by default, which means every interface: the tool
 // is a chat between two devices on the same network, and a host that only
 // listens on the loopback cannot be reached by the other device.
 //
+// A host is a room, not a set of two-party conversations: every device that
+// authenticates joins it, one line typed at the console goes to all of them,
+// and a message from one is printed once and relayed to the rest. One goroutine
+// reads stdin, so two devices never compete for the terminal.
+//
 // Ctrl-C on the host's own terminal ends the host — the listener goes with it,
 // so the port is free the moment the command returns. A peer that leaves does
 // not: the host keeps waiting for the next device, which is what hosting is.
+// A host with no terminal attached keeps serving too: nothing can be typed, so
+// there is nothing whose end means the user left, and the process is stopped by
+// a signal.
 func Host(app *app.Data, opts pairing.Options, tlsConf auth.TLS, confirm ...Confirm) error {
-	var (
-		handle *HostHandle
-		ready  = make(chan struct{})
-	)
-
-	h, err := OpenServer(app, opts, tlsConf, func(s session.Session) {
-		go func() {
-			// The handle is only returned after the listener is bound, and a
-			// client can connect in the meantime, so the stop waits for the
-			// close below — which is what makes the assignment visible.
-			<-ready
-
-			if runHost(s) {
-				_ = handle.Stop()
-			}
-		}()
-	}, confirm...)
+	// The room is the consumer: OpenServer's onSession is for a caller that
+	// keeps its own window (the GUI), and the terminal keeps none.
+	h, err := OpenServer(app, opts, tlsConf, func(session.Session) {}, confirm...)
 	if err != nil {
 		return err
 	}
 
-	handle = h
-	close(ready)
+	log.Println("WebSocket server listening on", h.Addr(), "-", describeBind(app.Host))
 
-	log.Println("WebSocket server listening on", handle.Addr(), "-", describeBind(app.Host))
+	go func() {
+		if runRoom(h.Hub()) {
+			_ = h.Stop()
+		}
+	}()
 
-	err = handle.Wait()
+	err = h.Wait()
 
 	// Stopping here is what ends the announcement: a host that has returned
 	// must stop broadcasting its port, or the other devices keep listing a
 	// device that no longer answers. Stop is idempotent, so the path that
 	// stopped itself above pays nothing for it.
-	_ = handle.Stop()
+	_ = h.Stop()
 
 	return err
 }
@@ -181,13 +183,13 @@ func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession
 
 	// admit hands an authenticated session to the caller and records it in the
 	// hub. Only a sealed session ever reaches it, so a broadcast cannot write
-	// to the transport in the clear.
+	// to the transport in the clear. Register wires the relay and the
+	// departure; a second close handler here would only displace it.
 	admit := func(sealed session.Session) {
 		<-ready
 
 		if hub != nil {
 			hub.Register(sealed)
-			sealed.OnClose(func(string) { hub.Unregister(sealed.ID()) })
 		}
 
 		onSession(sealed)
