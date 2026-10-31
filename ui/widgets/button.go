@@ -68,6 +68,16 @@ func newCopyButton(button *widget.Button, text string, onCopied func(string)) *C
 	return b
 }
 
+// CreateRenderer makes the button a widget the toolkit draws.
+//
+// The paint walk descends into a node only when it is a *fyne.Container or a
+// fyne.Widget — a struct that embeds a container is neither. Without this
+// method every button in the app is a leaf the walker cannot enter, and it
+// paints nothing at all: a window full of invisible buttons and a blank screen.
+func (b *CopyButton) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(b.Container)
+}
+
 // Tapped runs the button. The catcher above the button receives the tap first,
 // so this is where a normal press reaches the action the button was built for.
 func (b *CopyButton) Tapped(ev *fyne.PointEvent) {
