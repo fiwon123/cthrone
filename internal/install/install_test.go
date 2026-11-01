@@ -324,6 +324,22 @@ func TestRunInstallsAVerifiedRelease(t *testing.T) {
 		t.Errorf("Run() kept %q, want %q", result.Previous, previous)
 	}
 
+	// The reported checksum is the archive's, as the release recorded it: the
+	// one number a user can check with `sha256sum` against the asset. The
+	// extracted binary's hash is a different value that nothing compared, so
+	// reporting it under "verified" would be a claim about a check nobody made.
+	archiveSum := sha256.Sum256(archive)
+	wantArchive := hex.EncodeToString(archiveSum[:])
+	binarySum := sha256.Sum256([]byte("the new binary"))
+
+	if result.Checksum != wantArchive {
+		t.Errorf("Run() reported %q, want the archive's checksum %q", result.Checksum, wantArchive)
+	}
+
+	if result.Checksum == hex.EncodeToString(binarySum[:]) {
+		t.Error("Run() reported the extracted binary's checksum, which was never verified")
+	}
+
 	assertFile(t, target, "the new binary")
 	assertFile(t, previous, "the running binary")
 }

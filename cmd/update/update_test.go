@@ -230,7 +230,7 @@ func TestRunInstallsARelease(t *testing.T) {
 		Asset:    "cthrone_v0.10.0_linux.tar.gz",
 		Target:   "/usr/local/bin/cthrone",
 		Previous: "/usr/local/bin/cthrone.previous",
-		SHA256:   "abc123",
+		Checksum: "4b79ade2b6b278f6bdae2e73d0c98af51c4b1faaeddfce8e047b78d5aeef4392",
 	})
 
 	setAction(t, func() { doInstall = true })
@@ -247,7 +247,13 @@ func TestRunInstallsARelease(t *testing.T) {
 
 	got := out.String()
 
-	for _, want := range []string{"v0.10.0", "abc123", "cthrone.previous", "--revert"} {
+	for _, want := range []string{
+		"v0.10.0",
+		"4b79ade2b6b278f6bdae2e73d0c98af51c4b1faaeddfce8e047b78d5aeef4392",
+		"checksums.txt",
+		"cthrone.previous",
+		"--revert",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output = %q, want it to mention %q", got, want)
 		}
