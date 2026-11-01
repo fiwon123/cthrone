@@ -1,4 +1,4 @@
-//go:build !linux || android
+//go:build (!linux && !windows) || android
 
 package bluetoothcore
 
@@ -15,13 +15,13 @@ import (
 // ErrUnsupported is what every entry point returns on a platform without the
 // transport.
 //
-// The implementation talks to BlueZ over the D-Bus system bus, so it is Linux
-// only. A build for Windows, macOS or Android therefore has no Bluetooth
-// transport at all, and says so: a `--bluetooth` run fails with this message
-// rather than with a flag that appears to work. Android is the one that will
-// change: it needs its own binding to the platform's Bluetooth stack, which is
-// a separate piece of work.
-var ErrUnsupported = errors.New("bluetooth: this build has no Bluetooth transport — it speaks BlueZ over D-Bus, which only Linux provides")
+// The GATT layer is written for the two desktop stacks the library supports —
+// BlueZ over D-Bus on Linux, WinRT on Windows — so a build for macOS or Android
+// has no Bluetooth transport at all, and says so: a `--bluetooth` run fails
+// with this message rather than with a flag that appears to work. Android is
+// the one that will change: it needs its own binding to the Java Bluetooth
+// APIs, which is issue #206.
+var ErrUnsupported = errors.New("bluetooth: this build has no Bluetooth transport — it is implemented for Linux (BlueZ) and Windows (WinRT)")
 
 // Supported reports that this build carries no Bluetooth transport at all.
 //

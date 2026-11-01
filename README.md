@@ -44,10 +44,12 @@ There are three transports, and the command set is the same either way:
   see each other directly. Useful when a broker is already running.
 - **Bluetooth** — the two devices talk over the radio, so no network, router or
   broker is needed at all. It is the transport for a phone with no Wi-Fi, or two
-  laptops on a network that isolates its clients. Linux only for now, one device
+  laptops on a network that isolates its clients. Linux and Windows, one device
   at a time, and built for text: a Bluetooth packet carries 20 bytes. A build
-  that does not carry the transport — Windows, macOS, and a phone until the
-  Android binding lands — does not offer the option at all.
+  that does not carry the transport — macOS, and a phone until the Android
+  binding lands — does not offer the option at all. The Windows path compiles
+  and **has never been run**: if it fails for you, that is a bug worth
+  [reporting](https://github.com/fiwon123/cthrone/issues/215).
 
 There is nothing to configure: the only setting is the port, and it comes from
 the command line. The `ct` short alias ships next to the `cthrone` binary,
@@ -469,9 +471,10 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
    wrote to a characteristic, so two devices cannot be told apart, and the slot
    frees when the keepalive notices the device has gone quiet. Text is what the
    link is for — a 256 KiB file chunk is thousands of 20-byte packets. The
-   transport speaks BlueZ over D-Bus, so it is Linux only for now; a build for
-   Windows, macOS or Android says it has no Bluetooth transport instead of
-   failing somewhere deeper. Pairing is unchanged: the same six-digit code on
+   transport speaks the platform's own stack — BlueZ over D-Bus on Linux, WinRT
+   on Windows — and a build for macOS or Android says it has no Bluetooth
+   transport instead of failing somewhere deeper. The Windows path compiles;
+   nothing has run it. Pairing is unchanged: the same six-digit code on
    both screens, and the peer is pinned by its device key.
 
 ## Install
@@ -549,11 +552,10 @@ The app has four tabs:
 - **Setup** — the port, the credential (device key by default, or a shared
   secret), the transport and the TLS options, with **Host** and **Connect**.
   The transport is WebSocket, NATS, or Bluetooth where the build carries it —
-  a Linux build today, one device at a time. A Windows, macOS or phone build
-  offers the two network transports only, because the Bluetooth transport
-  speaks BlueZ over D-Bus, which Linux provides and the others do not; Android
-  needs its own binding (#206). Encryption is on unless the box is cleared, and
-  the host's certificate is pinned on first contact.
+  Linux and Windows, one device at a time. macOS and a phone build offer the two
+  network transports only: macOS has no backend in the library this uses, and
+  Android needs its own binding (#206). Encryption is on unless the box is
+  cleared, and the host's certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the `/24` the default route uses for a
   host on the chat port (with Bluetooth selected, the same button scans the
   radio); tap a result to fill in its address. A row reads
@@ -620,8 +622,9 @@ What the Android CLI does and does not give you:
   e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
 - the desktop GUI ships as `cthrone_gui` in its own archive; the APK above is
   the phone equivalent, and `cthrone ui` in this archive only prints a message.
-- `--bluetooth` refuses on this build: the transport speaks BlueZ over D-Bus,
-  and Android does not have it. A phone binding is a separate piece of work
+- `--bluetooth` refuses on this build: the transport speaks the desktop stacks
+  (BlueZ, WinRT), and Android has neither. A phone binding is a separate piece
+  of work
   ([issue #206](https://github.com/fiwon123/cthrone/issues/206)); until it
   lands, use a network transport on the phone.
 - **neither Android download is verified on a device.** Both are cross-compiled
@@ -677,7 +680,7 @@ so the app links to the release page instead.
 | `--all-subnets` | `cthrone scan`: walk the `/24` of every local network interface |
 | `--nats` | use the NATS transport instead of the websocket one |
 | `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`); a `tls://` URL asks for an encrypted connection |
-| `--bluetooth` | use the Bluetooth transport instead of the websocket one (Linux only; `host` serves one device at a time) |
+| `--bluetooth` | use the Bluetooth transport instead of the websocket one (Linux and Windows; `host` serves one device at a time) |
 | `--token` | a shared secret to use instead of pairing by device key — **visible in the process list**, so prefer the environment or the file |
 | `--token-file` | the file the shared secret is read from — no file is read unless it is named here |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
@@ -1013,7 +1016,7 @@ NATS_PORT=4223 NATS_MONITOR_PORT=8223 docker compose up -d nats
 |---|---|
 | Language | Go 1.26.10 |
 | CLI | spf13/cobra |
-| Transports | gorilla/websocket, nats-io/nats.go, tinygo.org/x/bluetooth (BlueZ over D-Bus, Linux only) |
+| Transports | gorilla/websocket, nats-io/nats.go, tinygo.org/x/bluetooth (BlueZ over D-Bus on Linux, WinRT on Windows — the Windows path is compiled, never run) |
 | Terminal | golang.org/x/term |
 
 ## License

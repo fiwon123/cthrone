@@ -219,5 +219,5 @@ func printTargets(out io.Writer, targets []netip.Prefix, found []string, names m
 func init() {
 	Cmd.Flags().StringArray("subnet", nil, "an IPv4 CIDR to scan as well, e.g. 192.168.1.0/24; repeat for several segments")
 	Cmd.Flags().Bool("all-subnets", false, "scan the /24 of every local network interface")
-	Cmd.Flags().Bool("bluetooth", false, "scan for Bluetooth devices instead of network hosts (Linux only)")
+	Cmd.Flags().Bool("bluetooth", false, "scan for Bluetooth devices instead of network hosts (Linux and Windows)")
 }

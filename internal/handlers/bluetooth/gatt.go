@@ -1,10 +1,21 @@
-//go:build linux && !android
+//go:build (linux || windows) && !android
 
-// The GATT layer speaks BlueZ over the D-Bus system bus, which is Linux's own
-// stack. Android satisfies the `linux` build tag as well, so it has to be
-// excluded explicitly: a phone has no BlueZ and no system bus, and compiling
-// this file there would turn "this build has no Bluetooth transport" into a
-// D-Bus failure at run time.
+// The GATT layer speaks whatever stack tinygo.org/x/bluetooth selects for the
+// platform: BlueZ over the D-Bus system bus on Linux, WinRT on Windows. The
+// calls are the same for both — the library is the seam — so this file is built
+// for either.
+//
+// Android satisfies the `linux` build tag as well, so it has to be excluded
+// explicitly: a phone has no BlueZ and no system bus, and compiling this file
+// there would turn "this build has no Bluetooth transport" into a D-Bus failure
+// at run time. It needs its own binding to the Java Bluetooth APIs (#206).
+//
+// **The Windows path compiles and has never been run.** No Windows machine and
+// no radio exist in the environment this was written in, and the backends
+// differ where it matters: how an address is spelled, whether a disconnect is
+// reported at all, the MTU, and how notifications are subscribed. What is
+// proven here is that `GOOS=windows go build ./...` produces it; what it does
+// when a user runs it is #215's open question.
 
 package bluetooth
 
