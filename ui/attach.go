@@ -51,6 +51,11 @@ type incomingTransfer struct {
 	note     *fileNote
 	from     string
 	received int64
+
+	// abandoned is a cancel that arrived while chunks were still in flight. The
+	// receive loop reads it and drops the transfer, because the assembler
+	// belongs to that goroutine and not to the one the button was pressed on.
+	abandoned bool
 }
 
 // pickFile asks for a file and queues it for the live session.
@@ -132,7 +137,10 @@ func (g *gui) queuePick(reader fyne.URIReadCloser) {
 		// reads from is the user's own, not the staged copy: the copy is removed
 		// as soon as the send returns, and a row pointing at it would lose its
 		// picture the moment the transfer finished.
+		id := newTransferID()
+
 		note := &fileNote{
+			id:     id,
 			name:   name,
 			size:   size,
 			state:  transferSending,
@@ -140,7 +148,7 @@ func (g *gui) queuePick(reader fyne.URIReadCloser) {
 			inline: showsInline(mimeOf(name), size),
 		}
 		item := outgoing{
-			id:   newTransferID(),
+			id:   id,
 			name: name,
 			mime: mimeOf(name),
 			path: path,
@@ -230,6 +238,44 @@ func (g *gui) untrackTransfer(id string) {
 	g.mu.Lock()
 	delete(g.cancels, id)
 	g.mu.Unlock()
+}
+
+// cancelTransfer stops one transfer, from the row that is showing it.
+//
+// A send is cancelled through the context its reader is watching. A receive has
+// no context to cancel — the bytes are already in flight — so the request is
+// recorded on the entry and the receive loop abandons the transfer on the next
+// chunk, which is the goroutine that owns the assembler.
+func (g *gui) cancelTransfer(id string) {
+	if id == "" {
+		return
+	}
+
+	g.mu.Lock()
+	cancel := g.cancels[id]
+
+	entry := g.incoming[id]
+	if entry != nil {
+		entry.abandoned = true
+	}
+
+	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+
+		return
+	}
+
+	if entry == nil {
+		return
+	}
+
+	// The row goes now, so the screen agrees with the decision; the part file
+	// is removed by the receive loop, or by the assembler's own sweep if no
+	// further chunk ever arrives.
+	g.removeTransfer(entry.note)
+	g.setStatus("Receiving " + entry.note.name + " cancelled")
 }
 
 // cancelTransfers stops every transfer on its way. A cancelled transfer leaves
@@ -529,9 +575,21 @@ func (g *gui) receiveTransfer(from string, frame wire.Frame) {
 		return
 	}
 
+	if entry != nil && entry.abandoned {
+		g.mu.Lock()
+		delete(g.incoming, header.ID)
+		g.mu.Unlock()
+
+		if assembler.Abandon(header.ID) {
+			g.setStatus("Receiving " + entry.note.name + " cancelled")
+		}
+
+		return
+	}
+
 	if entry == nil {
 		entry = &incomingTransfer{
-			note: &fileNote{name: header.Name, size: header.Size, state: transferSending},
+			note: &fileNote{id: header.ID, name: header.Name, size: header.Size, state: transferSending},
 			from: from,
 		}
 
@@ -703,13 +761,29 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	}
 
 	switch m.file.state {
+	case transferSent:
+		save.Hide()
+
+	case transferSending:
+		// The one action slot a row has: while the bytes are moving it is the
+		// way to stop them, and when they have landed it is Save as….
+		if m.file.id != "" {
+			save.SetText("Cancel")
+			save.SetOnTapped(func() { g.cancelTransfer(m.file.id) })
+			save.Show()
+		} else {
+			save.Hide()
+		}
+
 	case transferSaved:
+		save.SetText("Save as…")
 		save.SetOnTapped(func() { g.saveAs(path) })
 		save.Show()
 
 	case transferPending:
 		name := filepath.Base(path)
 		note := m.file
+		save.SetText("Save as…")
 		save.SetOnTapped(func() { g.askWhereToSave(note, name, path) })
 		save.Show()
 

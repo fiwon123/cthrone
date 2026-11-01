@@ -3,13 +3,18 @@
 package ui
 
 import (
+	"bytes"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/test"
+
+	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
 // pickedFile is what the file picker hands over: a reader that knows its name.
@@ -349,5 +354,148 @@ func TestDrawnFileOffersNoOpen(t *testing.T) {
 
 	if open.Visible() {
 		t.Error("a drawn picture also offered Open")
+	}
+}
+
+// gatedSession holds the first send until the test lets it go, so a transfer can
+// be in flight while the test does something else.
+type gatedSession struct {
+	*session.Base
+
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *gatedSession) Send(payload []byte) error {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+
+	<-s.release
+
+	return nil
+}
+
+func (s *gatedSession) Close(reason string) { s.NotifyClose(reason) }
+
+// Cancel stops a send in flight, from the row that is showing it, and the row
+// goes with it rather than sitting there failed.
+func TestCancellingASendStopsIt(t *testing.T) {
+	dir := t.TempDir()
+	staged := dir + "/.cthrone-send-1"
+
+	// Two chunks, so there is a send after the one that is held.
+	body := bytes.Repeat([]byte("x"), int(wire.ChunkSize)+1)
+	if err := os.WriteFile(staged, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+
+	gated := &gatedSession{Base: session.NewBase("alice", "alice:8080"), started: make(chan struct{}, 4), release: make(chan struct{})}
+	g.mu.Lock()
+	g.sess = gated
+	g.mu.Unlock()
+
+	note := &fileNote{id: "send-1", name: "clip.mp3", size: int64(len(body)), state: transferSending}
+	item := outgoing{id: "send-1", name: "clip.mp3", mime: "audio/mpeg", path: staged, size: int64(len(body)), note: note}
+
+	fyne.Do(func() { g.messages = append(g.messages, chatMessage{file: note}) })
+
+	go g.sendTransfer(item)
+
+	select {
+	case <-gated.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the transfer never started sending")
+	}
+
+	g.cancelTransfer("send-1")
+
+	close(gated.release)
+
+	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text(), "cancelled") })
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, message := range g.messages {
+		if message.file == note {
+			t.Error("a cancelled send left its row behind, want it gone")
+		}
+	}
+}
+
+// Cancel on a receive records the request and the receive loop abandons the
+// transfer — the assembler belongs to that goroutine, not to the button.
+func TestCancellingAReceiveAbandonsIt(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.prepareReceive()
+
+	size := int64(wire.ChunkSize * 2)
+	first := wire.Frame{
+		Header:  fileChunkHeader("rx-1", "clip.mp3", size, 0),
+		Payload: make([]byte, wire.ChunkSize),
+	}
+
+	g.receiveTransfer("bob", first)
+
+	g.mu.Lock()
+	held := len(g.incoming)
+	g.mu.Unlock()
+
+	if held != 1 {
+		t.Fatalf("the receive loop holds %d transfers, want 1", held)
+	}
+
+	g.cancelTransfer("rx-1")
+
+	// The request is recorded, not acted on: the assembler belongs to the
+	// receive loop, so the entry stays — flagged — until that loop sees it.
+	g.mu.Lock()
+	entry := g.incoming["rx-1"]
+	g.mu.Unlock()
+
+	if entry == nil {
+		t.Fatal("the cancelled receive vanished before the loop could abandon it")
+	}
+
+	if !entry.abandoned {
+		t.Error("the cancel was not recorded on the transfer")
+	}
+
+	// The next chunk of that transfer is dropped, not written.
+	second := wire.Frame{
+		Header:  fileChunkHeader("rx-1", "clip.mp3", size, 1),
+		Payload: make([]byte, wire.ChunkSize),
+	}
+
+	g.receiveTransfer("bob", second)
+
+	g.mu.Lock()
+	still := len(g.incoming)
+	g.mu.Unlock()
+
+	if still != 0 {
+		t.Errorf("the abandoned transfer is still tracked (%d entries)", still)
+	}
+
+	if got := g.status.Text(); !strings.Contains(got, "cancelled") {
+		t.Errorf("the status line reads %q, want it to say the transfer was cancelled", got)
+	}
+}
+
+// fileChunkHeader is the first and subsequent chunk header of one transfer, in
+// the shape the sender builds.
+func fileChunkHeader(id, name string, size int64, index int) wire.Header {
+	return wire.Header{
+		Kind:   wire.KindFile,
+		ID:     id,
+		Name:   name,
+		MIME:   "audio/mpeg",
+		Size:   size,
+		Index:  index,
+		Chunks: wire.Chunks(size),
 	}
 }
