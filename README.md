@@ -36,12 +36,16 @@ cthrone is a chat tool for the terminal. One device hosts a chat server, any
 number of devices connect to it, and everyone in the room sees what everyone
 says — no account, no GUI, no configuration file.
 
-There are two transports, and the command set is the same either way:
+There are three transports, and the command set is the same either way:
 
 - **websocket** (the default) — one device runs the server, the other connects
   to it over the local network. Nothing else needs to be installed.
 - **NATS** — both sides talk to a broker, so the two devices do not need to
   see each other directly. Useful when a broker is already running.
+- **Bluetooth** — the two devices talk over the radio, so no network, router or
+  broker is needed at all. It is the transport for a phone with no Wi-Fi, or two
+  laptops on a network that isolates its clients. Linux only for now, one device
+  at a time, and built for text: a Bluetooth packet carries 20 bytes.
 
 There is nothing to configure: the only setting is the port, and it comes from
 the command line. The `ct` short alias ships next to the `cthrone` binary,
@@ -131,9 +135,11 @@ Accept this device? [y/N]
 - a device already pinned under its name is not asked again. The pin *is* the
   answer to that question, given once.
 
-Only the **websocket host** asks. A websocket session has exactly one
-correspondent and the host is the side that has a person at it; on NATS the
-roles are inverted — every peer subscribes — so nobody is a host to ask, and a
+Only a **host** asks, and only where there is one: the websocket's and the
+Bluetooth host's. A Bluetooth link also has exactly one correspondent, and the
+host is the side with a screen to ask on — the code appears on both screens
+there too. On NATS the roles are inverted — every peer subscribes — so nobody
+is a host to ask, and a
 first contact is pinned without a prompt, with the fingerprints on both screens
 as the comparison. A terminal host that has **no terminal attached** — a
 container, a service — has nobody to ask either: it accepts and pins the first
@@ -214,7 +220,9 @@ downgraded.
 That is what makes the NATS transport private: **the broker carries
 ciphertext**. It sees that two devices are talking on a subject and nothing
 about what they say. Over a websocket the host is your correspondent rather
-than a relay, so the end-to-end layer protects the wire, not the peer.
+than a relay, so the end-to-end layer protects the wire, not the peer. On
+Bluetooth the radio carries the sealed payloads too: what an observer nearby
+can tell is how many packets moved and when, never what they said.
 
 The websocket connection is **encrypted by default**: the host serves
 `https`, and the client connects over `wss://`. Nothing has to be remembered —
@@ -443,6 +451,27 @@ sealed, but who is talking to whom, and how much, is visible on the wire.
      --cert-fingerprint 1f2e3d...
    ```
 
+6. No network at all? Put the two devices on Bluetooth. One hosts, the other
+   connects; there is no address and no port, and the positional argument is a
+   device name or address that narrows the search:
+
+   ```bash
+   cthrone host --bluetooth
+   cthrone connect --bluetooth            # the first cthrone device in range
+   cthrone connect --bluetooth phone      # by the name it advertises
+   cthrone connect --bluetooth AA:BB:CC:DD:EE:FF
+   ```
+
+   `cthrone scan --bluetooth` lists the devices in range, by name and address.
+   A host serves **one device at a time**: BlueZ does not say which central
+   wrote to a characteristic, so two devices cannot be told apart, and the slot
+   frees when the keepalive notices the device has gone quiet. Text is what the
+   link is for — a 256 KiB file chunk is thousands of 20-byte packets. The
+   transport speaks BlueZ over D-Bus, so it is Linux only for now; a build for
+   Windows, macOS or Android says it has no Bluetooth transport instead of
+   failing somewhere deeper. Pairing is unchanged: the same six-digit code on
+   both screens, and the peer is pinned by its device key.
+
 ## Install
 
 Download the archive for your platform from the
@@ -508,11 +537,14 @@ The app has four tabs:
   error dialog carries a **Copy** button, so a failure can be pasted into a bug
   report instead of retyped from a screenshot.
 - **Setup** — the port, the credential (device key by default, or a shared
-  secret), the transport (NATS or websocket) and the TLS options, with **Host**
-  and **Connect**. Encryption is on unless the box is cleared, and the host's
-  certificate is pinned on first contact.
+  secret), the transport and the TLS options, with **Host** and **Connect**.
+  The transport is WebSocket, NATS or — on a desktop Linux build — Bluetooth;
+  a phone build leaves Bluetooth out, because the transport speaks BlueZ, which
+  Android does not have. Encryption is on unless the box is cleared, and the
+  host's certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the `/24` the default route uses for a
-  host on the chat port; tap a result to fill in its address. A row reads
+  host on the chat port (with Bluetooth selected, the same button scans the
+  radio); tap a result to fill in its address. A row reads
   `laptop — 192.168.1.20:8080` once the device has announced itself, and shows
   the address alone until then — the address is always there, never replaced by
   the name. A device that hosts
@@ -572,6 +604,10 @@ What the Android CLI does and does not give you:
   e.g. `echo 'export PATH="$HOME/cthrone:$PATH"' >> ~/.bashrc` in Termux.
 - the desktop GUI ships as `cthrone_gui` in its own archive; the APK above is
   the phone equivalent, and `cthrone ui` in this archive only prints a message.
+- `--bluetooth` refuses on this build: the transport speaks BlueZ over D-Bus,
+  and Android does not have it. A phone binding is a separate piece of work
+  ([issue #206](https://github.com/fiwon123/cthrone/issues/206)); until it
+  lands, use a network transport on the phone.
 - **neither Android download is verified on a device.** Both are cross-compiled
   and published; nothing in this project's CI installs the APK or runs the
   binary on a phone or an emulator, so "built for Android" is a build claim, not
@@ -585,8 +621,8 @@ What the Android CLI does and does not give you:
 | Command | What it does |
 |---|---|
 | `cthrone host` | host the room: every device that joins sees the messages of the others |
-| `cthrone connect <ip>` | connect to a device's chat server and chat |
-| `cthrone scan` | scan the default route's `/24` for chat servers; `--subnet <cidr>` adds another segment, `--all-subnets` walks every local interface (shows device names when discovered) |
+| `cthrone connect <ip>` | connect to a device's chat server and chat; with `--bluetooth`, the argument is a device name or address |
+| `cthrone scan` | scan the default route's `/24` for chat servers; `--subnet <cidr>` adds another segment, `--all-subnets` walks every local interface (shows device names when discovered); `--bluetooth` lists the devices in radio range instead |
 | `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
@@ -599,6 +635,7 @@ What the Android CLI does and does not give you:
 | `--all-subnets` | `cthrone scan`: walk the `/24` of every local network interface |
 | `--nats` | use the NATS transport instead of the websocket one |
 | `--nats-url` | the NATS broker to connect to (default `nats://127.0.0.1:4222`); a `tls://` URL asks for an encrypted connection |
+| `--bluetooth` | use the Bluetooth transport instead of the websocket one (Linux only; `host` serves one device at a time) |
 | `--token` | a shared secret to use instead of pairing by device key — **visible in the process list**, so prefer the environment or the file |
 | `--token-file` | the file the shared secret is read from — no file is read unless it is named here |
 | `--host` | the interface `cthrone host` binds to (default: every interface) |
@@ -610,13 +647,15 @@ What the Android CLI does and does not give you:
 | `-v`, `--version` | print the version |
 
 `cthrone connect` needs the address of the machine running `cthrone host`; it
-exits with an error when it is not given one. Run `cthrone <command> --help`
-for the full flag list.
+exits with an error when it is not given one. The radio is the exception: there
+is no address to type, so `--bluetooth` with no argument takes the first
+cthrone device in range. Run `cthrone <command> --help` for the full flag list.
 
 ## Architecture
 
-The transport is chosen at the command level, and both transports meet at the
-same chat loop, so they are interchangeable from your side.
+The transport is chosen at the command level, and all three meet at the same
+chat loop over the same sealed session, so they are interchangeable from your
+side — the radio's one-device limit and its 20-byte packets aside.
 
 The credential is chosen once, in `internal/pairing`: `internal/auth` holds the
 shared secret, and the device key and the pin store live in
@@ -744,12 +783,14 @@ agent inside the sandbox cannot manage containers.
 
 ### A note on what `make check` proves
 
-`make check` runs gofmt, vet, test, and build. Every one of the module's 27
+`make check` runs gofmt, vet, test, and build. Every one of the module's 29
 packages now has a test file (#85/#86 closed the last gap), covering the
 transports, the scanner, the CLI commands, the shared secret and device-key
 pairing, the TLS handling, the remote-exec allowlist, the session hub, the
 selectable-text helpers, the GUI's transfer rows and inline image, and the
-mobile entry point.
+mobile entry point. The Bluetooth framing, session and keepalive are tested
+over an in-memory link — no gate here opens a radio, so a claim that Bluetooth
+works needs two devices.
 
 A green run therefore proves that the code is formatted, that it vets clean,
 that it compiles, and that every package's tests passed. It also runs the
@@ -930,7 +971,7 @@ NATS_PORT=4223 NATS_MONITOR_PORT=8223 docker compose up -d nats
 |---|---|
 | Language | Go 1.26.10 |
 | CLI | spf13/cobra |
-| Transports | gorilla/websocket, nats-io/nats.go |
+| Transports | gorilla/websocket, nats-io/nats.go, tinygo.org/x/bluetooth (BlueZ over D-Bus, Linux only) |
 | Terminal | golang.org/x/term |
 
 ## License
