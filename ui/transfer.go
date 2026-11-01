@@ -25,11 +25,25 @@ const (
 	// The width follows the row, so the same code draws on a phone and on a
 	// desktop window.
 	inlineImageHeight = 180
+
+	// inlineTextBytes bounds the text drawn inside the transcript, and
+	// inlineTextLines bounds how many of its lines are drawn at all.
+	//
+	// A pasted log is a file like any other, and a row that grows to the length
+	// of the log pushes the conversation off the screen. The reader gets the
+	// beginning, an ellipsis, and Save as… for the rest.
+	inlineTextBytes = 4 << 10
+	inlineTextLines = 8
 )
 
 // inlineTypes are the image types the GUI can decode. A type outside this set
 // becomes a file row even when its MIME says "image/": a type the toolkit
 // cannot decode draws an empty box, which looks like a failed transfer.
+// textPreviewPrefix is the MIME prefix whose files are drawn as text. The
+// decision is made on the type the sender announced, and the file's own bytes
+// decide whether it is readable at all.
+const textPreviewPrefix = "text/"
+
 var inlineTypes = map[string]bool{
 	"image/png":     true,
 	"image/jpeg":    true,
@@ -330,4 +344,56 @@ func dropFile(messages []chatMessage, note *fileNote) ([]chatMessage, bool) {
 	}
 
 	return messages, false
+}
+
+// showsText reports whether a transfer's body is drawn as text.
+func showsText(mime string, size int64) bool {
+	if size <= 0 || size > inlineTextBytes*4 {
+		return false
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(mime))
+	if i := strings.IndexByte(kind, ';'); i >= 0 {
+		kind = strings.TrimSpace(kind[:i])
+	}
+
+	return strings.HasPrefix(kind, textPreviewPrefix)
+}
+
+// textPreview reads the beginning of a text file, for the row that shows it.
+//
+// It is bounded twice: by bytes read, and by lines kept. A file that is not
+// valid UTF-8 is not refused — a log with one bad byte is still worth reading —
+// but a file that cannot be opened is, by returning "" and letting the row stay
+// a file row.
+func textPreview(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	body, err := io.ReadAll(io.LimitReader(file, inlineTextBytes))
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+
+	text := strings.ToValidUTF8(string(body), "\uFFFD")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.TrimRight(text, "\n")
+
+	lines := strings.Split(text, "\n")
+	truncated := len(body) == inlineTextBytes || len(lines) > inlineTextLines
+
+	if len(lines) > inlineTextLines {
+		lines = lines[:inlineTextLines]
+	}
+
+	text = strings.Join(lines, "\n")
+
+	if truncated {
+		text += "…"
+	}
+
+	return text
 }

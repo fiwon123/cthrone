@@ -645,9 +645,10 @@ func (g *gui) finishReceive() {
 // A row with no path on disk is a transfer that is still in flight, or one that
 // failed: neither has anything to save or to show, so both parts stay hidden
 // and the label carries the state.
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyButton) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton) {
 	if m.file == nil || m.file.path == "" {
 		pic.Hide()
+		preview.Hide()
 		save.Hide()
 
 		return
@@ -666,6 +667,20 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyBu
 		}
 	} else {
 		pic.Hide()
+	}
+
+	// Text is the other thing a row can show: bounded by bytes and lines, so a
+	// long log is a row that ends in an ellipsis rather than a window with no
+	// conversation under it.
+	if showsText(mimeOf(m.file.name), m.file.size) {
+		if body := textPreview(path); body != "" {
+			preview.SetText(body)
+			preview.Show()
+		} else {
+			preview.Hide()
+		}
+	} else {
+		preview.Hide()
 	}
 
 	switch m.file.state {
