@@ -221,9 +221,15 @@ program do: a command's output is bounded and its whole process tree dies at the
 deadline (#269), a received file's name can no longer escape the download folder
 (#271), a beacon flood can no longer grow the device list without bound (#273),
 and `recv`/`exec` — which were stubs, one of them running commands **locally**
-while its help said remote — now refuse and say so (#275). The device rows are
-clickable again after a regression (#236, #267), and the suite runs under the race
-detector and a fuzzer in CI (#262, #264).
+while its help said remote — now refuse and say so (#275). The suite runs under
+the race detector and a fuzzer in CI (#262, #264).
+
+`v0.11.1` is a patch on it: a row that takes a tap is the object the driver finds
+on a desktop too, so the Devices list and the transcript respond to a click again
+(#280). The selectable label's own selection child had been swallowing the click
+and returning, and the two earlier attempts (#236, #267) changed the handler
+without changing which object receives the click — their tests called the handler
+directly and so proved nothing about a click on the row.
 
 `v0.10.1` was the release before it: the README as a landing page with a wiki
 behind it (#242, #241), CONTRIBUTING (#244), one licence — MIT (#243), the window
