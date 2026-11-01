@@ -78,10 +78,10 @@ WINRES_SYSO := rsrc_windows_amd64.syso
 # What every Unix archive carries, in the order it is listed inside the
 # archive. The staging directory holds a copy of each file, so the binaries and
 # the documents sit next to each other with no `../` paths in the recipe.
-UNIX_ARCHIVE_FILES := $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh
+UNIX_ARCHIVE_FILES := $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE $(SCRIPT_NAME).sh
 
 # What every Windows archive carries.
-WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).bat README.md LICENSE LICENSE-APACHE NOTICE
+WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).bat README.md LICENSE
 
 
 .PHONY: all windows linux android darwin zip_linux zip_windows zip_android clean release \
@@ -113,20 +113,20 @@ android: $(BUILD_DIR)
 
 # Compress Windows binary
 zip_windows: windows
-	zip -j $(WINDOWS_ZIP) $(WINDOWS_BIN) $(SHORT_WINDOWS_BIN) $(WINDOWS_SCRIPT) README.md LICENSE LICENSE-APACHE NOTICE
+	zip -j $(WINDOWS_ZIP) $(WINDOWS_BIN) $(SHORT_WINDOWS_BIN) $(WINDOWS_SCRIPT) README.md LICENSE
 
 # Compress Linux binary
 zip_linux: linux
 	tar -czvf $(LINUX_TAR) \
 	          -C $(LINUX_BUILD) $(notdir $(LINUX_BIN)) $(notdir $(SHORT_LINUX_BIN)) \
-	          -C ../../$(SCRIPTS_DIR) $(notdir $(LINUX_SCRIPT)) ../README.md ../LICENSE ../LICENSE-APACHE ../NOTICE
+	          -C ../../$(SCRIPTS_DIR) $(notdir $(LINUX_SCRIPT)) ../README.md ../LICENSE
 
 # Compress Android binary
 zip_android: android
-	zip -j $(ANDROID_ZIP) $(ANDROID_BIN) $(SHORT_ANDROID_BIN) README.md LICENSE LICENSE-APACHE NOTICE
+	zip -j $(ANDROID_ZIP) $(ANDROID_BIN) $(SHORT_ANDROID_BIN) README.md LICENSE
 	tar -czvf $(ANDROID_TAR) \
 	          -C $(ANDROID_BUILD) $(notdir $(ANDROID_BIN)) $(notdir $(SHORT_ANDROID_BIN)) \
-	          -C ../../ README.md LICENSE LICENSE-APACHE NOTICE
+	          -C ../../ README.md LICENSE
 
 # Clean build folder
 clean:
@@ -153,7 +153,7 @@ darwin: $(BUILD_DIR) ## build the macOS CLI archives (arm64, amd64)
 	cp $(DARWIN_AMD64_DIR)/$(APP_NAME) $(DARWIN_AMD64_DIR)/$(APP_NAME_SHORT)
 	@for arch in arm64 amd64; do \
 	  dir="$(DARWIN_BUILD)/$$arch"; \
-	  cp README.md LICENSE LICENSE-APACHE NOTICE "$$dir/"; \
+	  cp README.md LICENSE "$$dir/"; \
 	  cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh "$$dir/"; \
 	  tar -czf "$(DARWIN_BUILD)/$(APP_NAME)_$(VERSION)_darwin_$$arch.tar.gz" -C "$$dir" $(UNIX_ARCHIVE_FILES); \
 	done
@@ -189,13 +189,13 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)
 	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
-	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_LINUX_DIR)/
+	cp README.md LICENSE $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_LINUX_DIR)/
 	cp $(SCRIPTS_DIR)/cthrone.desktop $(GUI_LINUX_DIR)/ 2>/dev/null || true
 	# No icon file goes into the archive: add_to_path.sh writes the launcher
 	# icon from the data it carries, and the window icon is embedded in the
 	# binary. A PNG next to the binaries would be read by nothing.
-	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh cthrone.desktop
+	tar -czf $(GUI_LINUX_TAR) -C $(GUI_LINUX_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE $(SCRIPT_NAME).sh cthrone.desktop
 
 # The Windows GUI needs mingw-w64 for the CGO link, and the icon needs the Go
 # resource tool below. Both are settled before a single file is generated, so a
@@ -236,9 +236,9 @@ gui-windows: $(BUILD_DIR) require-mingw ## cross-build the Windows Fyne GUI arch
 	@$(MAKE) --no-print-directory winres-icon || { rm -f $(WINRES_SYSO); exit 1; }
 	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }
 	@rm -f $(WINRES_SYSO)
-	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_WINDOWS_DIR)/
+	cp README.md LICENSE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
-	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).bat
+	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE $(SCRIPT_NAME).bat
 
 gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	@test "$$(go env GOOS)" = "darwin" || { \
@@ -249,11 +249,11 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
-	cp README.md LICENSE LICENSE-APACHE NOTICE $(GUI_DARWIN_DIR)/
+	cp README.md LICENSE $(GUI_DARWIN_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).sh $(GUI_DARWIN_DIR)/
 	# No cthrone.png: Finder reads an .icns inside a .app bundle, never a PNG
 	# beside the binary, and the window icon comes from the embedded copy.
-	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE LICENSE-APACHE NOTICE $(SCRIPT_NAME).sh
+	tar -czf $(GUI_DARWIN_TAR) -C $(GUI_DARWIN_DIR) $(APP_NAME)_gui $(APP_NAME) $(APP_NAME_SHORT) README.md LICENSE $(SCRIPT_NAME).sh
 
 # Build the Android APK. Everything the packager needs is checked first: a
 # missing SDK, NDK or fyne CLI fails the target with what to install, instead
