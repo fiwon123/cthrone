@@ -1,5 +1,11 @@
 // Package exec runs one command a peer asked for, if the allowlist permits it.
 //
+// **No transport is wired to it yet.** `cthrone recv` and `cthrone exec` are
+// stubs that refuse (#275); this package is the executor they will use, and its
+// rules — deny by default, no shell, bounded output, the whole tree killed at
+// the deadline — are written and tested ahead of the transport rather than
+// alongside it.
+//
 // It is the most dangerous thing in this program, and the rules reflect that:
 //
 //   - **deny by default** — an empty allowlist allows nothing;

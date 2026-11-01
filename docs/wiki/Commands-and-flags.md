@@ -9,8 +9,8 @@
 | `cthrone scan` | scan the default route's `/24` for chat servers; `--subnet <cidr>` adds another segment, `--all-subnets` walks every local interface (shows device names when discovered); `--bluetooth` lists the devices in radio range instead |
 | `cthrone peers` | list the devices and host certificates this one has pinned, or `cthrone peers forget <name\|fingerprint\|address>` one |
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
-| `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
-| `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
+| `cthrone recv` | **not implemented** (#275): the allowlist and audit log exist, but nothing carries a command to this process yet, so the command refuses |
+| `cthrone exec <device> -- <cmd>` | **not implemented** (#275): nothing is sent to the device, and nothing is run here |
 | `cthrone update --check` | ask the public release list whether a newer version exists; names the archive for this platform and exits 0 either way — non-zero only when the check could not be made |
 | `cthrone update --install [--to <tag>]` | replace this binary with the one from the newest published release, or the one named by `--to`; the download is verified against the release's `checksums.txt` first, and the binary it replaces is kept as `<name>.previous` |
 | `cthrone update --revert` | put the previous binary back, without a network call |

@@ -1,42 +1,32 @@
 package recvcmd
 
 import (
+	"errors"
 	"strings"
 	"testing"
-
-	"github.com/fiwon123/cthrone/internal/exec"
 )
 
 func TestRecvFlagsRegistered(t *testing.T) {
-	if f := Cmd.Flags().Lookup("allow"); f == nil {
-		t.Fatal("expected --allow flag")
-	}
-	if f := Cmd.Flags().Lookup("log"); f == nil {
-		t.Fatal("expected --log flag")
+	for _, name := range []string{"allow", "log"} {
+		if f := Cmd.Flags().Lookup(name); f == nil {
+			t.Fatalf("expected --%s flag", name)
+		}
 	}
 }
 
-func TestRecvAllowlistParsing(t *testing.T) {
-	allowFlag = " echo hello , ls* ,  "
-	logFlag = "/tmp/test.log"
-	defer func() { allowFlag = ""; logFlag = "" }()
+// The receiver does not exist yet, and the one thing it must never do is claim
+// to be listening when it is not — which is what it used to print.
+func TestRecvRefuses(t *testing.T) {
+	err := Cmd.RunE(Cmd, nil)
+	if !errors.Is(err, ErrNotImplemented) {
+		t.Fatalf("RunE() error = %v, want ErrNotImplemented", err)
+	}
 
-	var allowlist []string
-	for _, a := range strings.Split(allowFlag, ",") {
-		a = strings.TrimSpace(a)
-		if a == "" {
-			continue
-		}
-		allowlist = append(allowlist, a)
+	if !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("the refusal does not say it is unimplemented: %q", err.Error())
 	}
-	p := &exec.Policy{Allowlist: allowlist, LogFile: logFlag}
-	if len(p.Allowlist) != 2 {
-		t.Fatalf("expected 2 entries, got %v", p.Allowlist)
-	}
-	if p.Allowlist[0] != "echo hello" || p.Allowlist[1] != "ls*" {
-		t.Fatalf("unexpected allowlist: %v", p.Allowlist)
-	}
-	if p.LogFile != "/tmp/test.log" {
-		t.Fatalf("log file = %s", p.LogFile)
+
+	if strings.Contains(err.Error(), "ready") {
+		t.Errorf("the refusal claims the receiver is ready: %q", err.Error())
 	}
 }
