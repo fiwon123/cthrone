@@ -78,6 +78,13 @@ jobs:
       - name: Test with the race detector
         run: make race
 
+      # A short fuzz pass over the parsers that read bytes from a peer. Twenty
+      # seconds each is not a proof; the value is that a regression is found by
+      # the job rather than by a user, and that a failing input is committed to
+      # testdata/fuzz and replayed by every later run.
+      - name: Fuzz the wire parsers
+        run: make fuzz FUZZTIME=20s
+
       - name: Build
         run: go build ./...
 

@@ -77,6 +77,20 @@ driver serialises the writes, and the test driver cannot. The non-GUI build of
 the same code is what `make race` covers, and that is where this project's
 concurrency lives.
 
+### Fuzzing the untrusted input
+
+`make fuzz` (CI runs it for 20 s per target) drives the parsers that read bytes
+from a peer: `wire.Parse`, the door every frame goes through, and the chunk
+arithmetic a transfer depends on.
+
+A failing input is written by the tool into `testdata/fuzz/<Target>/` — commit
+it. The next run replays the corpus before it starts exploring, so a fuzzer that
+found something keeps finding it.
+
+Twenty seconds is not a proof of correctness; it is a check that a change did
+not reintroduce a panic on input nobody chose. Run it longer by hand when
+touching the parser: `make fuzz FUZZTIME=5m`.
+
 ### Go conventions
 
 - Test file: `<file>_test.go`, next to the code it tests, same package (or

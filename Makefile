@@ -384,6 +384,21 @@ test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
 # race in the harness, not in the program, and it cannot be silenced without a
 # different driver. `go test -race ./...` here is the non-GUI build of the same
 # code, which is where this project's concurrency lives anyway.
+# `go test -fuzz` takes one target per run, so the target loops. The corpus that
+# matters is the seed set in the test: a *failing* input is written to
+# testdata/fuzz by the tool itself, and that file is what a later run replays
+# before it starts exploring.
+FUZZTIME ?= 20s
+FUZZ_TARGETS := ./internal/wire:FuzzParse ./internal/wire:FuzzChunks
+
+fuzz: ## fuzz the parsers of untrusted input (FUZZTIME=20s by default)
+	@set -e; \
+	for target in $(FUZZ_TARGETS); do \
+	  pkg="$${target%%:*}"; name="$${target##*:}"; \
+	  echo "fuzzing $$name in $$pkg for $(FUZZTIME)"; \
+	  CGO_ENABLED=0 go test -run '^$$' -fuzz "^$$name$$" -fuzztime=$(FUZZTIME) "$$pkg"; \
+	done
+
 race: ## test with the race detector (needs a C compiler)
 	@if [ "$$(CGO_ENABLED=1 go env CGO_ENABLED)" != "1" ] || ! echo 'int main(void){return 0;}' | $${CC:-cc} -x c - -o /dev/null 2>/dev/null; then \
 	  echo "ERROR: -race needs cgo and a C compiler (CC=${CC:-cc}); neither is available here." >&2; \
