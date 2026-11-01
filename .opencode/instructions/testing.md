@@ -62,6 +62,21 @@ are exercised on an in-memory link, and no gate here opens a radio (#202, #206).
 Report what executed; "32/32 packages have tests" is not "the behaviour is
 covered".
 
+### The race detector
+
+`make race` runs `go test -race ./...` and CI runs it. It is a separate target
+rather than part of `make check` because `-race` needs a C compiler, and the
+gate must keep working on a host without one; the target fails loudly rather
+than skipping.
+
+The **gui-tagged suite is deliberately excluded**: Fyne's *test* driver runs
+`fyne.Do` inline, so a worker goroutine's widget write lands on that goroutine
+while the test reads the widget, and the detector reports a race in the harness
+rather than in the program. Do not "fix" those by locking the tests — the real
+driver serialises the writes, and the test driver cannot. The non-GUI build of
+the same code is what `make race` covers, and that is where this project's
+concurrency lives.
+
 ### Go conventions
 
 - Test file: `<file>_test.go`, next to the code it tests, same package (or
