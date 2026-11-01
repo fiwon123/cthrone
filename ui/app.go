@@ -268,27 +268,77 @@ func run() (err error) {
 
 	go g.pruneLoop()
 
-	if mobile {
-		// Discovery is skipped on a phone: the beacon and the scan are for
-		// finding another machine on a network, and the app that is already
-		// open is the one the user picked up.
-	} else {
+	// Everything that touches the disk or binds a socket runs beside the window,
+	// not in front of it: the identity read and the discovery listener used to
+	// happen before ShowAndRun, so the user waited for both before anything was
+	// painted. Nothing here blocks the main goroutine, which goes straight to
+	// the event loop and draws.
+	go func() {
+		if err := guard("identity", func() {
+			if err := g.fillIdentity(); err != nil {
+				logFailure(err)
+			}
+		}); err != nil {
+			logFailure(err)
+		}
+
+		if mobile {
+			// Discovery is skipped on a phone: the beacon and the scan are for
+			// finding another machine on a network, and the app that is already
+			// open is the one the user picked up.
+			return
+		}
+
 		// Discovery and the resize are not worth the window: a failure in
 		// either is recorded and the chat still opens.
 		if err := guard("discovery", g.startDiscovery); err != nil {
 			logFailure(err)
 		}
 
-		if err := guard("resize", func() { w.Resize(fyne.NewSize(900, 640)) }); err != nil {
+		if err := guard("resize", func() {
+			fyne.Do(func() { w.Resize(fyne.NewSize(900, 640)) })
+		}); err != nil {
 			logFailure(err)
 		}
-	}
+	}()
 
 	w.ShowAndRun()
 
 	// The close intercept may not run on every platform — a phone that kills
 	// the window rather than closing it — so the same release happens here.
 	g.shutdown()
+
+	return nil
+}
+
+// loadIdentity is a variable so a test can answer without the real
+// configuration directory, and can see whether the build asked at all.
+var loadIdentity = discovery.LoadIdentity
+
+// fillIdentity names this device after the identity on disk.
+//
+// It runs after the window is shown, off the UI goroutine: the read is I/O, and
+// a window that waits for the disk to appear is the delay this function exists
+// to avoid.
+func (g *gui) fillIdentity() error {
+	identity, err := loadIdentity()
+	if err != nil {
+		return err
+	}
+
+	if identity == nil || identity.Name == "" {
+		return nil
+	}
+
+	fyne.Do(func() {
+		// A name the user has already typed wins: this is a default, not an
+		// instruction.
+		if g.nameEntry == nil || g.nameEntry.Text != "" {
+			return
+		}
+
+		g.nameEntry.SetText(identity.Name)
+	})
 
 	return nil
 }
@@ -442,12 +492,10 @@ func (g *gui) build() {
 	g.bindEntry = widget.NewEntry()
 	g.bindEntry.SetPlaceHolder("every interface")
 
+	// The name is filled in after the window is up (fillIdentity): reading it
+	// is I/O, and the window must not wait on the disk to appear.
 	g.nameEntry = widget.NewEntry()
-	if identity, err := discovery.LoadIdentity(); err == nil && identity.Name != "" {
-		g.nameEntry.SetText(identity.Name)
-	} else {
-		g.nameEntry.SetPlaceHolder("device name")
-	}
+	g.nameEntry.SetPlaceHolder("device name")
 
 	g.hostEntry = widget.NewEntry()
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
