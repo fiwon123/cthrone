@@ -340,6 +340,14 @@ release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can pr
 #     unused import there stayed green here while the Windows release archives
 #     could not be built at all (#176). This compiles that tree; the native
 #     Fyne link stays the release workflow's job.
+#
+#   - The Android CLI tree is cross-compiled as well, for the reason above and
+#     one more: GOOS=android satisfies the `linux` build tag, so a Linux-only
+#     file (`//go:build linux`) is compiled there unless it excludes android
+#     explicitly. That mistake cannot be seen from a Linux build; it is exactly
+#     how the BlueZ transport would have entered the phone build (#202). The
+#     scope stops short of `./...` because Fyne's mobile and darwin drivers
+#     need CGO and platform glue, which is the release workflow's job.
 # ---------------------------------------------------------------------------
 check: ## gofmt, vet, test, build — the local verification gate
 	@set -e; \
@@ -354,6 +362,7 @@ check: ## gofmt, vet, test, build — the local verification gate
 	$(GUI_TEST); \
 	go build ./...; \
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...; \
+	GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build . ./cmd/... ./internal/...; \
 	notested="$$(go list -f '{{if and (not .TestGoFiles) (not .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$' || true)"; \
 	if [ -n "$$notested" ]; then \
 		echo ""; \

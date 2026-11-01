@@ -8,6 +8,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/auth"
 	"github.com/fiwon123/cthrone/internal/chat"
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -17,6 +18,8 @@ import (
 )
 
 var natsFlag bool
+
+var bluetoothFlag bool
 
 var natsURLFlag string
 
@@ -31,6 +34,10 @@ var nameFlag string
 // listener: the encrypted default is the kind of wiring a test that only
 // checks flag registration would leave unproven.
 var hostWebsocket = websocketcore.Host
+
+// hostBluetooth is the Bluetooth host the command starts. It is a variable for
+// the same reason: a test cannot open a radio.
+var hostBluetooth = bluetoothcore.Host
 
 // Cmd represents the host command
 var Cmd = &cobra.Command{
@@ -81,6 +88,20 @@ On nats connection only host receive message and only connect device send messag
 			fmt.Println(notice)
 		}
 
+		if err := transportConflict(bluetoothFlag, natsFlag); err != nil {
+			log.Fatal(err)
+		}
+
+		if bluetoothFlag {
+			// Bluetooth needs no port and no certificate: the radio is the
+			// link, and the end-to-end layer seals it as it seals the others.
+			if err := hostBluetooth(app, opts, firstContactGate()); err != nil {
+				log.Fatal(err)
+			}
+
+			return
+		}
+
 		if natsFlag {
 			natscore.Host(args, app, opts, natsURLFlag, tlsConf)
 
@@ -91,6 +112,20 @@ On nats connection only host receive message and only connect device send messag
 			log.Fatal(err)
 		}
 	},
+}
+
+// transportConflict refuses two switches that name different carriers. A run
+// that passed both has not said which transport to use, and choosing one for it
+// would be a guess; the transport is the one thing the command cannot infer.
+//
+// It is a function so a test can read the refusal: log.Fatal ends the process,
+// and a test that calls it verifies nothing but its own exit.
+func transportConflict(bluetooth, nats bool) error {
+	if bluetooth && nats {
+		return errors.New("--bluetooth and --nats select different transports; name one")
+	}
+
+	return nil
 }
 
 // firstContactGate is how a new device is let in: a question on the terminal.
@@ -112,6 +147,7 @@ func firstContactGate() websocketcore.Confirm {
 
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
+	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "serve over Bluetooth instead of the websocket (Linux only, one device at a time)")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&bindAddressFlag, "host", "", "the interface to bind to (default: every interface, so another device can reach it)")
 	Cmd.Flags().BoolVar(&allowAnonymousFlag, "allow-anonymous", false, "retired: every session is encrypted and authenticated")

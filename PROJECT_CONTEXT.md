@@ -28,7 +28,8 @@ through a NATS broker.
 
 - **Language**: Go 1.26.10 (see `go.mod`)
 - **CLI framework**: spf13/cobra
-- **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
+- **Transports**: gorilla/websocket (default), nats-io/nats.go (`--nats`), and
+  tinygo.org/x/bluetooth over BlueZ/D-Bus (`--bluetooth`, Linux only)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
@@ -38,8 +39,9 @@ through a NATS broker.
 ## Architecture
 
 A cobra command is a thin shell over a *transport* package. The transport is
-selected at the command level — `--nats` chooses the NATS path, its absence
-chooses the websocket path — and both paths meet at the same chat loop.
+selected at the command level — `--nats` chooses the NATS path, `--bluetooth`
+the radio, and neither chooses the websocket path — and all three meet at the
+same chat loop over the same sealed session.
 
 ```text
 cmd/<verb>/                 cobra command: flags and argument parsing
@@ -76,17 +78,33 @@ compete for the keyboard — and the GUI is another. Relay attribution is
 in-band: text is prefixed with the sender's label, and a file frame carries the
 label in an optional `wire.Header.Sender` field, which an older peer ignores.
 
+The radio is the exception to "the transports are interchangeable", and the
+exception belongs to Bluetooth rather than to a shortcut: a BlueZ peripheral
+cannot tell which central wrote to a characteristic, so a host serves **one
+device at a time** and the slot frees when the keepalive notices the device has
+gone quiet; discovery is a BLE scan rather than the UDP beacon, so `cthrone scan
+--bluetooth` lists the devices in range; and a 20-byte packet makes text the
+only practical payload. The GATT layer is Linux only (`//go:build linux
+&& !android` — Android satisfies the `linux` tag and has no BlueZ, so it is
+excluded explicitly), and `internal/core/bluetooth/unsupported.go` answers
+everywhere else. The framing, the session and the keepalive are portable and
+tested on an in-memory link; no gate opens a radio.
+
 The GUI is not a fourth transport: `ui/` reads and writes through the same
 `internal/session.Session` the terminal loops use, and `mobile/` is a second
 `main` that starts that GUI on a phone. So the terminal and the app share the
 transports, the credential and the TLS rules, and differ only in how they read
-and write.
+and write. A phone build leaves Bluetooth out of the transport select, because
+the Android binding is separate work (issue #206).
 
 ## Design Decisions
 
-- **Two interchangeable transports behind one command set** — the user picks
-  the transport with a flag, and the chat experience is the same either way.
-  (2026-01)
+- **Interchangeable transports behind one command set** — the user picks the
+  transport with a flag, and the chat experience is the same either way. The
+  radio keeps that promise within its own limits — one device at a time, text
+  over a 20-byte packet, the OS's Bluetooth permission — and the limits are the
+  radio's, stated rather than hidden. (2026-01; the radio added 2026-11, issue
+  #202)
 - **A host is a room, and a message reaches every device in it** — the host
   relays what one device sends to all the others with the sender named, rather
   than pairing two devices in private. Text carries the name in-band, because
@@ -112,10 +130,10 @@ and write.
   desktop GUI and the Android APK, and the same code can become an iOS build;
   a second UI in a second language would have duplicated the transports and the
   security model. (2026-10, issue #84; supersedes issue #9)
-- **Encryption is built in, not opt-in** — every session is sealed on both
-  transports and a peer that cannot authenticate is refused rather than
+- **Encryption is built in, not opt-in** — every session is sealed on every
+  transport and a peer that cannot authenticate is refused rather than
   downgraded to plaintext. There is no anonymous mode. (2026-10, issue
-  #11/#109, kept by #125)
+  #11/#109, kept by #125; #202 added a carrier and changed no rule)
 - **A device pairs by its own key, with a shared secret as the alternative** —
   the default is a per-device ed25519 key, pinned by the peer on first contact
   and compared by fingerprint on both screens; a different key under a pinned
@@ -152,8 +170,8 @@ tag, `ui.Run` prints a message and exits, so the CLI needs no GUI toolkit.
 
 ```text
 cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec (+ the assets package)
-internal/core/       one package per transport (websocket, nats)
-internal/handlers/   one package per transport (websocket, nats)
+internal/core/       one package per transport (websocket, nats, bluetooth)
+internal/handlers/   one package per transport (websocket, nats, bluetooth)
 internal/data/app/   the in-memory configuration
 internal/pairing/    the credential a session uses: the shared secret, or this device's key
 internal/auth/       the shared secret and the TLS material
@@ -188,9 +206,10 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), and `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200). `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
-- **Encrypted and authenticated by default**: every session is sealed on both
-  transports, and exactly one credential authenticates it — this device's
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ; the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.8.5` is the published release; `v0.8.6` is merged into `dev` and awaiting its release.
+- **Encrypted and authenticated by default**: every session is sealed on every
+  transport — a Bluetooth link carries ciphertext too, whatever the radio's own
+  pairing — and exactly one credential authenticates it — this device's
   ed25519 key when no secret is configured, or the shared secret when the user
   names one — `--token`, `CTHRONE_TOKEN` or `--token-file` — which is the
   v0.6.0 path. X25519 + HKDF per direction, AES-256-GCM, a sequence
@@ -222,12 +241,18 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 1. Publish the `v0.8.6` release when its milestone is done — the draft comes from `release.yml` and a human presses publish.
 2. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
-3. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
+3. Prove the Bluetooth transport on two real devices — Linux to Linux, and then a phone once #206 binds the Android stack; no gate in this repository opens a radio.
+4. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
 
 ## Notes
 
 - The `ct` alias is the same binary under a second name; both are shipped in
   the release archive.
+- The Bluetooth transport has no address and no port. `cthrone host --bluetooth`
+  advertises the service and serves one device at a time; `cthrone connect
+  --bluetooth [name|address]` scans and dials the first (or named) cthrone
+  device; `cthrone scan --bluetooth` lists what advertises the service. The
+  GATT layer is BlueZ over D-Bus, so it is Linux only (#202); Android is #206.
 - The websocket transport defaults to port `8080` on **every interface**; the
   client dials `wss://` and the server serves https by default, and `--no-tls`
   puts both back on `ws://`. With no secret configured — the default — the host

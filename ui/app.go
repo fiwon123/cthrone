@@ -33,6 +33,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	appdata "github.com/fiwon123/cthrone/internal/data/app"
@@ -44,6 +45,15 @@ import (
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
+// openBluetoothSession and openBluetoothServer are the radio's two entry points.
+// They are variables so a test can drive Connect and Host without an adapter:
+// there is no radio in a test, and what is being checked is the window's side of
+// the call — which target it names, what it shows, and how it stops.
+var (
+	openBluetoothSession = bluetoothcore.OpenSession
+	openBluetoothServer  = bluetoothcore.OpenServer
+)
+
 // copyHintDuration is how long the transcript's "Copied" confirmation stays on
 // screen. A tap that shows nothing reads as a tap that did nothing.
 const copyHintDuration = 2 * time.Second
@@ -51,10 +61,17 @@ const copyHintDuration = 2 * time.Second
 // copyHintMargin keeps the "Copied" popup off the bottom edge of the window.
 const copyHintMargin = 48
 
-// liveServer is the part of a websocket host the GUI needs. Keeping it an
-// interface means the UI does not import the handler package.
+// bluetoothScanTimeout is how long a radio scan listens. It matches the value
+// the terminal scan uses: a device that was slow to advertise is exactly the one
+// a shorter window would miss.
+const bluetoothScanTimeout = 10 * time.Second
+
+// liveServer is the part of a host the GUI needs. Keeping it an interface means
+// the UI does not import the handler package, and the two transports that can
+// host — the websocket listener and the Bluetooth one — are stopped the same
+// way. Addr is not part of it: the radio has no address, and the address the
+// user needs is already on screen from thisDeviceText.
 type liveServer interface {
-	Addr() string
 	Stop() error
 }
 
@@ -81,7 +98,6 @@ type gui struct {
 	natsURLEntry     *widget.Entry
 	tlsCheck         *widgets.CheckRow
 	insecureCheck    *widgets.CheckRow
-	natsCheck        *widgets.CheckRow
 
 	// hostBtn and connectBtn are kept so they can be disabled while this device
 	// is already hosting or connected. A second Host binds a port the first one
@@ -155,6 +171,7 @@ type gui struct {
 	beacons    []device
 	beaconList *widget.List
 	scanBtn    *widgets.CopyButton
+	listHint   *widget.Label
 	listener   *discovery.Listener
 
 	mu     sync.Mutex
@@ -433,18 +450,21 @@ func (g *gui) build() {
 	// phone that has to find a switch before it is protected is not protected.
 	g.tlsCheck.SetChecked(true)
 	g.insecureCheck = widgets.NewCheckRow("Skip the certificate check (insecure)", nil, !g.mobile)
-	g.natsCheck = widgets.NewCheckRow("Use NATS instead of websocket", nil, !g.mobile)
 
 	g.moreBtn = widgets.NewButton("More options", func() {
 		g.moreOptions = !g.moreOptions
 		g.rebuildSetupForm()
 	}, g.copyLabel)
 
-	g.transport = widget.NewSelect([]string{"WebSocket (default)", "NATS"}, func(s string) {
-		g.natsCheck.SetChecked(s == "NATS")
+	// The transport select is the one control for the carrier: the three are
+	// exclusive, so three checkboxes would be three ways to disagree. It is
+	// built from transportNames, which leaves the radio out of a build that
+	// cannot run it.
+	g.transport = widget.NewSelect(transportNames(g.mobile), func(string) {
 		g.rebuildSetupForm()
+		g.refreshDeviceList()
 	})
-	g.transport.SetSelected("WebSocket (default)")
+	g.transport.SetSelected(labelWebsocket)
 
 	// The form is rebuilt into this stack: a Fyne form has no way to drop a
 	// single row, so the visible subset becomes a fresh form instead.
@@ -483,21 +503,21 @@ func (g *gui) build() {
 	// --- devices ------------------------------------------------------
 	g.scanBtn = widgets.NewButtonWithIcon("Scan network", theme.ViewRefreshIcon(), g.scan, g.copyLabel)
 
-	// A beacon row stays a plain label: the list gives it one fixed line, and a
-	// wrapping selectable label would clip there. The address is copyable from
-	// the "Selected" status line and the dial field, which is where a user who
-	// wants it is already looking.
+	// The list shows the rows of the carrier in force, not both at once: a
+	// Bluetooth address is not something the websocket transport can dial, and
+	// the other way round. rows re-reads that view on every refresh, so a scan
+	// of one transport never leaves the other's rows in the way.
 	g.beaconList = widget.NewList(
-		func() int { return len(g.beacons) },
+		func() int { return len(g.visibleBeacons()) },
 		func() fyne.CanvasObject { return widget.NewLabel("") },
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			if id < 0 || id >= len(g.beacons) {
+			rows := g.visibleBeacons()
+			if id < 0 || id >= len(rows) {
 				return
 			}
 
-			beacon := g.beacons[id]
 			if lbl, ok := obj.(*widget.Label); ok {
-				lbl.SetText(deviceLabel(beacon.Beacon))
+				lbl.SetText(deviceLabel(rows[id].Beacon))
 			}
 		},
 	)
@@ -506,11 +526,11 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	beaconHint := g.label("UDP beacons on port 9999")
+	g.listHint = g.label(scanHint(transportWebsocket))
 	if g.lay.Stack {
-		beaconHeader = container.NewVBox(g.scanBtn, beaconHint)
+		beaconHeader = container.NewVBox(g.scanBtn, g.listHint)
 	} else {
-		beaconHeader = container.NewHBox(g.scanBtn, beaconHint)
+		beaconHeader = container.NewHBox(g.scanBtn, g.listHint)
 	}
 
 	devices := container.NewBorder(
@@ -595,15 +615,30 @@ func (g *gui) rebuildSetupForm() {
 		return
 	}
 
-	useNATS := g.natsCheck.Checked()
-	view := setupVisibility(useNATS, g.tlsCheck.Checked(), g.moreOptions)
+	mode := g.mode()
+	view := setupVisibility(mode, g.tlsCheck.Checked(), g.moreOptions)
+
+	// The row that dials something names a different thing per transport, so
+	// its placeholder says which: an address for a websocket, the first device
+	// in range for the radio.
+	switch mode {
+	case transportBluetooth:
+		g.hostEntry.SetPlaceHolder("device name or address (empty: the first in range)")
+	default:
+		g.hostEntry.SetPlaceHolder("192.168.1.100")
+	}
 
 	rows := []widgets.Row{
 		{Caption: "Device name", Field: g.nameEntry},
 		{Caption: labelConnectTo, Field: g.hostEntry},
-		{Caption: "Port", Field: g.portEntry},
-		{Caption: "Transport", Field: g.transport},
 	}
+	// The radio has no port and no socket to bind: both rows would be settings
+	// the transport cannot use.
+	if view.Port {
+		rows = append(rows, widgets.Row{Caption: "Port", Field: g.portEntry})
+	}
+
+	rows = append(rows, widgets.Row{Caption: "Transport", Field: g.transport})
 	if view.Options {
 		rows = append(rows, widgets.Row{Caption: "Options", Field: g.moreBtn})
 	}
@@ -638,7 +673,7 @@ func (g *gui) rebuildSetupForm() {
 		g.moreBtn.SetCopyText("More options")
 	}
 
-	g.hint.SetText(setupHint(useNATS))
+	g.hint.SetText(setupHint(mode))
 
 	g.formHolder.Objects = []fyne.CanvasObject{widgets.Form(g.lay.Stack, !g.mobile, rows)}
 	g.formHolder.Refresh()
@@ -689,12 +724,15 @@ func (g *gui) finishStart(seq int, install func()) bool {
 	return true
 }
 
-// connect joins a host (websocket) or a broker (NATS).
+// connect joins a host (websocket), a broker (NATS), or a Bluetooth device.
 func (g *gui) connect() {
 	host := strings.TrimSpace(g.hostEntry.Text)
-	useNATS := g.natsCheck.Checked()
+	mode := g.mode()
 
-	if !useNATS && host == "" {
+	// Only the websocket has nothing to find on its own: a Bluetooth connect
+	// with no device named takes the first cthrone device in range, which is
+	// what an empty field means there.
+	if mode == transportWebsocket && host == "" {
 		g.showError(errors.New("enter the host address to connect to"))
 
 		return
@@ -721,9 +759,14 @@ func (g *gui) connect() {
 			err  error
 		)
 
-		if useNATS {
+		switch mode {
+		case transportNATS:
 			sess, err = natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
-		} else {
+
+		case transportBluetooth:
+			sess, err = openBluetoothSession(targetArg(host), data, opts)
+
+		default:
 			sess, err = websocketcore.Dial([]string{host}, data, opts, tlsConf)
 		}
 
@@ -746,15 +789,28 @@ func (g *gui) connect() {
 			return
 		}
 
-		if useNATS {
+		switch mode {
+		case transportNATS:
 			g.setStatus("Connected through NATS on " + broker)
-		} else {
+		case transportBluetooth:
+			g.setStatus("Connected over Bluetooth — chatting")
+		default:
 			g.setStatus("Connected to " + host + " — chatting")
 		}
 
 		g.noteFirstContact(sess)
 		g.attach(sess)
 	}()
+}
+
+// targetArg is what a Bluetooth connect was pointed at: the named device, or
+// nothing, which the transport reads as "the first cthrone device in range".
+func targetArg(host string) []string {
+	if host == "" {
+		return nil
+	}
+
+	return []string{host}
 }
 
 // noteFirstContact shows the code a joining device is compared by while the
@@ -772,7 +828,8 @@ func (g *gui) noteFirstContact(sess session.Session) {
 	sealed.OnFirstContact(func(c e2e.FirstContact) { g.setStatus(waitingText(c)) })
 }
 
-// host starts a host (websocket) or joins the broker as a peer (NATS).
+// host starts a host (websocket), joins the broker as a peer (NATS), or serves
+// a room over the radio (Bluetooth).
 func (g *gui) host() {
 	seq, ok := g.beginStart()
 	if !ok {
@@ -784,7 +841,7 @@ func (g *gui) host() {
 	opts := g.pairingOptions()
 	broker := g.natsURLEntry.Text
 	subject := g.subject()
-	useNATS := g.natsCheck.Checked()
+	mode := g.mode()
 	typedToken := strings.TrimSpace(g.tokenEntry.Text) != ""
 
 	// This device's own address, as the other device's scan will find it. The
@@ -792,20 +849,25 @@ func (g *gui) host() {
 	// bridge or a VPN adapter is not advertised as a way in. Both are read
 	// before the goroutine so no interface is touched off the UI thread, and
 	// they are only meaningful for the websocket host: the NATS path has a
-	// broker, not an address on this network.
-	route, _ := defaultRouteIP()
-	addrs := discovery.AdvertisedAddrs(localAddrs(), route)
-	own := thisDeviceText(addrs, data.Port)
+	// broker instead of an address, and the radio has neither.
+	own := ""
 	hosting := "Hosting — waiting for connection"
-	if addresses := deviceAddresses(addrs, data.Port); addresses != "" {
-		hosting = "Hosting on " + addresses + " — waiting for connection"
+
+	if mode != transportNATS {
+		route, _ := defaultRouteIP()
+		addrs := discovery.AdvertisedAddrs(localAddrs(), route)
+		own = thisDeviceText(addrs, data.Port)
+		if addresses := deviceAddresses(addrs, data.Port); addresses != "" {
+			hosting = "Hosting on " + addresses + " — waiting for connection"
+		}
 	}
 
 	g.setStatus("Starting…")
 	g.updateButtons()
 
 	go func() {
-		if useNATS {
+		switch mode {
+		case transportNATS:
 			sess, err := natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
 			if err != nil {
 				if !g.finishStart(seq, nil) {
@@ -830,41 +892,86 @@ func (g *gui) host() {
 			g.tabs.SelectIndex(0)
 
 			return
+
+		case transportBluetooth:
+			g.hostBluetooth(seq, data, opts)
+		default:
+			g.hostWebsocket(seq, data, tlsConf, opts, own, hosting, typedToken)
 		}
-
-		handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
-			g.setStatus("A device joined — chatting")
-			g.attach(sess)
-		}, g.confirmFirstContact)
-		if err != nil {
-			if !g.finishStart(seq, nil) {
-				return
-			}
-
-			g.setStatus("Host failed")
-			g.showError(err)
-			fyne.Do(g.updateButtons)
-
-			return
-		}
-
-		// The listener is bound already. A Stop that arrived while it was
-		// binding released the port it was told about, not this one, so this
-		// server closes itself: otherwise the app would be running a host with
-		// nobody holding the button that stops it.
-		if !g.finishStart(seq, func() { g.server = handle }) {
-			_ = handle.Stop()
-			fyne.Do(g.updateButtons)
-
-			return
-		}
-
-		fyne.Do(g.updateButtons)
-		g.showThisDevice(own)
-		g.setStatus(hosting)
-		g.tabs.SelectIndex(0)
-		g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, own, !typedToken)
 	}()
+}
+
+// hostBluetooth serves a room over the radio.
+//
+// There is no address to show and no certificate to pin: the other device finds
+// this one by scanning the radio, and the two screens are compared by
+// fingerprint or by the six-digit code the host asks on. The dialog carries the
+// fingerprint for exactly that reason — it is the only screen the user has.
+func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
+	handle, err := openBluetoothServer(data, opts, func(sess session.Session) {
+		g.setStatus("A device joined over Bluetooth — chatting")
+		g.attach(sess)
+	}, g.confirmFirstContact)
+	if err != nil {
+		if !g.finishStart(seq, nil) {
+			return
+		}
+
+		g.setStatus("Host failed")
+		g.showError(err)
+		fyne.Do(g.updateButtons)
+
+		return
+	}
+
+	if !g.finishStart(seq, func() { g.server = handle }) {
+		_ = handle.Stop()
+		fyne.Do(g.updateButtons)
+
+		return
+	}
+
+	fyne.Do(g.updateButtons)
+	g.setStatus("Hosting over Bluetooth — one device at a time")
+	g.tabs.SelectIndex(0)
+	g.offerPairing("", handle.DeviceFingerprint, "", "", false)
+}
+
+// hostWebsocket serves the websocket room: it binds the port, shows this
+// device's address, and prints what the other device needs to find it.
+func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts pairing.Options, own, hosting string, typedToken bool) {
+	handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
+		g.setStatus("A device joined — chatting")
+		g.attach(sess)
+	}, g.confirmFirstContact)
+	if err != nil {
+		if !g.finishStart(seq, nil) {
+			return
+		}
+
+		g.setStatus("Host failed")
+		g.showError(err)
+		fyne.Do(g.updateButtons)
+
+		return
+	}
+
+	// The listener is bound already. A Stop that arrived while it was
+	// binding released the port it was told about, not this one, so this
+	// server closes itself: otherwise the app would be running a host with
+	// nobody holding the button that stops it.
+	if !g.finishStart(seq, func() { g.server = handle }) {
+		_ = handle.Stop()
+		fyne.Do(g.updateButtons)
+
+		return
+	}
+
+	fyne.Do(g.updateButtons)
+	g.showThisDevice(own)
+	g.setStatus(hosting)
+	g.tabs.SelectIndex(0)
+	g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, own, !typedToken)
 }
 
 // showThisDevice puts this device's own address on screen while it hosts. The
@@ -1058,12 +1165,21 @@ func (g *gui) send(text string) {
 	}()
 }
 
-// scan walks the local subnet for a chat host on the configured port.
+// scan finds devices on the carrier in force: the hosts answering on this
+// network, or the cthrone devices in radio range.
 //
 // The devices already listed are re-checked too: a host that was stopped
 // since it was heard fails the check and leaves before its TTL would have
 // expired it, so pressing the button never keeps a dead address around.
 func (g *gui) scan() {
+	mode := g.mode()
+
+	if mode == transportBluetooth {
+		g.scanBluetooth(mode)
+
+		return
+	}
+
 	data := g.data()
 
 	g.scanBtn.Disable()
@@ -1082,7 +1198,7 @@ func (g *gui) scan() {
 
 			g.beacons = withoutDead(g.beacons, checked, answered)
 			g.beacons = addScanned(g.beacons, found, data.Port, now)
-			g.beaconList.Refresh()
+			g.refreshDeviceList()
 
 			if len(found) == 0 {
 				g.setStatus("No host answered on this network")
@@ -1095,15 +1211,88 @@ func (g *gui) scan() {
 	}()
 }
 
-// selectBeacon fills the host address from a discovered device.
-func (g *gui) selectBeacon(id widget.ListItemID) {
-	if id < 0 || id >= len(g.beacons) {
+// scanBluetooth walks the radio. There is no beacon to listen for on this
+// transport and no port to probe, so the scan is the whole of discovery: what
+// advertises the service is what can be dialled.
+func (g *gui) scanBluetooth(mode transportMode) {
+	g.scanBtn.Disable()
+	g.setStatus("Scanning for Bluetooth devices — about ten metres…")
+
+	go func() {
+		found := 0
+
+		err := bluetoothcore.ScanPeers(bluetoothScanTimeout, func(p bluetoothcore.Peer) {
+			found++
+			// The peer arrives on the scan's goroutine, so the list is touched
+			// on the UI one.
+			fyne.Do(func() { g.addPeer(p) })
+		})
+
+		fyne.Do(func() {
+			g.scanBtn.Enable()
+
+			if err != nil {
+				g.setStatus("Bluetooth scan failed")
+				g.showError(err)
+
+				return
+			}
+
+			if found == 0 {
+				g.setStatus("No cthrone device answered over Bluetooth")
+
+				return
+			}
+
+			g.setStatus(fmt.Sprintf("Found %d Bluetooth device(s) — tap one to connect", found))
+		})
+	}()
+}
+
+// visibleBeacons is the rows the Devices list shows for the transport in force.
+func (g *gui) visibleBeacons() []device {
+	return visibleDevices(g.beacons, g.mode())
+}
+
+// refreshDeviceList re-reads the view and the hint after the carrier changed:
+// the rows of the other transport are not peers the Connect button can reach.
+func (g *gui) refreshDeviceList() {
+	if g.beaconList == nil {
 		return
 	}
 
-	beacon := g.beacons[id]
+	if g.listHint != nil {
+		g.listHint.SetText(scanHint(g.mode()))
+	}
+
+	if g.scanBtn != nil {
+		g.scanBtn.SetText(scanButtonText(g.mode()))
+		g.scanBtn.SetCopyText(scanButtonText(g.mode()))
+	}
+
+	g.beaconList.UnselectAll()
+	g.beaconList.Refresh()
+}
+
+// addPeer records a device the radio found.
+func (g *gui) addPeer(p bluetoothcore.Peer) {
+	g.beacons = upsertPeer(g.beacons, p, time.Now())
+	g.beaconList.Refresh()
+}
+
+// selectBeacon fills the host address from a discovered device.
+func (g *gui) selectBeacon(id widget.ListItemID) {
+	rows := g.visibleBeacons()
+	if id < 0 || id >= len(rows) {
+		return
+	}
+
+	beacon := rows[id]
 
 	g.hostEntry.SetText(beacon.Addr)
+
+	// A radio address has no port: the row offers the device, not an address on
+	// a network, and the port field is not on screen in that mode anyway.
 	if beacon.Port > 0 {
 		g.portEntry.SetText(strconv.Itoa(beacon.Port))
 	}
@@ -1492,6 +1681,17 @@ func (g *gui) startDiscovery() {
 }
 
 // --- settings ---------------------------------------------------------
+
+// mode is the transport the select points at. It is the single reading of that
+// control: the connect, host and scan paths all ask here rather than each
+// deciding again from a checkbox.
+func (g *gui) mode() transportMode {
+	if g.transport == nil {
+		return transportWebsocket
+	}
+
+	return transportOf(g.transport.Selected)
+}
 
 func (g *gui) port() int {
 	return parsePort(g.portEntry.Text)

@@ -75,7 +75,7 @@ func TestDesktopLabelsStaySelectable(t *testing.T) {
 func TestTouchCheckRowsAreInert(t *testing.T) {
 	g := newScreenGUI(t, true)
 
-	for _, row := range []*widgets.CheckRow{g.tlsCheck, g.insecureCheck, g.natsCheck} {
+	for _, row := range []*widgets.CheckRow{g.tlsCheck, g.insecureCheck} {
 		if caption := checkRowCaption(t, row); caption.Selectable {
 			t.Errorf("check caption %q is selectable on touch", caption.Text)
 		}

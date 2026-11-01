@@ -2,9 +2,11 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
@@ -156,6 +158,10 @@ func TestDeviceLabel(t *testing.T) {
 	}{
 		{"named", discovery.Beacon{Name: "laptop", Addr: "192.168.1.20", Port: 8080}, "laptop — 192.168.1.20:8080"},
 		{"unnamed", discovery.Beacon{Addr: "192.168.1.21", Port: 8080}, "192.168.1.21:8080"},
+		// A radio device has no port: the address is a Bluetooth address, and
+		// printing an empty one after a colon would be a port that never was.
+		{"radio, named", discovery.Beacon{Name: "phone", Addr: "AA:BB:CC:DD:EE:01"}, "phone — AA:BB:CC:DD:EE:01"},
+		{"radio, unnamed", discovery.Beacon{Addr: "AA:BB:CC:DD:EE:02"}, "AA:BB:CC:DD:EE:02"},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +170,105 @@ func TestDeviceLabel(t *testing.T) {
 				t.Errorf("deviceLabel(%+v) = %q, want %q", tt.beacon, got, tt.want)
 			}
 		})
+	}
+}
+
+// radioRow is one device a Bluetooth scan found.
+func radioRow(name, addr string, seen time.Time) device {
+	return device{Beacon: discovery.Beacon{Name: name, Addr: addr}, Radio: true, seen: seen}
+}
+
+// A radio scan reports the same device once however often it advertises, and
+// updates it when the name or the signal changes.
+func TestUpsertPeerKeepsOneRowPerAddress(t *testing.T) {
+	list := upsertPeer(nil, bluetoothcore.Peer{Address: "AA:BB:CC:DD:EE:01", Name: "phone"}, deviceTime)
+	list = upsertPeer(list, bluetoothcore.Peer{Address: "AA:BB:CC:DD:EE:01", Name: "phone-renamed"}, deviceTime.Add(2*time.Second))
+
+	if len(list) != 1 {
+		t.Fatalf("len = %d, want 1", len(list))
+	}
+
+	if !list[0].Radio {
+		t.Error("the row is not marked as a radio device")
+	}
+
+	if list[0].Name != "phone-renamed" {
+		t.Errorf("name = %q, want the latest scan", list[0].Name)
+	}
+
+	if !list[0].seen.Equal(deviceTime.Add(2 * time.Second)) {
+		t.Errorf("seen = %v, want the latest scan", list[0].seen)
+	}
+}
+
+// A beacon and a radio device never share a row, even if their addresses read
+// alike: they are different carriers, and only one of them can be dialled.
+func TestAPeerAndAReachableDeviceStayTwoRows(t *testing.T) {
+	list := upsertDevice(nil, discovery.Beacon{Addr: "AA:BB:CC:DD:EE:01", Port: 8080}, deviceTime)
+	list = upsertPeer(list, bluetoothcore.Peer{Address: "AA:BB:CC:DD:EE:01"}, deviceTime)
+
+	if len(list) != 2 {
+		t.Fatalf("the list holds %d rows, want one per carrier", len(list))
+	}
+
+	// And the network beacon does not take over the radio row's place.
+	if list[0].Radio == list[1].Radio {
+		t.Fatalf("both rows are the same carrier: %+v", list)
+	}
+}
+
+// A radio row was never announced, so there is no beacon interval to miss: it
+// stays until the next scan replaces it.
+func TestPruneDevicesKeepsRadioRows(t *testing.T) {
+	list := []device{radioRow("phone", "AA:BB:CC:DD:EE:01", deviceTime)}
+
+	got := pruneDevices(list, deviceTime.Add(deviceTTL+time.Hour))
+	if len(got) != 1 {
+		t.Fatalf("pruneDevices dropped a radio row: %+v", got)
+	}
+}
+
+// The Devices tab shows the carrier in force: a row from the other transport is
+// not a peer the Connect button can reach.
+func TestVisibleDevicesFollowsTheTransport(t *testing.T) {
+	list := []device{
+		listed("laptop", "192.168.1.20", 8080, deviceTime),
+		radioRow("phone", "AA:BB:CC:DD:EE:01", deviceTime),
+	}
+
+	for _, tt := range []struct {
+		mode transportMode
+		want string
+	}{
+		{transportWebsocket, "laptop"},
+		{transportNATS, "laptop"},
+		{transportBluetooth, "phone"},
+	} {
+		got := visibleDevices(list, tt.mode)
+		if len(got) != 1 || got[0].Name != tt.want {
+			t.Errorf("visibleDevices in mode %v = %+v, want only %q", tt.mode, got, tt.want)
+		}
+	}
+
+	// The full list is untouched: filtering is a view, not a prune.
+	if len(list) != 2 {
+		t.Fatalf("filtering the list changed it: %+v", list)
+	}
+}
+
+// The scan button and its hint say which carrier they will walk, because the
+// two scans look for entirely different things.
+func TestScanWordingFollowsTheTransport(t *testing.T) {
+	if hint := scanHint(transportBluetooth); !strings.Contains(hint, "Bluetooth") {
+		t.Errorf("the Bluetooth hint is %q", hint)
+	}
+
+	if hint := scanHint(transportWebsocket); !strings.Contains(hint, "beacons") {
+		t.Errorf("the network hint is %q", hint)
+	}
+
+	if text := scanButtonText(transportBluetooth); text == scanButtonText(transportWebsocket) {
+		t.Errorf("the two scans share the button label %q", text)
 	}
 }
 

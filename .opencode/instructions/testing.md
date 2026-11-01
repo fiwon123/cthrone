@@ -29,19 +29,21 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file**: #85/#86 closed the last gap, so all 27
+**Every package has a test file**: #85/#86 closed the last gap, so all 29
 packages in the module carry tests and `go test ./...` prints no
 `? package [no test files]` line.
 
-- **Covered (27)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
+- **Covered (29)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
   `cmd/exec`, `cmd/host`, `cmd/peers`, `cmd/recv`, `cmd/scan`, `cmd/ui`,
-  `internal/auth`, `internal/chat`, `internal/core/nats`,
-  `internal/core/websocket` (scanner included), `internal/data/app`,
-  `internal/discovery`, `internal/e2e`, `internal/exec`,
-  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
-  `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
-  non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
-  copyable button and tab bar), and the gui-tagged widget tree (headless).
+  `internal/auth`, `internal/chat`, `internal/core/bluetooth`,
+  `internal/core/nats`, `internal/core/websocket` (scanner included),
+  `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
+  `internal/handlers/bluetooth` (framing, reassembly and keepalive — portable,
+  tested without a radio), `internal/handlers/nats`,
+  `internal/handlers/websocket`, `internal/pairing`, `internal/session`,
+  `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its non-GUI settings
+  logic), `ui/widgets` (the selectable-text helpers, the copyable button and tab
+  bar), and the gui-tagged widget tree (headless).
 
 So a green `make check` proves the code is `gofmt`-clean, `go vet` found
 nothing, it compiles, every package's tests passed, and the gui-tagged widget
@@ -53,8 +55,10 @@ change is now executed, not only type-checked: `make check` and the CI `Test
 the GUI headless` step run
 `CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...`. The `ci` tag
 swaps Fyne's GL driver for the software one, so no GTK/X11/GL is needed. A
-native rendered frame and the APK on a device are still unverified (#155).
-Report what executed; "27/27 packages have tests" is not "the behaviour is
+native rendered frame and the APK on a device are still unverified (#155). The
+Bluetooth transport is in the same position: its framing, session and keepalive
+are exercised on an in-memory link, and no gate here opens a radio (#202, #206).
+Report what executed; "29/29 packages have tests" is not "the behaviour is
 covered".
 
 ### Go conventions

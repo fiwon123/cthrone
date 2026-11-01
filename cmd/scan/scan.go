@@ -1,10 +1,12 @@
 package scancmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/netip"
 
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	core "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
 	"github.com/spf13/cobra"
@@ -22,6 +24,10 @@ var localSubnetsFunc = core.LocalSubnets
 // beaconNames names the addresses a scan found. It is a variable so a test
 // does not wait out the discovery window (or bind its port).
 var beaconNames = core.BeaconNames
+
+// scanBluetoothFunc walks the radio instead of the network. It is a variable so
+// a test does not wait out a scan.
+var scanBluetoothFunc = bluetoothcore.Scan
 
 // Cmd represents the scan command
 var Cmd = &cobra.Command{
@@ -49,11 +55,23 @@ Usage:
 	cthrone scan --subnet 192.168.1.0/24
 	cthrone scan --subnet 192.168.1.0/24 --subnet 10.0.0.0/24
 	cthrone scan --all-subnets
+	cthrone scan --bluetooth
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port, _ := cmd.Flags().GetInt("port")
 
 		data := app.New(port)
+
+		if bluetooth, _ := cmd.Flags().GetBool("bluetooth"); bluetooth {
+			subnets, _ := cmd.Flags().GetStringArray("subnet")
+			all, _ := cmd.Flags().GetBool("all-subnets")
+
+			if err := scanConflict(subnets, all); err != nil {
+				return err
+			}
+
+			return scanBluetoothFunc(cmd.OutOrStdout())
+		}
 
 		targets, err := targetsFromFlags(cmd)
 		if err != nil {
@@ -148,6 +166,22 @@ func printFound(out io.Writer, addrs []string, names map[string]string) {
 // A subnet with no answer gets the sentence that explains it: a scan cannot
 // tell an empty segment from one it cannot reach, and the difference is the
 // whole point of asking for a second subnet.
+// scanConflict refuses a radio scan that also asked for a network walk. The
+// radio is not a subnet: the two scans look for different things over different
+// media, and a run that asked for both would report neither honestly. It is a
+// function so a test can read the refusal without parsing flags twice.
+func scanConflict(subnets []string, all bool) error {
+	if len(subnets) > 0 {
+		return errors.New("--bluetooth scans the radio, --subnet walks a network; name one")
+	}
+
+	if all {
+		return errors.New("--bluetooth scans the radio, --all-subnets walks the local networks; name one")
+	}
+
+	return nil
+}
+
 func printTargets(out io.Writer, targets []netip.Prefix, found []string, names map[string]string) {
 	for _, target := range targets {
 		var in []string
@@ -185,4 +219,5 @@ func printTargets(out io.Writer, targets []netip.Prefix, found []string, names m
 func init() {
 	Cmd.Flags().StringArray("subnet", nil, "an IPv4 CIDR to scan as well, e.g. 192.168.1.0/24; repeat for several segments")
 	Cmd.Flags().Bool("all-subnets", false, "scan the /24 of every local network interface")
+	Cmd.Flags().Bool("bluetooth", false, "scan for Bluetooth devices instead of network hosts (Linux only)")
 }

@@ -117,6 +117,97 @@ func inheritRootFlags(t *testing.T) {
 	Cmd.Flags().String("token-file", "", "")
 }
 
+// --bluetooth has to reach the radio's client: a flag that is registered but
+// never read would leave the run dialling a websocket address over a radio, and
+// the user would only learn that from the error.
+func TestBluetoothFlagSelectsTheTransport(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var (
+		got       []string
+		radio     bool
+		websocket bool
+	)
+
+	originalRadio := connectBluetooth
+	t.Cleanup(func() { connectBluetooth = originalRadio })
+
+	connectBluetooth = func(args []string, _ *app.Data, _ pairing.Options) error {
+		radio, got = true, args
+
+		return nil
+	}
+
+	originalWebsocket := connectWebsocket
+	t.Cleanup(func() { connectWebsocket = originalWebsocket })
+
+	connectWebsocket = func(_ []string, _ *app.Data, _ pairing.Options, _ auth.TLS) error {
+		websocket = true
+
+		return nil
+	}
+
+	inheritRootFlags(t)
+	resetBluetoothFlag(t)
+
+	Cmd.SetArgs([]string{"--bluetooth", "AA:BB:CC:DD:EE:FF"})
+
+	if err := Cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !radio {
+		t.Fatal("--bluetooth did not reach the Bluetooth client")
+	}
+
+	if websocket {
+		t.Error("--bluetooth started the websocket client as well")
+	}
+
+	if len(got) != 1 || got[0] != "AA:BB:CC:DD:EE:FF" {
+		t.Errorf("the Bluetooth client was given %v, want the device that was typed", got)
+	}
+}
+
+// Two switches that name different transports is a run that has not chosen one.
+// The refusal is an error rather than a guess, and it is checked here rather
+// than through log.Fatal — a test that exits proves nothing.
+func TestTransportConflict(t *testing.T) {
+	tests := []struct {
+		name      string
+		bluetooth bool
+		nats      bool
+		wantErr   bool
+	}{
+		{"no switch", false, false, false},
+		{"radio only", true, false, false},
+		{"broker only", false, true, false},
+		{"both", true, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := transportConflict(tt.bluetooth, tt.nats); (err != nil) != tt.wantErr {
+				t.Fatalf("transportConflict(%v, %v) error = %v, wantErr %v",
+					tt.bluetooth, tt.nats, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// resetBluetoothFlag puts the transport switches back to their defaults: the
+// command is a package-level value, so a run that passed one would otherwise
+// leave the next test dialling a radio or a broker.
+func resetBluetoothFlag(t *testing.T) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		Cmd.SetArgs([]string{})
+		_ = Cmd.Flags().Set("bluetooth", "false")
+		_ = Cmd.Flags().Set("nats", "false")
+	})
+}
+
 // The broker the NATS transport connects to has to be configurable: the
 // flag is what makes a remote broker reachable at all.
 func TestNatsURLFlagIsRegisteredWithTheDefaultBroker(t *testing.T) {

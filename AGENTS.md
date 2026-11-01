@@ -27,7 +27,8 @@ through a NATS broker.
 
 - **Language**: Go 1.26.10 (pinned in `go.mod`)
 - **CLI framework**: spf13/cobra
-- **Transports**: gorilla/websocket (default) and nats-io/nats.go (`--nats`)
+- **Transports**: gorilla/websocket (default), nats-io/nats.go (`--nats`), and
+  tinygo.org/x/bluetooth over BlueZ/D-Bus (`--bluetooth`, Linux only)
 - **Terminal handling**: golang.org/x/term
 - **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
@@ -38,7 +39,7 @@ cmd/<verb>/                 cobra command: flags and argument parsing
   ↓
 internal/core/<transport>/  the operation: connect, host, scan
   ↓
-internal/handlers/<transport>/  the rules: the websocket and NATS sessions
+internal/handlers/<transport>/  the rules: the websocket, NATS and Bluetooth sessions
   ↓
 internal/e2e/               the end-to-end layer every session is wrapped in
   ↓
@@ -52,9 +53,10 @@ beside that stack:
 ```
 
 The transport is chosen at the command level: `--nats` selects the NATS path,
-and its absence selects the websocket path. Both paths meet at the same
-`internal/chat` loop over the same sealed `session.Session`, so the two
-transports are interchangeable from the user's point of view.
+`--bluetooth` the radio, and neither selects the websocket path. All three meet
+at the same `internal/chat` loop over the same sealed `session.Session`, so they
+are interchangeable from the user's point of view — with one limit the radio
+imposes, below.
 
 A host is a room rather than a pair: `internal/session.Hub` holds every
 authenticated session and relays what one sends to all the others with the
@@ -70,12 +72,35 @@ that starts that GUI on Android (and, later, iOS). The terminal and the GUI
 therefore share the transports, the secrets and the TLS rules, and differ only
 in how they read and write.
 
+The Bluetooth transport is the exception to "the transports are
+interchangeable", and the exception is the radio's, not a shortcut:
+
+- **one device at a time on a host.** BlueZ does not say which central wrote to
+  a peripheral's characteristic, so two devices cannot be told apart and there
+  is no per-device channel to answer on. The slot frees when the keepalive
+  notices the device has gone quiet;
+- **nothing is announced.** There is no beacon and no port: discovery is a BLE
+  scan for the service, so `cthrone scan --bluetooth` lists the devices in
+  radio range rather than the hosts on a network;
+- **text, not files in practice.** A packet carries 20 bytes, so a 256 KiB
+  file chunk is thousands of notifications. Nothing refuses a file frame, and
+  nothing offers one on a radio host: the terminal has no file support, and the
+  GUI's transfer would arrive eventually, not usefully;
+- **Linux only, for now** — the GATT layer speaks BlueZ over D-Bus, and
+  `internal/core/bluetooth/unsupported.go` refuses everywhere else. The Android
+  binding is a separate piece of work (issue #206): a phone build has no
+  `--bluetooth` transport and the GUI does not offer the option.
+
+The security model does not change: `internal/e2e` seals every session with the
+device key before a payload crosses, and a peer that cannot prove its key is
+refused, exactly as on a websocket.
+
 ## Project Structure
 
 ```text
 cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec
-internal/core/       one package per transport (websocket, nats)
-internal/handlers/   one package per transport (websocket, nats)
+internal/core/       one package per transport (websocket, nats, bluetooth)
+internal/handlers/   one package per transport (websocket, nats, bluetooth)
 internal/data/app/   the in-memory configuration
 internal/pairing/    the credential a session uses: the shared secret, or this device's key
 internal/auth/       the shared secret and the TLS material: where they come from, how they are compared
@@ -139,15 +164,17 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 27 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 29 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (27 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (29 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
   `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`,
-  `internal/core/nats`, `internal/core/websocket` (the scanner included),
-  `internal/data/app`, `internal/discovery`, `internal/e2e`, `internal/exec`,
+  `internal/core/bluetooth`, `internal/core/nats`, `internal/core/websocket`
+  (the scanner included), `internal/data/app`, `internal/discovery`,
+  `internal/e2e`, `internal/exec`, `internal/handlers/bluetooth` (framing,
+  reassembly and keepalive — portable, so tested without a radio),
   `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
   non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
@@ -169,8 +196,11 @@ gui-tagged widget tree is now **executed**, not just type-checked:
 `CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...`, which swaps
 Fyne's GL driver for the software one (`fyne.io/fyne/v2/app/app_software.go`)
 and needs no GTK/X11/GL. What that still does not prove is a rendered frame
-under the native driver, or the APK on a device (#155). Report what executed,
-not just that the package list is complete.
+under the native driver, or the APK on a device (#155). The Bluetooth transport
+is the same kind of limit: its framing, session and keepalive are exercised on
+an in-memory link, and no gate here opens a radio — a claim that Bluetooth
+works needs two devices (#202, #206). Report what executed, not just that the
+package list is complete.
 
 `make check` prints the list of packages with no test file after the run, so a
 green run with no such list means every package was exercised.
@@ -228,13 +258,15 @@ Linux.
 - **CI**: GitHub Actions runs gofmt, vet, test, and build on `dev` → `main` pull requests only — never on a feature-branch pull request
 - **Local testing**: run `make check` before pushing a feature branch. CI is not the gate for feature work; the local gate is.
 - **Version**: the binary reports the tag it was built from, injected with `-X` into `github.com/fiwon123/cthrone/cmd.Version`. A build without that variable reports `vx.x.x`.
-- **Ports**: 8080 by default, for both the websocket and the NATS path (`-p`).
+- **Ports**: 8080 by default, for both network transports — the websocket and
+  the NATS path (`-p`). The radio has no port: a Bluetooth link has no address
+  to type.
 - **No anonymous mode**: every session is authenticated and encrypted by one of
   two credentials. See "Security" below.
 
 ### Security — read this before changing the transport
 
-Every session is authenticated and encrypted end to end, on both transports;
+Every session is authenticated and encrypted end to end, on every transport;
 the websocket connection is encrypted as well (`wss://`) unless `--no-tls` is
 given. The model is the one issue #125 decided, superseding #11/#109:
 
@@ -248,15 +280,15 @@ given. The model is the one issue #125 decided, superseding #11/#109:
     name is **refused**, never re-pinned; `cthrone peers forget` is the way
     back. **The pin is written only after the confirm authenticates the
     peer** — a hello alone records nothing, or anyone could take a name from a
-    frame it never proved. On a **websocket** the host also shows a
-    six-digit **first-contact code** on both screens and asks before the
+    frame it never proved. On a **websocket** and on **Bluetooth** the host also
+    shows a six-digit **first-contact code** on both screens and asks before the
     device joins; it **withholds its confirm** until the answer, so a peer
     that has not been accepted is neither authenticated nor pinned, an
     unanswered question expires into a refusal (silence is not a yes), and a
-    name already pinned is never asked again. Only the websocket host asks: a
-    NATS subject has no host and no single person to ask, so a first contact
-    there is pinned without a prompt, and a terminal host with no tty accepts
-    and pins and prints why;
+    name already pinned is never asked again. Only a host asks, and only where
+    a host is: a NATS subject has no host and no single person to ask, so a
+    first contact there is pinned without a prompt, and a terminal host with no
+    tty accepts and pins and prints why;
   - **the shared secret**, when the user names one: `--token`, `CTHRONE_TOKEN`,
     or a file passed to `--token-file` — the compatibility path a v0.6.0 peer
     speaks. Nothing generates one any more: a minted token file would force
@@ -288,6 +320,14 @@ given. The model is the one issue #125 decided, superseding #11/#109:
   encrypted connection with the same pinning. Even without it, the broker
   carries ciphertext: it cannot read the payloads, only the subject and the
   timing;
+- the **Bluetooth** transport adds no transport-level encryption of its own and
+  does not need one: the radio link is short-range and paired at the operating
+  system's level, and the end-to-end layer seals every payload before it is
+  fragmented into 20-byte packets. What stays visible is the shape — packet
+  counts and timing — exactly as on NATS. The device-key handshake is the same
+  one the websocket runs, so a peer on the radio must prove its key too, and the
+  host asks the same first-contact question; a Bluetooth peer is pinned in the
+  same `peers.json`;
 - the `docker-compose.yml` broker asks for credentials and **persists
   nothing**: JetStream is off, so a conversation does not outlive the
   session it happened in.
@@ -296,10 +336,11 @@ The rules that come with it:
 
 - "encrypted by default" means the **payload** is sealed, and the websocket
   connection is encrypted too. It does not mean the conversation is hidden: on
-  NATS the subject and the timing stay visible, and `--no-tls` puts the
-  websocket's shape back on the wire. On a websocket the host is the
-  correspondent, not a relay, so the transport encryption protects the wire
-  and the end-to-end layer protects the peer on NATS;
+  NATS the subject and the timing stay visible, on the radio the packet count
+  and the timing do, and `--no-tls` puts the websocket's shape back on the
+  wire. On a websocket the host is the correspondent, not a relay, so the
+  transport encryption protects the wire and the end-to-end layer protects the
+  peer on NATS and on Bluetooth;
 - **first contact is the only moment a machine in the middle can insert
   itself**, and the fingerprint comparison is what closes it. Say that plainly
   wherever pairing is described; a pin is only as good as the comparison. Each
@@ -316,9 +357,9 @@ The rules that come with it:
   them, or put them in a status line;
 - the broker reads its password through its own configuration parser, so a
   password with a `#` or a quote in it does not survive the trip;
-- if you touch the transport, read issues #11, #109 and #125 first: the
+- if you touch the transport, read issues #11, #109, #125 and #202 first: the
   security model is a design decision, not an implementation detail, and it
-  changes the CLI surface.
+  changes the CLI surface. #202 added a carrier and changed no rule.
 
 ## Environment and Secret-File Rules
 
