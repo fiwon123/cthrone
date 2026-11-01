@@ -1,10 +1,12 @@
 package connectcmd
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -14,6 +16,8 @@ import (
 
 var natsFlag bool
 
+var bluetoothFlag bool
+
 var natsURLFlag string
 
 var nameFlag string
@@ -22,6 +26,10 @@ var nameFlag string
 // so a test can see the TLS setting the flags resolved to without a host to
 // dial.
 var connectWebsocket = websocketcore.Connect
+
+// connectBluetooth is the Bluetooth client the command runs. It is a variable
+// so a test can see the flags it resolves to without a radio.
+var connectBluetooth = bluetoothcore.Connect
 
 // Cmd represents the connect command
 var Cmd = &cobra.Command{
@@ -63,6 +71,21 @@ On nats connection only host receive message and only connect device send messag
 			fmt.Println(notice)
 		}
 
+		if err := transportConflict(bluetoothFlag, natsFlag); err != nil {
+			log.Fatal(err)
+		}
+
+		if bluetoothFlag {
+			// No port and no certificate: the argument names a Bluetooth
+			// device — an address, a name, or nothing for the first one in
+			// range.
+			if err := connectBluetooth(args, app, opts); err != nil {
+				log.Fatal(err)
+			}
+
+			return
+		}
+
 		if natsFlag {
 			natscore.Connect(args, app, opts, natsURLFlag, tlsConf)
 
@@ -75,8 +98,23 @@ On nats connection only host receive message and only connect device send messag
 	},
 }
 
+// transportConflict refuses two switches that name different carriers. A run
+// that passed both has not said which transport to use, and choosing one for it
+// would be a guess; the transport is the one thing the command cannot infer.
+//
+// It is a function so a test can read the refusal: log.Fatal ends the process,
+// and a test that calls it verifies nothing but its own exit.
+func transportConflict(bluetooth, nats bool) error {
+	if bluetooth && nats {
+		return errors.New("--bluetooth and --nats select different transports; name one")
+	}
+
+	return nil
+}
+
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
+	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "connect over Bluetooth instead of the websocket (Linux only)")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&nameFlag, "name", "", "device name the host shows for this device")
 }

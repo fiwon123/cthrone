@@ -17,6 +17,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 	"golang.org/x/term"
 )
 
@@ -31,15 +32,6 @@ const (
 // to do calls it directly and a host calls it in a goroutine.
 func Run(s session.Session) {
 	run(s, os.Stdin, os.Stdout)
-}
-
-// RunHost is Run for a host, and reports whether the user ended it by pressing
-// Ctrl-C. A host holds something a client does not — a listening port — and
-// "the user quit" and "the peer left" have to be told apart: the second one
-// leaves the host waiting for the next device, the first one means the command
-// is over and the port must go back to the machine.
-func RunHost(s session.Session) bool {
-	return run(s, os.Stdin, os.Stdout)
 }
 
 // lockedWriter serializes the loop's writes.
@@ -93,22 +85,8 @@ func run(s session.Session, in *os.File, out io.Writer) bool {
 
 	// A sealed session says when a peer authenticated and when it refused one;
 	// both belong on the terminal, above the input line.
-	if sealed, ok := s.(*e2e.Conn); ok {
-		// The two fingerprints are compared at first contact, so this device's
-		// own must be on screen as well: the peer's arrives with the notice,
-		// and a value nobody printed cannot be compared with anything.
-		if own := sealed.Fingerprint(); own != "" {
-			notice(out, input, "This device's fingerprint is "+own+" — the other screen shows the same value for this device")
-		}
-
-		sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
-		sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
-
-		// The code a first contact is compared by arrives before the peer is
-		// accepted, and on both sides: the side that is waiting has nothing
-		// else to go on.
-		sealed.OnFirstContact(func(c e2e.FirstContact) { notice(out, input, FirstContactNotice(c)) })
-	}
+	var own sync.Once
+	announceSealed(s, out, input, &own)
 
 	// receive only installs the printer on the session, so it is done by the
 	// time the sender wants to print; send blocks on the terminal and goes
@@ -174,8 +152,65 @@ func peerNotice(p e2e.Peer, own string) string {
 // the reading; this only renders.
 func receive(s session.Session, input *line, out io.Writer) {
 	s.OnMessage(func(m session.Message) {
-		notice(out, input, m.From+": "+string(m.Payload))
+		notice(out, input, senderLabel(m)+": "+messageText(m.Payload))
 	})
+}
+
+// messageText is what a message says.
+//
+// Text is the bytes that arrived, byte for byte. The one sentence a sender has
+// to wrap is the one that begins with the wire magic — the receiver would read
+// it as a frame — so a text frame is unwrapped here and printed as the line it
+// carries. A file frame is not text and is left as it arrived: the terminal has
+// no file support, and turning a transfer into a sentence would be worse than
+// the noise it already is.
+func messageText(payload []byte) string {
+	if !wire.IsFrame(payload) {
+		return string(payload)
+	}
+
+	frame, err := wire.Parse(payload)
+	if err != nil || frame.Header.Kind != wire.KindText {
+		return string(payload)
+	}
+
+	return string(frame.Payload)
+}
+
+// announceSealed prints what a sealed session has to say above the input line:
+// this device's fingerprint once, then the peer's notices as they arrive.
+//
+// own is shared by every session a console holds: a room has several peers and
+// one fingerprint, and printing it once per device would bury the line that
+// matters — the one the other screen has to be compared with.
+func announceSealed(s session.Session, out io.Writer, input *line, own *sync.Once) {
+	sealed, ok := s.(*e2e.Conn)
+	if !ok {
+		return
+	}
+
+	// The two fingerprints are compared at first contact, so this device's own
+	// must be on screen as well: the peer's arrives with the notice, and a
+	// value nobody printed cannot be compared with anything.
+	own.Do(func() {
+		if fingerprint := sealed.Fingerprint(); fingerprint != "" {
+			notice(out, input, "This device's fingerprint is "+fingerprint+" — the other screen shows the same value for this device")
+		}
+	})
+
+	sealed.OnPeer(func(p e2e.Peer) { notice(out, input, peerNotice(p, sealed.Fingerprint())) })
+	sealed.OnError(func(err error) { notice(out, input, "Refused: "+err.Error()) })
+
+	// The code a first contact is compared by arrives before the peer is
+	// accepted, and on both sides: the side that is waiting has nothing else to
+	// go on.
+	sealed.OnFirstContact(func(c e2e.FirstContact) { notice(out, input, FirstContactNotice(c)) })
+}
+
+// senderLabel is how a message is attributed. The rule lives on the message
+// itself, because a relay names the sender the same way the terminal prints it.
+func senderLabel(m session.Message) string {
+	return m.Label()
 }
 
 // send reads raw-mode input and sends a line when Enter is pressed.
@@ -204,7 +239,19 @@ func send(s session.Session, input *line, in *os.File, out io.Writer, quit *atom
 		case enter:
 			msg := input.take()
 
-			if err := s.Send([]byte(msg)); err != nil {
+			// The one line that cannot go out as it was typed is the one that
+			// begins with the wire magic: the peer would read it as a frame,
+			// and a damaged frame closes the session. Encode wraps it in a text
+			// frame, which the peer unwraps, so the sentence arrives whole.
+			payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(msg))
+			if err != nil {
+				input.put(msg)
+				notice(out, input, "Not sent: "+err.Error())
+
+				break
+			}
+
+			if err := s.Send(payload); err != nil {
 				// The handshake may not have finished yet, and a send that
 				// fails must not take the terminal with it: keep the text so
 				// the user can press Enter again, and say why nothing went.

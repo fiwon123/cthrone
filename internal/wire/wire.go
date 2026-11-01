@@ -13,9 +13,12 @@
 // A payload that does not begin with the magic is text, byte for byte. That is
 // what keeps a peer built before this package working: it receives the sentence
 // the user typed, because that sentence was never wrapped. The other side of
-// the rule is deliberate too — text that does begin with "CTH1" is read as a
-// frame, which is why Encode refuses to send such text instead of handing the
-// peer something it will misinterpret.
+// the rule is deliberate too: text that does begin with "CTH1" is read as a
+// frame, so a sentence that happens to start with the magic — anything a user
+// can type — would arrive as a malformed frame and be reported as one. Such a
+// sentence is therefore carried inside a KindText frame, which the framing
+// already describes, so it arrives as the text it is; every other sentence is
+// still sent unwrapped.
 //
 // One kind, KindHandshake, carries the end-to-end key exchange. Its payload is
 // JSON that this package moves and never interprets: the envelope is the thing
@@ -68,9 +71,11 @@ const (
 type Kind string
 
 const (
-	// KindText is a chat message. It is never produced by Encode: text is sent
-	// unwrapped so a peer that predates this package still reads it. The kind
-	// still parses, so a future framing of text does not need a new magic.
+	// KindText is a chat message. Text that does not begin with the magic is
+	// sent unwrapped, so a peer that predates this package still reads it; the
+	// text that does begin with it is wrapped in this kind instead, because
+	// the receiver would otherwise read it as a frame. Wrapping is what makes
+	// the kind necessary and what keeps it rare.
 	KindText Kind = "text"
 
 	// KindFile is one chunk of a file, identified by ID and ordered by Index.
@@ -101,6 +106,14 @@ type Header struct {
 	Index  int    `json:"index,omitempty"`
 	Chunks int    `json:"chunks,omitempty"`
 	SHA256 string `json:"sha256,omitempty"`
+
+	// Sender is who sent a frame a host relayed, when it was not the host. A
+	// file has no line to prefix the way text does, so the name travels in the
+	// header. It is optional and additive: a peer built before this field
+	// existed ignores it and still reads the frame, which is why it is a field
+	// rather than a new frame kind — a new kind would make an older peer refuse
+	// the transfer.
+	Sender string `json:"sender,omitempty"`
 }
 
 // Frame is a parsed message: the header and the bytes it describes.
@@ -143,15 +156,12 @@ func IsFrame(data []byte) bool {
 // Encode serialises a frame.
 //
 // Text is returned unchanged: it is not a frame, and wrapping it would break
-// the peer that predates this format. For that reason, text that begins with
-// the magic is refused — the receiver would read it as a frame, so the honest
-// failure is here, where the user can be told.
+// the peer that predates this format. The one exception is text that begins
+// with the magic, which the receiver would read as a frame: that text is
+// wrapped in a KindText frame, so it arrives as the sentence it is instead of
+// as the damaged frame it looks like. Parse unwraps it.
 func Encode(h Header, payload []byte) ([]byte, error) {
-	if h.Kind == KindText {
-		if IsFrame(payload) {
-			return nil, fmt.Errorf("%w: text beginning with %q would be read as a frame", ErrFrame, Magic)
-		}
-
+	if h.Kind == KindText && !IsFrame(payload) {
 		return payload, nil
 	}
 

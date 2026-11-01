@@ -293,6 +293,14 @@ type Conn struct {
 	timer   *time.Timer
 	onError func(error)
 	onPeer  func(Peer)
+
+	// sendMu makes one payload's whole send atomic: the sequence number is
+	// assigned to the frame before the frame is written, so two sends that
+	// overlapped would be two numbers that can reach the wire in the other
+	// order. It covers sealing *and* the write for that reason, and is held
+	// across a transport write — a slow peer delays the next send rather than
+	// letting it jump ahead of this one.
+	sendMu sync.Mutex
 }
 
 // credential decides which handshake the session speaks and checks that the
@@ -574,10 +582,20 @@ func (c *Conn) Peers() []Peer {
 //
 // Before the handshake finishes there is nowhere safe to send it, so Send fails
 // rather than falling back to plaintext.
+//
+// One send is one critical section, sealing and writing together. The sequence
+// number belongs to the wire order — the receiver opens each frame at the
+// number it expects and refuses anything else — so two senders that took 1 and
+// 2 and then wrote 2 first would be refusing themselves. Two callers do overlap
+// in practice: the GUI sends typed text from one goroutine while the file
+// transfer pumps chunks from another (issue #192).
 func (c *Conn) Send(payload []byte) error {
 	if c.IsClosed() {
 		return session.ErrClosed
 	}
+
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
 
 	frames, err := c.sealForEveryPeer(payload)
 	if err != nil {
@@ -673,7 +691,11 @@ func (c *Conn) receive(m session.Message) {
 		return
 	}
 
-	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Payload: plain, Time: m.Time})
+	// From is the name that authenticated the frame; Addr is the transport's
+	// own idea of where it came from, carried beside the name rather than
+	// replaced by it. A caller that shows only one of them loses either who
+	// the peer is or which machine it is.
+	c.NotifyMessage(session.Message{From: c.senderName(key, m.From), Addr: m.Addr, Payload: plain, Time: m.Time})
 }
 
 // senderName is what to call the peer a frame came from. The transport's From

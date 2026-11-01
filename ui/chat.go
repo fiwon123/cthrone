@@ -35,6 +35,26 @@ func (m chatMessage) line() string {
 	return sender + ": " + m.text
 }
 
+// senderLabel is how an arriving message is attributed in the transcript: the
+// device name, with the address it came from when the transport knows one.
+//
+// Both are worth showing, for the reason the terminal shows both: the name is
+// who the handshake authenticated, and does not say which machine on the
+// network it is; two devices can share a hostname. A bus has no per-peer
+// address, so the name stands alone. An unnamed peer is still labelled,
+// because the one thing it must never render as is "You".
+func senderLabel(from, addr string) string {
+	if from == "" {
+		from = "peer"
+	}
+
+	if addr == "" || addr == from {
+		return from
+	}
+
+	return from + " (" + addr + ")"
+}
+
 // transcript renders every message in order, one per line — what "Copy all"
 // puts on the clipboard.
 func transcript(messages []chatMessage) string {

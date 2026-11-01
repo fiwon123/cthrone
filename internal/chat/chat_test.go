@@ -13,6 +13,7 @@ import (
 
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/session"
+	"github.com/fiwon123/cthrone/internal/wire"
 )
 
 // fakeSession is a session that records what was sent to it. The loop only
@@ -120,6 +121,92 @@ func TestReceivePrintsTheSender(t *testing.T) {
 	}
 }
 
+// A line that begins with the magic arrives wrapped, because a peer would read
+// it as a frame otherwise. The terminal prints the line the sender typed, not
+// the envelope around it.
+func TestReceivePrintsWrappedTextAsTheLine(t *testing.T) {
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte("CTH1 says hello"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	s := newFake("alice")
+
+	receive(s, &line{}, out)
+
+	s.NotifyMessage(session.Message{From: "bob", Payload: payload})
+
+	if got := out.String(); !strings.Contains(got, "bob: CTH1 says hello") {
+		t.Errorf("expected the line as the sender typed it, got %q", got)
+	}
+}
+
+// A file frame is not a line: the terminal leaves it as it arrived rather than
+// pretending a transfer is text.
+func TestReceiveLeavesAFileFrameAlone(t *testing.T) {
+	payload, err := wire.Encode(wire.Header{
+		Kind:   wire.KindFile,
+		ID:     "f1",
+		Name:   "notes.txt",
+		Size:   3,
+		Chunks: 1,
+	}, []byte("abc"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	out := &bytes.Buffer{}
+	s := newFake("alice")
+
+	receive(s, &line{}, out)
+
+	s.NotifyMessage(session.Message{From: "bob", Payload: payload})
+
+	if got := out.String(); !strings.Contains(got, string(payload)) {
+		t.Errorf("the frame was rewritten: %q", got)
+	}
+}
+
+// A websocket message knows where it came from as well as who sent it, and
+// both are printed: the name does not say which machine on the network it is.
+func TestReceivePrintsTheSenderAndItsAddress(t *testing.T) {
+	out := &bytes.Buffer{}
+	s := newFake("alice")
+
+	receive(s, &line{}, out)
+
+	s.NotifyMessage(session.Message{From: "bob", Addr: "192.168.1.20:51234", Payload: []byte("hello")})
+
+	if got := out.String(); !strings.Contains(got, "bob (192.168.1.20:51234): hello") {
+		t.Errorf("expected the sender, its address and the message, got %q", got)
+	}
+}
+
+// The label is the same rule everywhere it is rendered, so the terminal and the
+// GUI cannot disagree about who a message is from.
+func TestSenderLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  session.Message
+		want string
+	}{
+		{"a bus has no address", session.Message{From: "bob"}, "bob"},
+		{"name and address", session.Message{From: "bob", Addr: "192.168.1.20:51234"}, "bob (192.168.1.20:51234)"},
+		{"an address that is the name", session.Message{From: "bob", Addr: "bob"}, "bob"},
+		{"an unnamed peer with an address", session.Message{Addr: "192.168.1.20:51234"}, "peer (192.168.1.20:51234)"},
+		{"nothing at all", session.Message{}, "peer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := senderLabel(tt.msg); got != tt.want {
+				t.Errorf("senderLabel(%+v) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
 // An arriving message is put above the input line and the line comes back
 // intact: a message must not swallow what is being typed.
 func TestNoticeKeepsTheInputLine(t *testing.T) {
@@ -164,6 +251,52 @@ func TestSendSendsAWholeLine(t *testing.T) {
 
 	if got := input.get(); got != "" {
 		t.Errorf("the line was not started again, got %q", got)
+	}
+}
+
+// The one line that cannot go out as it was typed is the one that begins with
+// the wire magic: a peer reads that as a frame, and a damaged frame closes its
+// session. It is sent in a text frame instead, so it arrives as the line it is.
+func TestSendWrapsALineThatBeginsWithTheMagic(t *testing.T) {
+	in, w, out := pipeTerminal(t)
+	s := newFake("alice")
+	input := &line{}
+
+	done := make(chan struct{})
+	go func() {
+		send(s, input, in, out, &atomic.Bool{})
+		close(done)
+	}()
+
+	fmt.Fprint(w, "CTH1 says hello\r")
+	_ = w.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("send did not return when the input ended")
+	}
+
+	sent := s.outgoing()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d payloads, want one", len(sent))
+	}
+
+	if !wire.IsFrame(sent[0]) {
+		t.Fatalf("the line was sent unwrapped, so a peer would read it as a frame: %q", sent[0])
+	}
+
+	frame, err := wire.Parse(sent[0])
+	if err != nil {
+		t.Fatalf("the sent payload does not parse: %v", err)
+	}
+
+	if frame.Header.Kind != wire.KindText || string(frame.Payload) != "CTH1 says hello" {
+		t.Fatalf("sent %q (%q), want the line as text", frame.Header.Kind, frame.Payload)
+	}
+
+	if got := out.String(); !strings.Contains(got, "You: CTH1 says hello") {
+		t.Errorf("the terminal did not echo the line: %q", got)
 	}
 }
 

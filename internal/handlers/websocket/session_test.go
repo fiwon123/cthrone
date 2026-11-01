@@ -65,8 +65,8 @@ func TestSessionExchangesMessages(t *testing.T) {
 	}
 
 	// Client -> host.
-	fromClient := make(chan string, 1)
-	hostSession.OnMessage(func(m session.Message) { fromClient <- string(m.Payload) })
+	fromClient := make(chan session.Message, 1)
+	hostSession.OnMessage(func(m session.Message) { fromClient <- m })
 
 	if err := client.Send([]byte("hello")); err != nil {
 		t.Fatalf("client Send: %v", err)
@@ -74,9 +74,21 @@ func TestSessionExchangesMessages(t *testing.T) {
 
 	select {
 	case got := <-fromClient:
-		if got != "hello" {
-			t.Errorf("expected %q, got %q", "hello", got)
+		if string(got.Payload) != "hello" {
+			t.Errorf("expected %q, got %q", "hello", string(got.Payload))
 		}
+
+		// The peer's address travels beside the sender: the layer above
+		// replaces the sender with the name the handshake authenticated, and
+		// the address is what says which machine the name belongs to.
+		if got.Addr == "" {
+			t.Error("the host received no peer address")
+		}
+
+		if _, _, err := net.SplitHostPort(got.Addr); err != nil {
+			t.Errorf("peer address %q is not host:port: %v", got.Addr, err)
+		}
+
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the host to receive the message")
 	}
