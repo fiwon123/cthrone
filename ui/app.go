@@ -113,19 +113,19 @@ type gui struct {
 	moreBtn     *widgets.CopyButton
 	formHolder  *fyne.Container
 	transport   *widget.Select
-	hint        *widget.Label
+	hint        *widgets.Text
 
 	// thisDevice is the read-only line that shows a hosting device its own
 	// address. It is hidden until this device hosts: the Devices list never
 	// lists this device, so this is where its address lives.
-	thisDevice *widget.Label
+	thisDevice *widgets.Text
 
 	// credential is the read-only line that names the credential in force and
 	// where it came from — this device's key, or a shared secret typed here or
 	// set in the environment. It also reports a token file an older version
 	// left behind: that file decides nothing now, and a user who is told so is
 	// the one who can stop looking for the cause in the wrong place.
-	credential *widget.Label
+	credential *widgets.Text
 
 	// forgetSecret deletes the token file an older version read. It decides
 	// nothing now, so the button is an offer to remove a leftover that used to
@@ -136,14 +136,14 @@ type gui struct {
 	// and — on a press, never on a start — whether there is a newer release.
 	// aboutCredential repeats the Setup tab's line, because "which model am I
 	// in?" belongs on the screen a bug report is written from.
-	aboutCredential *widget.Label
-	aboutNote       *widget.Label
+	aboutCredential *widgets.Text
+	aboutNote       *widgets.Text
 	updateBtn       *widgets.CopyButton
 	releaseBtn      *widgets.CopyButton
 
 	// chat
 	tabs      *widgets.Tabs
-	status    *widget.Label
+	status    *widgets.Text
 	chatList  *widget.List
 	entry     *widget.Entry
 	sendBtn   *widgets.CopyButton
@@ -173,7 +173,7 @@ type gui struct {
 	beacons    []device
 	beaconList *widget.List
 	scanBtn    *widgets.CopyButton
-	listHint   *widget.Label
+	listHint   *widgets.Text
 	listener   *discovery.Listener
 
 	mu     sync.Mutex
@@ -345,8 +345,8 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = g.label("Ready — open Setup to connect or host.")
-	g.status.TextStyle = fyne.TextStyle{Bold: true}
+	g.status = g.text("Ready — open Setup to connect or host.")
+	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -360,7 +360,7 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := g.label("")
+			row := g.text("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
@@ -488,12 +488,12 @@ func (g *gui) build() {
 
 	actions := container.NewGridWithColumns(2, g.hostBtn, g.connectBtn)
 
-	g.hint = g.label("")
+	g.hint = g.text("")
 
-	g.thisDevice = g.label("")
+	g.thisDevice = g.text("")
 	g.thisDevice.Hide()
 
-	g.credential = g.label("")
+	g.credential = g.text("")
 
 	g.forgetSecret = widgets.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile, g.copyLabel)
 	g.forgetSecret.Hide()
@@ -539,7 +539,7 @@ func (g *gui) build() {
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	g.listHint = g.label(scanHint(transportWebsocket))
+	g.listHint = g.text(scanHint(transportWebsocket))
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, g.listHint)
 	} else {
@@ -1495,7 +1495,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		return
 	}
 
-	label, _ := row.Objects[0].(*widget.Label)
+	label, _ := row.Objects[0].(*widgets.Text)
 	pic, _ := row.Objects[1].(*canvas.Image)
 	save, _ := row.Objects[2].(*widgets.CopyButton)
 
@@ -1505,6 +1505,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	m := g.messages[id]
 	label.SetText(m.line())
+	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, save)
 
 	width := row.Size().Width
@@ -1757,8 +1758,8 @@ func (g *gui) tokenFile() string {
 func (g *gui) buildAbout() fyne.CanvasObject {
 	version := aboutVersion(Version, g.app.Metadata().Version)
 
-	g.aboutCredential = g.label("")
-	g.aboutNote = g.label("")
+	g.aboutCredential = g.text("")
+	g.aboutNote = g.text("")
 
 	// The name is the heading and the version sits under it, rather than the
 	// two sharing one line: at phone width "cthrone v0.8.3" in a horizontal box
@@ -1767,7 +1768,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	header := g.aboutHeader(version)
 
 	repoBtn := widgets.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository, g.copyLabel)
-	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.label(RepositoryURL))
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.text(RepositoryURL))
 
 	g.updateBtn = widgets.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates, g.copyLabel)
 
@@ -1801,8 +1802,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 // version out of the pane.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 	return container.NewVBox(
-		g.heading("cthrone"),
-		g.label(version),
+		g.textHeading("cthrone"),
+		g.text(version),
 	)
 }
 

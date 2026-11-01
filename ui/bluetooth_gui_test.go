@@ -126,11 +126,11 @@ func TestBluetoothModeShowsOnlyTheRowsItUses(t *testing.T) {
 
 	// The hint and the Scan button are the two places a user reads what the
 	// carrier is before pressing anything.
-	if hint := g.hint.Text; !strings.Contains(hint, "Bluetooth") {
+	if hint := g.hint.Text(); !strings.Contains(hint, "Bluetooth") {
 		t.Errorf("the hint does not name the transport: %q", hint)
 	}
 
-	if hint := g.listHint.Text; !strings.Contains(hint, "Bluetooth") {
+	if hint := g.listHint.Text(); !strings.Contains(hint, "Bluetooth") {
 		t.Errorf("the scan hint does not name the transport: %q", hint)
 	}
 }
@@ -228,7 +228,7 @@ func TestConnectBluetoothWithNoTargetTakesTheFirstDevice(t *testing.T) {
 		t.Fatalf("Connect passed %v to the transport, want no target at all", target)
 	}
 
-	if got := g.status.Text; !strings.Contains(got, "Bluetooth") {
+	if got := g.status.Text(); !strings.Contains(got, "Bluetooth") {
 		t.Errorf("the status reads %q, want it to say the session is on the radio", got)
 	}
 }
@@ -287,7 +287,7 @@ func TestConnectBluetoothReportsTheTransportsFailure(t *testing.T) {
 
 	g.connect()
 
-	waitForStatus(t, g, func() bool { return g.status.Text == "Connection failed" })
+	waitForStatus(t, g, func() bool { return g.status.Text() == "Connection failed" })
 
 	if g.sess != nil {
 		t.Error("a failed connect attached a session anyway")
@@ -321,7 +321,7 @@ func TestHostBluetoothOffersTheFingerprintAndStops(t *testing.T) {
 
 	g.host()
 
-	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text, "Bluetooth") })
+	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text(), "Bluetooth") })
 
 	openerCalled.Wait()
 
@@ -341,7 +341,7 @@ func TestHostBluetoothOffersTheFingerprintAndStops(t *testing.T) {
 
 	g.stop()
 
-	waitForStatus(t, g, func() bool { return g.status.Text == "Disconnected" })
+	waitForStatus(t, g, func() bool { return g.status.Text() == "Disconnected" })
 
 	g.mu.Lock()
 	still := g.server
@@ -391,7 +391,7 @@ func waitForStatus(t *testing.T, g *gui, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	t.Fatalf("the status line never reached the expected value: %q", g.status.Text)
+	t.Fatalf("the status line never reached the expected value: %q", g.status.Text())
 }
 
 // beaconFor is one network device as a beacon would announce it.

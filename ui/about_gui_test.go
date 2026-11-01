@@ -144,7 +144,7 @@ func waitForAboutNote(t *testing.T, g *gui, contains string) string {
 
 	for time.Now().Before(deadline) {
 		if g.aboutNote != nil {
-			if note := g.aboutNote.Text; strings.Contains(note, contains) && note != "Checking…" {
+			if note := g.aboutNote.Text(); strings.Contains(note, contains) && note != "Checking…" {
 				return note
 			}
 		}
