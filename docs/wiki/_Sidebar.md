@@ -6,8 +6,10 @@
 - [Send a file](Send-a-file)
 - [Bluetooth](Bluetooth)
 - [NATS](NATS)
+- [Commands and flags](Commands-and-flags)
 - [Troubleshooting](Troubleshooting)
 - [Security model](Security-model)
+- [Development](Development)
 
 ---
 - [README](https://github.com/fiwon123/cthrone#readme)
