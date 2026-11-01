@@ -20,7 +20,7 @@
 // is a carrier, not a fourth security model — the peer still has to prove its
 // key before a payload crosses.
 //
-// The GATT implementation is Linux only (BlueZ over D-Bus). The framing and the
+// The GATT implementation is Linux (BlueZ over D-Bus) and Windows (WinRT). The framing and the
 // session are portable and are tested without a radio; core/bluetooth says what
 // the other platforms do.
 package bluetooth

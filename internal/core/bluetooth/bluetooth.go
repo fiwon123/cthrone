@@ -21,8 +21,10 @@
 // websocket, and a peer that cannot prove its key is refused rather than
 // downgraded.
 //
-// The GATT layer is Linux only — it speaks BlueZ over the D-Bus system bus —
-// so this package is built for Linux and unsupported.go answers the rest.
+// The GATT layer is built for the two desktop stacks the library speaks —
+// BlueZ over D-Bus on Linux, WinRT on Windows — and unsupported.go answers the
+// rest. The Windows path compiles and has never been run: see the note in
+// gatt.go.
 package bluetoothcore
 
 import (

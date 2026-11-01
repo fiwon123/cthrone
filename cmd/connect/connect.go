@@ -114,7 +114,7 @@ func transportConflict(bluetooth, nats bool) error {
 
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
-	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "connect over Bluetooth instead of the websocket (Linux only)")
+	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "connect over Bluetooth instead of the websocket (Linux and Windows)")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&nameFlag, "name", "", "device name the host shows for this device")
 }

@@ -29,7 +29,8 @@ through a NATS broker.
 - **Language**: Go 1.26.10 (see `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default), nats-io/nats.go (`--nats`), and
-  tinygo.org/x/bluetooth over BlueZ/D-Bus (`--bluetooth`, Linux only)
+  tinygo.org/x/bluetooth (`--bluetooth`: BlueZ over D-Bus on Linux, WinRT on
+  Windows — the Windows path is compiled and never run)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
@@ -84,11 +85,12 @@ cannot tell which central wrote to a characteristic, so a host serves **one
 device at a time** and the slot frees when the keepalive notices the device has
 gone quiet; discovery is a BLE scan rather than the UDP beacon, so `cthrone scan
 --bluetooth` lists the devices in range; and a 20-byte packet makes text the
-only practical payload. The GATT layer is Linux only (`//go:build linux
-&& !android` — Android satisfies the `linux` tag and has no BlueZ, so it is
-excluded explicitly), and `internal/core/bluetooth/unsupported.go` answers
-everywhere else. The framing, the session and the keepalive are portable and
-tested on an in-memory link; no gate opens a radio.
+only practical payload. The GATT layer is built for Linux and Windows
+(`//go:build (linux || windows) && !android` — Android satisfies the `linux`
+tag and has no BlueZ, so it is excluded explicitly), and
+`internal/core/bluetooth/unsupported.go` answers everywhere else. The Windows
+path compiles and has never been run. The framing, the session and the
+keepalive are portable and tested on an in-memory link; no gate opens a radio.
 
 The GUI is not a fourth transport: `ui/` reads and writes through the same
 `internal/session.Session` the terminal loops use, and `mobile/` is a second
@@ -251,7 +253,8 @@ docker-compose.yml   the dev sandbox and a local NATS server
   advertises the service and serves one device at a time; `cthrone connect
   --bluetooth [name|address]` scans and dials the first (or named) cthrone
   device; `cthrone scan --bluetooth` lists what advertises the service. The
-  GATT layer is BlueZ over D-Bus, so it is Linux only (#202); Android is #206.
+  GATT layer is BlueZ over D-Bus on Linux (#202) and WinRT on Windows (#215,
+  compiled but never run); Android is #206.
 - The websocket transport defaults to port `8080` on **every interface**; the
   client dials `wss://` and the server serves https by default, and `--no-tls`
   puts both back on `ws://`. With no secret configured — the default — the host
