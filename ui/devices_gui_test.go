@@ -13,6 +13,36 @@ import (
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
+// paintedRow finds the row the toolkit is actually showing for a device: the
+// object under the user's finger, not one the test built for itself.
+func paintedRow(root fyne.CanvasObject, want string, depth int) *widgets.Text {
+	if root == nil || depth > 12 {
+		return nil
+	}
+
+	if text, ok := root.(*widgets.Text); ok && text.Text() == want {
+		return text
+	}
+
+	if box, ok := root.(*fyne.Container); ok {
+		for _, child := range box.Objects {
+			if found := paintedRow(child, want, depth+1); found != nil {
+				return found
+			}
+		}
+	}
+
+	if drawn, ok := root.(fyne.Widget); ok {
+		for _, child := range test.WidgetRenderer(drawn).Objects() {
+			if found := paintedRow(child, want, depth+1); found != nil {
+				return found
+			}
+		}
+	}
+
+	return nil
+}
+
 // A device row is text a user copies — the address of the machine they are
 // about to dial — so it is the same long-press widget the transcript uses.
 // Its tap, though, still belongs to the list: tapping a row fills the address
@@ -109,5 +139,67 @@ func TestDeviceRowIsClickableOnADesktop(t *testing.T) {
 
 	if got := g.portEntry.Text; got != "8080" {
 		t.Errorf("tapping a device row filled port %q, want the row's port", got)
+	}
+}
+
+// The row a user sees is the row that reacts — on both layouts.
+//
+// #236 was the regression this guards: a row that is tappable in the test's
+// hand but not in the tree the toolkit paints. It asks the painted object, not
+// a fresh one, and it taps twice, because a row that works once and then ignores
+// every later tap is exactly what "I cannot click it" means.
+func TestBeaconRowTheUserSeesIsTappable(t *testing.T) {
+	for _, mobile := range []bool{false, true} {
+		name := "desktop"
+		if mobile {
+			name = "phone"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			g := newScreenGUI(t, mobile)
+
+			g.mu.Lock()
+			g.beacons = []device{{Beacon: discovery.Beacon{Addr: "192.168.15.25", Port: 8080}, seen: time.Now()}}
+			g.mu.Unlock()
+
+			g.refreshDeviceList()
+			g.win.Resize(fyne.NewSize(420, 640))
+			g.win.Content().Refresh()
+
+			want := deviceLabel(g.visibleBeacons()[0].Beacon)
+			if want != "192.168.15.25:8080" {
+				t.Fatalf("the row reads %q, want the address and port the user reported", want)
+			}
+
+			row := paintedRow(g.win.Content(), want, 0)
+			if row == nil {
+				t.Fatal("the address row is not in the painted tree at all")
+			}
+
+			tappable, ok := any(row).(fyne.Tappable)
+			if !ok {
+				t.Fatalf("the painted row is %T, which cannot be tapped", row)
+			}
+
+			for tap := 1; tap <= 2; tap++ {
+				g.hostEntry.SetText("")
+				g.portEntry.SetText("")
+
+				test.Tap(tappable)
+
+				if got := g.hostEntry.Text; got != "192.168.15.25" {
+					t.Fatalf("tap %d filled %q, want the address", tap, got)
+				}
+
+				if got := g.portEntry.Text; got != "8080" {
+					t.Fatalf("tap %d filled port %q, want 8080", tap, got)
+				}
+			}
+
+			// And the tap goes to Setup, where the address it filled is.
+			if got := g.tabs.SelectedIndex(); got != 1 {
+				t.Errorf("tapping a device selected tab %d, want Setup", got)
+			}
+		})
 	}
 }
