@@ -149,21 +149,86 @@ func TestTextSelectionEndsOnItsOwn(t *testing.T) {
 	t.Fatal("the text stayed selectable, so the pane would never scroll by touch again")
 }
 
-// A desktop's long press is Fyne's own: the wrapper must not start a selection
-// of its own or pop a menu over it.
-func TestTextLeavesTheDesktopGestureAlone(t *testing.T) {
+// The gesture layer carries exactly the two gestures Text takes, and neither of
+// the two it must not take: a Draggable layer would take the desktop drag from
+// the selection underneath, and a Touchable one would stop the pane scrolling on
+// a phone.
+func TestTapCatcherTakesOnlyTheTapAndTheLongPress(t *testing.T) {
+	var catcher any = newTapCatcher(nil, nil)
+
+	if _, ok := catcher.(fyne.Tappable); !ok {
+		t.Error("the gesture layer takes no tap, so a row would stay dead")
+	}
+
+	if _, ok := catcher.(fyne.SecondaryTappable); !ok {
+		t.Error("the gesture layer takes no long press, so nothing could be selected on a phone")
+	}
+
+	if _, ok := catcher.(fyne.Draggable); ok {
+		t.Error("the gesture layer is Draggable, so a desktop drag would stop selecting the address")
+	}
+
+	if _, ok := catcher.(mobile.Touchable); ok {
+		t.Error("the gesture layer is mobile.Touchable, so the driver would stop at it and the pane would not scroll")
+	}
+}
+
+// A line with nothing to do keeps Fyne's own desktop gesture: no layer, so the
+// driver still finds the label's selection child and its menu.
+func TestTextWithoutAnActionLeavesTheDesktopGestureAlone(t *testing.T) {
+	text := NewText("hello", false)
+
+	if text.catcher.Visible() {
+		t.Error("a text with no action put a gesture layer up, where Fyne's own selection should stay in charge")
+	}
+}
+
+// Giving the text an action is what brings its layer up, and the layer is what
+// makes the tap reachable above a selectable label (#280).
+func TestTextWithAnActionPutsItsGestureLayerUp(t *testing.T) {
+	text := NewText("hello", false)
+
+	taps := 0
+	text.SetOnTapped(func() { taps++ })
+
+	if !text.catcher.Visible() {
+		t.Fatal("giving the text an action left its gesture layer hidden")
+	}
+
+	// The tap the user makes lands on the layer; it has to run the row's action.
+	text.catcher.Tapped(&fyne.PointEvent{})
+
+	if taps != 1 {
+		t.Errorf("the gesture layer ran the action %d times, want 1", taps)
+	}
+}
+
+// A tappable row owns the press once its layer is up, so the wrapper offers the
+// menu Fyne's selection child used to: Copy over the selected text, or over the
+// whole line when nothing is selected.
+func TestTappableTextOffersCopyOnADesktop(t *testing.T) {
 	app := test.NewApp()
 	t.Cleanup(app.Quit)
 
-	text := NewText("hello", false)
-	win := test.NewWindow(container.NewVBox(text))
+	text := NewText("hello there", false)
+	text.SetOnTapped(func() {})
+
+	win := test.NewWindow(container.NewVBox(container.NewPadded(text)))
 	t.Cleanup(win.Close)
 	win.Resize(fyne.NewSize(300, 100))
 
-	text.TappedSecondary(&fyne.PointEvent{})
+	text.TappedSecondary(&fyne.PointEvent{AbsolutePosition: fyne.NewPos(20, 10), Position: fyne.NewPos(20, 10)})
 
-	if win.Canvas().Overlays().Top() != nil {
-		t.Error("the wrapper popped its own menu on a desktop, where Fyne already offers one")
+	top := win.Canvas().Overlays().Top()
+	if top == nil {
+		t.Fatal("a right click on a tappable row offered no Copy menu")
+	}
+
+	app.Clipboard().SetContent("")
+	tapFirstMenuItem(t, top)
+
+	if got := app.Clipboard().Content(); got != "hello there" {
+		t.Errorf("Copy copied %q, want the whole line", got)
 	}
 }
 

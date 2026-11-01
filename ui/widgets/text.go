@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -35,14 +36,24 @@ var selectionWindow = 5 * time.Second
 //     when that object is not Draggable. So Text must implement neither: a
 //     widget that did would trade scrolling for a gesture nobody asked for.
 //
-// On a desktop none of that applies: the label is selectable from the start,
-// drag-selection and the right-click Copy menu are Fyne's own, and the wrapper
-// never sees the gestures because Fyne's selection child is deeper than it.
+// On a desktop the label is selectable from the start — drag-selection and the
+// right-click menu are Fyne's own — and the wrapper still takes no drag. But a
+// selectable label keeps a selection child deeper than this widget, and that
+// child takes a click and does nothing with it off-mobile. So a text with a tap
+// of its own puts a gesture layer above the label, and that layer is what the
+// driver finds: tapCatcher, in tap.go (#280).
 type Text struct {
 	widget.BaseWidget
 
-	label    *widget.Label
-	touch    bool
+	label *widget.Label
+
+	// catcher carries the tap and the long press above the label. It is hidden
+	// until this text has an action, so a line of plain text keeps Fyne's own
+	// gestures and adds none.
+	catcher *tapCatcher
+
+	touch bool
+
 	onTapped func()
 
 	// selMu guards the selectable flag. The restore runs on a timer, and a
@@ -77,16 +88,25 @@ func newText(text string, touch, bold bool) *Text {
 	label.Selectable = !touch
 
 	text2 := &Text{label: label, touch: touch}
+	text2.catcher = newTapCatcher(text2.Tapped, text2.TappedSecondary)
 	text2.ExtendBaseWidget(text2)
+
+	// A line nobody taps keeps no gesture layer, so a selectable label on a
+	// desktop is still Fyne's own business: drag to select, right click to copy.
+	text2.catcher.Hide()
 
 	return text2
 }
 
-// CreateRenderer draws the label. The renderer's object is the label itself and
-// not a container this struct also holds: a wrapper that returned something it
-// embedded had its position counted twice by the driver's walk (#186, #189).
+// CreateRenderer draws the label under the gesture layer.
+//
+// The label is not the renderer's object on its own: the catcher has to be a
+// child of this widget, drawn after the label, or the driver finds the label's
+// selection child first and the tap is lost (#280). The container stays
+// private, which is the rule that keeps a wrapper's position from being counted
+// twice (#186, #189).
 func (t *Text) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(t.label)
+	return widget.NewSimpleRenderer(container.NewStack(t.label, t.catcher))
 }
 
 // SetText replaces the text.
@@ -130,21 +150,33 @@ func (t *Text) setSelectable(selectable bool) {
 }
 
 // SetOnTapped sets what a plain tap does, which is what the tap did before the
-// text was wrapped: tapping a transcript row copies it, and tapping a status
-// line does nothing.
+// text was wrapped: tapping a transcript row copies it, and tapping a device row
+// fills the address field.
+//
+// Giving the text an action also brings its gesture layer up: a tap only reaches
+// this widget if something of its own is the deepest object under the pointer,
+// and a selectable label's selection child is deeper (#280).
 func (t *Text) SetOnTapped(tapped func()) {
 	t.onTapped = tapped
+
+	if tapped == nil {
+		t.catcher.Hide()
+
+		return
+	}
+
+	t.catcher.Show()
 }
 
-// Tapped is a plain tap: on every platform the driver dispatches it here,
-// because Text is the deepest object that takes one — the label's selection
-// child does not receive taps, whatever the platform. So the tap has to keep
-// doing what it did before the text was wrapped: filling an address, copying a
-// row.
+// Tapped is a plain tap. On a text with an action the driver hands it here
+// because the gesture layer above the label is the deepest object that takes
+// one; a text with nothing to do puts no layer up and is not the tap target at
+// all.
 //
 // The guard on the touch-screen flag that this used to carry was wrong, and it
-// cost the Devices tab its clicks on a desktop (#236): the belief was that the
-// selection child handled desktop taps, and nothing did.
+// cost the Devices tab its clicks on a desktop (#236). The belief then was that
+// the selection child handled desktop taps; it does not, it swallows the click
+// and returns — which is the defect #280 closed.
 func (t *Text) Tapped(*fyne.PointEvent) {
 	if t.onTapped == nil {
 		return
@@ -153,16 +185,20 @@ func (t *Text) Tapped(*fyne.PointEvent) {
 	t.onTapped()
 }
 
-// TappedSecondary is the long press on a touch screen: it starts Fyne's own
-// selection at the point that was pressed and offers Copy.
+// TappedSecondary is the copy gesture: a long press on a touch screen, a right
+// click on a desktop.
+//
+// A touch screen has no drag-to-select, so the press also brings Fyne's own
+// selection up at the finger. A desktop already has its selection, so the press
+// offers the menu over whatever is selected — or over the whole line when
+// nothing is. The wrapper offers that menu itself rather than leaving it to
+// Fyne's selection child, because once the gesture layer is up that child is no
+// longer the object the driver finds (#280).
 func (t *Text) TappedSecondary(ev *fyne.PointEvent) {
-	if !t.touch {
-		// A desktop has Fyne's selection from the start; its selection child is
-		// deeper than this widget and receives the gesture instead.
-		return
+	if t.touch {
+		t.selectAt(ev)
 	}
 
-	t.selectAt(ev)
 	t.showCopyMenu(ev)
 }
 
