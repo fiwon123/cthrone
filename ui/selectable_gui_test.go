@@ -94,7 +94,7 @@ func TestTouchRowStillCopiesOnATap(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	text, _, _ := chatRowObjects(t, row)
+	text, _, _, _, _ := chatRowObjects(t, row)
 
 	g.app.Clipboard().SetContent("")
 	text.Tapped(&fyne.PointEvent{})

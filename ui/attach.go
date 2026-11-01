@@ -3,6 +3,11 @@
 package ui
 
 import (
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -45,6 +51,11 @@ type incomingTransfer struct {
 	note     *fileNote
 	from     string
 	received int64
+
+	// abandoned is a cancel that arrived while chunks were still in flight. The
+	// receive loop reads it and drops the transfer, because the assembler
+	// belongs to that goroutine and not to the one the button was pressed on.
+	abandoned bool
 }
 
 // pickFile asks for a file and queues it for the live session.
@@ -78,6 +89,20 @@ func (g *gui) pickFile() {
 	picker.Show()
 }
 
+// sourcePath is the picked file on this device's disk, or "" when the picker
+// handed over something that is not a path — a phone's content URI, for one.
+//
+// It is only ever read for the row's preview: the bytes that travel are read
+// from the staged copy, because the picker's reader is consumed once.
+func sourcePath(reader fyne.URIReadCloser) string {
+	uri := reader.URI()
+	if uri == nil || uri.Scheme() != "file" {
+		return ""
+	}
+
+	return uri.Path()
+}
+
 // queuePick stages the picked file and hands it to the sender.
 //
 // The copy is made off the UI goroutine: a 200 MB video takes a moment to
@@ -108,9 +133,22 @@ func (g *gui) queuePick(reader fyne.URIReadCloser) {
 			return
 		}
 
-		note := &fileNote{name: name, size: size, state: transferSending}
+		// The row draws the same preview the peer will draw (#237). The file it
+		// reads from is the user's own, not the staged copy: the copy is removed
+		// as soon as the send returns, and a row pointing at it would lose its
+		// picture the moment the transfer finished.
+		id := newTransferID()
+
+		note := &fileNote{
+			id:     id,
+			name:   name,
+			size:   size,
+			state:  transferSending,
+			path:   sourcePath(reader),
+			inline: showsInline(mimeOf(name), size),
+		}
 		item := outgoing{
-			id:   newTransferID(),
+			id:   id,
 			name: name,
 			mime: mimeOf(name),
 			path: path,
@@ -200,6 +238,44 @@ func (g *gui) untrackTransfer(id string) {
 	g.mu.Lock()
 	delete(g.cancels, id)
 	g.mu.Unlock()
+}
+
+// cancelTransfer stops one transfer, from the row that is showing it.
+//
+// A send is cancelled through the context its reader is watching. A receive has
+// no context to cancel — the bytes are already in flight — so the request is
+// recorded on the entry and the receive loop abandons the transfer on the next
+// chunk, which is the goroutine that owns the assembler.
+func (g *gui) cancelTransfer(id string) {
+	if id == "" {
+		return
+	}
+
+	g.mu.Lock()
+	cancel := g.cancels[id]
+
+	entry := g.incoming[id]
+	if entry != nil {
+		entry.abandoned = true
+	}
+
+	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+
+		return
+	}
+
+	if entry == nil {
+		return
+	}
+
+	// The row goes now, so the screen agrees with the decision; the part file
+	// is removed by the receive loop, or by the assembler's own sweep if no
+	// further chunk ever arrives.
+	g.removeTransfer(entry.note)
+	g.setStatus("Receiving " + entry.note.name + " cancelled")
 }
 
 // cancelTransfers stops every transfer on its way. A cancelled transfer leaves
@@ -499,9 +575,21 @@ func (g *gui) receiveTransfer(from string, frame wire.Frame) {
 		return
 	}
 
+	if entry != nil && entry.abandoned {
+		g.mu.Lock()
+		delete(g.incoming, header.ID)
+		g.mu.Unlock()
+
+		if assembler.Abandon(header.ID) {
+			g.setStatus("Receiving " + entry.note.name + " cancelled")
+		}
+
+		return
+	}
+
 	if entry == nil {
 		entry = &incomingTransfer{
-			note: &fileNote{name: header.Name, size: header.Size, state: transferSending},
+			note: &fileNote{id: header.ID, name: header.Name, size: header.Size, state: transferSending},
 			from: from,
 		}
 
@@ -616,17 +704,19 @@ func (g *gui) finishReceive() {
 // A row with no path on disk is a transfer that is still in flight, or one that
 // failed: neither has anything to save or to show, so both parts stay hidden
 // and the label carries the state.
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyButton) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton, open *widgets.CopyButton) {
 	if m.file == nil || m.file.path == "" {
 		pic.Hide()
+		preview.Hide()
 		save.Hide()
+		open.Hide()
 
 		return
 	}
 
 	path := m.file.path
 
-	if m.file.inline {
+	if m.file.inline && decodableImage(path) {
 		if res, err := fyne.LoadResourceFromPath(path); err == nil {
 			pic.Resource = res
 			pic.SetMinSize(fyne.NewSize(0, inlineImageHeight))
@@ -639,20 +729,95 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyBu
 		pic.Hide()
 	}
 
+	// Text is the other thing a row can show: bounded by bytes and lines, so a
+	// long log is a row that ends in an ellipsis rather than a window with no
+	// conversation under it.
+	drawn := false
+
+	if showsText(mimeOf(m.file.name), m.file.size) {
+		if body := textPreview(path); body != "" {
+			preview.SetText(body)
+			preview.Show()
+			drawn = true
+		} else {
+			preview.Hide()
+		}
+	} else {
+		preview.Hide()
+	}
+
+	// A file this program cannot draw is offered to the device instead: a PDF to
+	// its reader, an audio clip to its player. The button appears only where it
+	// can do something — the file is on this disk, and the row is not already
+	// showing its content.
+	switch {
+	case drawn || m.file.inline:
+		open.Hide()
+	case m.file.state == transferSaved || m.file.state == transferSent:
+		open.SetOnTapped(func() { g.openFile(path) })
+		open.Show()
+	default:
+		open.Hide()
+	}
+
 	switch m.file.state {
+	case transferSent:
+		save.Hide()
+
+	case transferSending:
+		// The one action slot a row has: while the bytes are moving it is the
+		// way to stop them, and when they have landed it is Save as….
+		if m.file.id != "" {
+			save.SetText("Cancel")
+			save.SetOnTapped(func() { g.cancelTransfer(m.file.id) })
+			save.Show()
+		} else {
+			save.Hide()
+		}
+
 	case transferSaved:
+		save.SetText("Save as…")
 		save.SetOnTapped(func() { g.saveAs(path) })
 		save.Show()
 
 	case transferPending:
 		name := filepath.Base(path)
 		note := m.file
+		save.SetText("Save as…")
 		save.SetOnTapped(func() { g.askWhereToSave(note, name, path) })
 		save.Show()
 
 	default:
 		save.Hide()
 	}
+}
+
+// openFile hands a file to whatever this device uses for that kind of file.
+//
+// It is the answer for the kinds this program has no engine for — a PDF, an
+// audio clip — and it goes through the same opener the About tab's links use,
+// so there is one place that reports "no handler for this" instead of two.
+func (g *gui) openFile(path string) {
+	g.openPage(storage.NewFileURI(path).String())
+}
+
+// decodableImage reports whether the file is an image the toolkit can actually
+// draw.
+//
+// The name and the MIME say what a file claims to be; a truncated download, a
+// renamed text file or a type the toolkit has no decoder for draws an empty box,
+// and an empty box in the transcript reads as a failed transfer. The header is
+// enough to tell, and it is cheap — no pixels are decoded.
+func decodableImage(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	_, _, err = image.DecodeConfig(file)
+
+	return err == nil
 }
 
 // showImage opens a received picture at the size the window allows, which is

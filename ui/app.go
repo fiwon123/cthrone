@@ -142,6 +142,7 @@ type gui struct {
 	releaseBtn      *widgets.CopyButton
 	installBtn      *widgets.CopyButton
 	revertBtn       *widgets.CopyButton
+	wikiBtn         *widgets.CopyButton
 
 	// aboutOffer is the release the check found and the Install button offers;
 	// empty means this build is the newest one, and the button is hidden.
@@ -267,27 +268,77 @@ func run() (err error) {
 
 	go g.pruneLoop()
 
-	if mobile {
-		// Discovery is skipped on a phone: the beacon and the scan are for
-		// finding another machine on a network, and the app that is already
-		// open is the one the user picked up.
-	} else {
+	// Everything that touches the disk or binds a socket runs beside the window,
+	// not in front of it: the identity read and the discovery listener used to
+	// happen before ShowAndRun, so the user waited for both before anything was
+	// painted. Nothing here blocks the main goroutine, which goes straight to
+	// the event loop and draws.
+	go func() {
+		if err := guard("identity", func() {
+			if err := g.fillIdentity(); err != nil {
+				logFailure(err)
+			}
+		}); err != nil {
+			logFailure(err)
+		}
+
+		if mobile {
+			// Discovery is skipped on a phone: the beacon and the scan are for
+			// finding another machine on a network, and the app that is already
+			// open is the one the user picked up.
+			return
+		}
+
 		// Discovery and the resize are not worth the window: a failure in
 		// either is recorded and the chat still opens.
 		if err := guard("discovery", g.startDiscovery); err != nil {
 			logFailure(err)
 		}
 
-		if err := guard("resize", func() { w.Resize(fyne.NewSize(900, 640)) }); err != nil {
+		if err := guard("resize", func() {
+			fyne.Do(func() { w.Resize(fyne.NewSize(900, 640)) })
+		}); err != nil {
 			logFailure(err)
 		}
-	}
+	}()
 
 	w.ShowAndRun()
 
 	// The close intercept may not run on every platform — a phone that kills
 	// the window rather than closing it — so the same release happens here.
 	g.shutdown()
+
+	return nil
+}
+
+// loadIdentity is a variable so a test can answer without the real
+// configuration directory, and can see whether the build asked at all.
+var loadIdentity = discovery.LoadIdentity
+
+// fillIdentity names this device after the identity on disk.
+//
+// It runs after the window is shown, off the UI goroutine: the read is I/O, and
+// a window that waits for the disk to appear is the delay this function exists
+// to avoid.
+func (g *gui) fillIdentity() error {
+	identity, err := loadIdentity()
+	if err != nil {
+		return err
+	}
+
+	if identity == nil || identity.Name == "" {
+		return nil
+	}
+
+	fyne.Do(func() {
+		// A name the user has already typed wins: this is a default, not an
+		// instruction.
+		if g.nameEntry == nil || g.nameEntry.Text != "" {
+			return
+		}
+
+		g.nameEntry.SetText(identity.Name)
+	})
 
 	return nil
 }
@@ -372,10 +423,23 @@ func (g *gui) build() {
 			pic.FillMode = canvas.ImageFillContain
 			pic.Hide()
 
+			// A text file is drawn, not just named: a pasted log is unreadable
+			// as a filename, and the beginning of it is what the sender meant
+			// the other person to see.
+			preview := g.text("")
+			preview.Hide()
+
 			save := widgets.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil, g.copyLabel)
 			save.Hide()
 
-			return container.NewVBox(row, pic, save)
+			// A file neither drawn nor read here — a PDF, an audio clip — is
+			// opened by whatever the device uses for that kind of file. It is
+			// the one thing this program can offer without an audio or PDF
+			// engine of its own.
+			open := widgets.NewButtonWithIcon("Open", theme.DocumentIcon(), nil, g.copyLabel)
+			open.Hide()
+
+			return container.NewVBox(row, pic, preview, save, open)
 		},
 		g.updateChatRow,
 	)
@@ -441,12 +505,10 @@ func (g *gui) build() {
 	g.bindEntry = widget.NewEntry()
 	g.bindEntry.SetPlaceHolder("every interface")
 
+	// The name is filled in after the window is up (fillIdentity): reading it
+	// is I/O, and the window must not wait on the disk to appear.
 	g.nameEntry = widget.NewEntry()
-	if identity, err := discovery.LoadIdentity(); err == nil && identity.Name != "" {
-		g.nameEntry.SetText(identity.Name)
-	} else {
-		g.nameEntry.SetPlaceHolder("device name")
-	}
+	g.nameEntry.SetPlaceHolder("device name")
 
 	g.hostEntry = widget.NewEntry()
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
@@ -1517,16 +1579,18 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	label, _ := row.Objects[0].(*widgets.Text)
 	pic, _ := row.Objects[1].(*canvas.Image)
-	save, _ := row.Objects[2].(*widgets.CopyButton)
+	preview, _ := row.Objects[2].(*widgets.Text)
+	save, _ := row.Objects[3].(*widgets.CopyButton)
+	open, _ := row.Objects[4].(*widgets.CopyButton)
 
-	if label == nil || pic == nil || save == nil {
+	if label == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
 	m := g.messages[id]
 	label.SetText(m.line())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
-	g.fillFileRow(m, pic, save)
+	g.fillFileRow(m, pic, preview, save, open)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {
@@ -1803,6 +1867,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.revertBtn = widgets.NewButtonWithIcon("Revert to previous", theme.ContentUndoIcon(), g.revertRelease, g.copyLabel)
 	g.revertBtn.Hide()
 
+	g.wikiBtn = widgets.NewButtonWithIcon("Wiki", theme.HelpIcon(), g.openWiki, g.copyLabel)
+
 	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
@@ -1817,6 +1883,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		g.revertBtn,
 		note,
 		g.releaseBtn,
+		g.wikiBtn,
 	)
 
 	// The credential line was filled in before this tab existed, so it is
@@ -1846,6 +1913,12 @@ func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 // one leaves the user clicking a dead button.
 func (g *gui) openRepository() {
 	g.openPage(RepositoryURL)
+}
+
+// openWiki opens the walk-through: one page per task, for the reader the README
+// is too long for. Its source is in docs/wiki, reviewed with the code.
+func (g *gui) openWiki() {
+	g.openPage(WikiURL)
 }
 
 // openReleasePage opens the release page: the list the update check's answer

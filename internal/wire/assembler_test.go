@@ -614,3 +614,45 @@ func TestZeroValueAssembler(t *testing.T) {
 		t.Errorf("reading %s = %q, %v", done.Path, got, err)
 	}
 }
+
+// Abandoning a transfer that is still arriving removes its part file and its
+// memory of the bytes, so a cancelled receive leaves nothing behind.
+func TestAssemblerAbandon(t *testing.T) {
+	dir := t.TempDir()
+	assembler := &Assembler{Dir: dir}
+
+	const id = "cancel-me"
+
+	size := int64(ChunkSize * 2)
+	header := chunkHeader(id, "clip.mp3", size, 0)
+	header.MIME = "audio/mpeg"
+
+	if _, err := assembler.Add(Frame{Header: header, Payload: make([]byte, ChunkSize)}); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	if len(assembler.transfers) != 1 {
+		t.Fatalf("the assembler holds %d transfers, want 1", len(assembler.transfers))
+	}
+
+	if !assembler.Abandon(id) {
+		t.Fatal("Abandon() reported nothing to abandon")
+	}
+
+	if len(assembler.transfers) != 0 {
+		t.Errorf("the assembler still holds %d transfers after Abandon", len(assembler.transfers))
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 0 {
+		t.Errorf("Abandon left %d file(s) behind: %v", len(entries), entries)
+	}
+
+	if assembler.Abandon(id) {
+		t.Error("Abandon() reported a transfer the second time, want nothing left to abandon")
+	}
+}

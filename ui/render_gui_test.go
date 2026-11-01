@@ -52,9 +52,9 @@ func newTestGUI(t *testing.T) *gui {
 	return g
 }
 
-// chatRowObjects pulls a transcript row apart into its three parts: the
-// caption, the inline picture, and the Save action.
-func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas.Image, *widgets.CopyButton) {
+// chatRowObjects pulls a transcript row apart into its parts: the caption, the
+// inline picture, the text preview, and the Save action.
+func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas.Image, *widgets.Text, *widgets.CopyButton, *widgets.CopyButton) {
 	t.Helper()
 
 	box, ok := row.(*fyne.Container)
@@ -62,8 +62,8 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 		t.Fatalf("row is %T, want *fyne.Container", row)
 	}
 
-	if len(box.Objects) != 3 {
-		t.Fatalf("row has %d objects, want 3", len(box.Objects))
+	if len(box.Objects) != 5 {
+		t.Fatalf("row has %d objects, want 5", len(box.Objects))
 	}
 
 	label, ok := box.Objects[0].(*widgets.Text)
@@ -76,12 +76,22 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 		t.Fatalf("row[1] is %T, want *canvas.Image", box.Objects[1])
 	}
 
-	save, ok := box.Objects[2].(*widgets.CopyButton)
+	preview, ok := box.Objects[2].(*widgets.Text)
 	if !ok {
-		t.Fatalf("row[2] is %T, want *widgets.CopyButton", box.Objects[2])
+		t.Fatalf("row[2] is %T, want the text preview", box.Objects[2])
 	}
 
-	return label, pic, save
+	save, ok := box.Objects[3].(*widgets.CopyButton)
+	if !ok {
+		t.Fatalf("row[3] is %T, want *widgets.CopyButton", box.Objects[3])
+	}
+
+	open, ok := box.Objects[4].(*widgets.CopyButton)
+	if !ok {
+		t.Fatalf("row[4] is %T, want the Open action", box.Objects[4])
+	}
+
+	return label, pic, preview, save, open
 }
 
 // TestChatRowReportsTransferProgress checks that each transfer draws its own
@@ -109,7 +119,7 @@ func TestChatRowReportsTransferProgress(t *testing.T) {
 			row := g.chatList.CreateItem()
 			g.updateChatRow(tt.id, row)
 
-			label, pic, save := chatRowObjects(t, row)
+			label, pic, _, save, _ := chatRowObjects(t, row)
 
 			if label.Text() != tt.want {
 				t.Errorf("row %d = %q, want %q", tt.id, label.Text(), tt.want)
@@ -145,7 +155,7 @@ func TestChatRowDrawsADecodableImageInline(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	label, pic, save := chatRowObjects(t, row)
+	label, pic, _, save, _ := chatRowObjects(t, row)
 
 	if !pic.Visible() {
 		t.Fatal("a decodable image was not drawn inline")
@@ -189,7 +199,7 @@ func TestChatRowKeepsAPictureHiddenWhenItIsNotInline(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, save := chatRowObjects(t, row)
+	_, pic, _, save, _ := chatRowObjects(t, row)
 
 	if pic.Visible() {
 		t.Error("a file row that is not inline drew a picture")
