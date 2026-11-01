@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"tinygo.org/x/bluetooth"
 )
@@ -583,7 +584,7 @@ func matches(target, address, name string) bool {
 		return true
 	}
 
-	if strings.EqualFold(target, address) {
+	if sameAddress(target, address) {
 		return true
 	}
 
@@ -591,10 +592,34 @@ func matches(target, address, name string) bool {
 		return true
 	}
 
-	// A name may carry a suffix the user did not type, and a Bluetooth address
-	// is written with colons or dashes. Accepting both is what keeps a typo
-	// from looking like a device that is not there.
+	// A name may carry a suffix the user did not type. Accepting a prefix is
+	// what keeps a typo from looking like a device that is not there.
 	return strings.Contains(strings.ToLower(name), strings.ToLower(target))
+}
+
+// sameAddress compares two Bluetooth addresses whatever separator or case they
+// were written in.
+//
+// The separators are not a detail: `cthrone scan` prints "AA:BB:CC:DD:EE:FF",
+// Windows' own device list shows "AA-BB-CC-DD-EE-FF", and a paste from a bug
+// report may carry neither. A user naming the device they can see is not making
+// a typo, so the comparison drops the separators rather than the user's
+// address.
+func sameAddress(a, b string) bool {
+	return foldAddress(a) == foldAddress(b) && foldAddress(a) != ""
+}
+
+// foldAddress is an address with its separators removed and its letters
+// lowered: the form two addresses are compared in.
+func foldAddress(address string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ':', '-', ' ':
+			return -1
+		}
+
+		return unicode.ToLower(r)
+	}, address)
 }
 
 // Scan lists the cthrone devices in range, calling report for each one.
