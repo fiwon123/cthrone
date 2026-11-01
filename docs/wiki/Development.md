@@ -55,7 +55,7 @@ agent that does much of the work, but it is the bar every patch is held to.
 release for a human to publish:
 
 ```bash
-gh workflow run release.yml --ref main -f version=v0.10.1
+gh workflow run release.yml --ref main -f version=vX.Y.Z
 ```
 
 It runs `make check` first. Publishing the draft by hand creates the tag; the
