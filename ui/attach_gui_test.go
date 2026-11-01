@@ -61,6 +61,12 @@ func TestSentPictureDrawsTheSamePreviewAsAReceivedOne(t *testing.T) {
 		t.Fatalf("the sent file points at %q, want the user's own file %q", got, path)
 	}
 
+	// Wait for the send to settle. A row that is still sending offers Cancel in
+	// its action slot and a caption with a percentage, which is right — but not
+	// what this test is about, and on a slower machine the row below would catch
+	// it mid-flight.
+	waitForTransferState(t, g, messages[0].file, transferSent)
+
 	if !messages[0].file.inline {
 		t.Errorf("a sent %q is not marked for an inline preview, and the same file received would be", path)
 	}
@@ -85,7 +91,7 @@ func TestSentPictureDrawsTheSamePreviewAsAReceivedOne(t *testing.T) {
 	}
 
 	if save.Visible() {
-		t.Error("a sent file offered Save as…, which is the receiver's action")
+		t.Error("a sent, settled file still offers an action, and the only one there is the receiver's Save")
 	}
 }
 
@@ -633,4 +639,34 @@ func TestTextFlowsWhileAFileIsSending(t *testing.T) {
 	if kinds[1] != "text" {
 		t.Errorf("the wire saw %v, want the text between the file's chunks", kinds)
 	}
+}
+
+// waitForTransferState waits for a row's transfer to reach a state, because the
+// send and the receive both happen off the UI goroutine: a test that reads the
+// row immediately is reading it mid-flight on a machine slower than the one it
+// was written on.
+func waitForTransferState(t *testing.T, g *gui, note *fileNote, state transferState) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	// The state is written on the UI goroutine, so it is read there too: a test
+	// reading it from its own goroutine would be a data race the race detector
+	// is right to flag.
+	read := func() transferState {
+		got := make(chan transferState, 1)
+		fyne.Do(func() { got <- note.state })
+
+		return <-got
+	}
+
+	for time.Now().Before(deadline) {
+		if read() == state {
+			return
+		}
+
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	t.Fatalf("the transfer never reached state %v (it is %v)", state, read())
 }
