@@ -2,6 +2,7 @@ package scancmd
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +107,70 @@ func TestScanCommandNamesWhatItFound(t *testing.T) {
 
 	if gotPort != 8080 {
 		t.Fatalf("beaconNames asked about port %d, want 8080", gotPort)
+	}
+}
+
+// --bluetooth walks the radio, and it must not also walk the network: a scan
+// that did both would take two discovery windows and print one list that mixes
+// two kinds of address.
+func TestBluetoothFlagScansTheRadio(t *testing.T) {
+	originalRadio := scanBluetoothFunc
+	t.Cleanup(func() { scanBluetoothFunc = originalRadio })
+
+	originalNetwork := scanFunc
+	t.Cleanup(func() { scanFunc = originalNetwork })
+
+	t.Cleanup(func() {
+		Cmd.SetArgs(nil)
+		_ = Cmd.Flags().Set("bluetooth", "false")
+	})
+
+	var radio bool
+
+	scanBluetoothFunc = func(io.Writer) error {
+		radio = true
+
+		return nil
+	}
+
+	scanFunc = func(*app.Data) []string {
+		t.Error("a radio scan walked the network as well")
+
+		return nil
+	}
+
+	Cmd.SetArgs([]string{"--bluetooth"})
+	Cmd.SetOut(&bytes.Buffer{})
+
+	if err := Cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !radio {
+		t.Fatal("--bluetooth did not run the radio scan")
+	}
+}
+
+// A radio scan and a network walk are different questions, and asking for both
+// is refused instead of answered with one of them.
+func TestScanConflict(t *testing.T) {
+	tests := []struct {
+		name    string
+		subnets []string
+		all     bool
+		wantErr bool
+	}{
+		{"the radio alone", nil, false, false},
+		{"the radio and a subnet", []string{"10.0.0.0/24"}, false, true},
+		{"the radio and every subnet", nil, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := scanConflict(tt.subnets, tt.all); (err != nil) != tt.wantErr {
+				t.Fatalf("scanConflict(%v, %v) error = %v, wantErr %v", tt.subnets, tt.all, err, tt.wantErr)
+			}
+		})
 	}
 }
 

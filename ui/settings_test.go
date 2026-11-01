@@ -59,30 +59,31 @@ func TestSubjectOrDefault(t *testing.T) {
 func TestSetupVisibility(t *testing.T) {
 	tests := []struct {
 		name        string
-		useNATS     bool
+		mode        transportMode
 		tls         bool
 		moreOptions bool
 		want        setupView
 	}{
 		{
 			name: "websocket, plain",
-			want: setupView{Options: true},
+			want: setupView{Port: true, Options: true},
 		},
 		{
 			name: "websocket, TLS adds the insecure row",
 			tls:  true,
-			want: setupView{Options: true, Insecure: true},
+			want: setupView{Port: true, Options: true, Insecure: true},
 		},
 		{
 			name:        "websocket, more options opens the advanced rows",
 			moreOptions: true,
-			want:        setupView{Options: true, SharedSecret: true, BindAddress: true},
+			want:        setupView{Port: true, Options: true, SharedSecret: true, BindAddress: true},
 		},
 		{
 			name:        "websocket, more options with TLS opens every row",
 			tls:         true,
 			moreOptions: true,
 			want: setupView{
+				Port:         true,
 				Options:      true,
 				SharedSecret: true,
 				Fingerprint:  true,
@@ -91,52 +92,148 @@ func TestSetupVisibility(t *testing.T) {
 			},
 		},
 		{
-			name:    "NATS hides the websocket options row",
-			useNATS: true,
-			want:    setupView{NATSBroker: true, NATSSubject: true},
+			name: "NATS hides the websocket options row",
+			mode: transportNATS,
+			want: setupView{Port: true, NATSBroker: true, NATSSubject: true},
 		},
 		{
-			name:    "NATS with TLS keeps the insecure row",
-			useNATS: true,
-			tls:     true,
-			want:    setupView{Insecure: true, NATSBroker: true, NATSSubject: true},
+			name: "NATS with TLS keeps the insecure row",
+			mode: transportNATS,
+			tls:  true,
+			want: setupView{Port: true, Insecure: true, NATSBroker: true, NATSSubject: true},
 		},
 		{
 			name:        "NATS ignores the advanced websocket rows",
-			useNATS:     true,
+			mode:        transportNATS,
 			moreOptions: true,
-			want:        setupView{NATSBroker: true, NATSSubject: true},
+			want:        setupView{Port: true, NATSBroker: true, NATSSubject: true},
 		},
 		{
 			name:        "NATS with everything on still shows only broker rows",
-			useNATS:     true,
+			mode:        transportNATS,
 			tls:         true,
 			moreOptions: true,
-			want:        setupView{Insecure: true, NATSBroker: true, NATSSubject: true},
+			want:        setupView{Port: true, Insecure: true, NATSBroker: true, NATSSubject: true},
+		},
+		{
+			// The radio has no port, no bind address and no certificate to pin:
+			// the rows that configure a socket or a TLS connection would each
+			// be a setting the transport cannot use.
+			name: "Bluetooth keeps the transport row and nothing else",
+			mode: transportBluetooth,
+			want: setupView{Options: true},
+		},
+		{
+			// A session on the radio is sealed and authenticated like any other,
+			// so the credential row is the one advanced row it keeps.
+			name:        "Bluetooth keeps the credential row",
+			mode:        transportBluetooth,
+			moreOptions: true,
+			want:        setupView{Options: true, SharedSecret: true},
+		},
+		{
+			// TLS belongs to the websocket connection. A Bluetooth link is not
+			// a socket, so the checkbox that spares one its certificate check
+			// means nothing there.
+			name: "Bluetooth ignores TLS",
+			mode: transportBluetooth,
+			tls:  true,
+			want: setupView{Options: true},
+		},
+		{
+			name:        "Bluetooth with everything on shows no network row",
+			mode:        transportBluetooth,
+			tls:         true,
+			moreOptions: true,
+			want:        setupView{Options: true, SharedSecret: true},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := setupVisibility(tt.useNATS, tt.tls, tt.moreOptions)
+			got := setupVisibility(tt.mode, tt.tls, tt.moreOptions)
 			if got != tt.want {
 				t.Errorf("setupVisibility(%v, %v, %v) = %+v, want %+v",
-					tt.useNATS, tt.tls, tt.moreOptions, got, tt.want)
+					tt.mode, tt.tls, tt.moreOptions, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestSetupHint(t *testing.T) {
-	websocket := setupHint(false)
-	nats := setupHint(true)
-
-	if websocket == "" || nats == "" {
-		t.Fatalf("setupHint returned an empty hint: websocket %q, NATS %q", websocket, nats)
+	hints := []string{
+		setupHint(transportWebsocket),
+		setupHint(transportNATS),
+		setupHint(transportBluetooth),
 	}
 
-	if websocket == nats {
-		t.Errorf("setupHint is the same for both transports: %q", websocket)
+	seen := make(map[string]bool, len(hints))
+
+	for i, hint := range hints {
+		if hint == "" {
+			t.Fatalf("setupHint for transport %d is empty", i)
+		}
+
+		// One sentence cannot serve three transports: a hint that is the same
+		// for two of them is not describing either.
+		if seen[hint] {
+			t.Errorf("setupHint returns %q for more than one transport", hint)
+		}
+
+		seen[hint] = true
+	}
+}
+
+// The transport select is the one control, so a mode has to survive the trip
+// through its option text and back — including the empty selection a select
+// reports before it is first shown.
+func TestTransportOfRoundTrip(t *testing.T) {
+	tests := []struct {
+		name     string
+		selected string
+		want     transportMode
+	}{
+		{"websocket", labelWebsocket, transportWebsocket},
+		{"NATS", labelNATS, transportNATS},
+		{"Bluetooth", labelBluetooth, transportBluetooth},
+		{"nothing selected yet", "", transportWebsocket},
+		{"an option this build does not offer", "Carrier pigeon", transportWebsocket},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := transportOf(tt.selected); got != tt.want {
+				t.Fatalf("transportOf(%q) = %v, want %v", tt.selected, got, tt.want)
+			}
+		})
+	}
+
+	for _, mode := range []transportMode{transportWebsocket, transportNATS, transportBluetooth} {
+		if got := transportOf(transportName(mode)); got != mode {
+			t.Errorf("transportName(%v) does not survive the round trip: %q -> %v",
+				mode, transportName(mode), got)
+		}
+	}
+}
+
+// A phone build has no Bluetooth transport — the implementation speaks BlueZ
+// over D-Bus — so the option is absent rather than present and always failing.
+func TestTransportNames(t *testing.T) {
+	desktop := transportNames(false)
+	mobile := transportNames(true)
+
+	if len(desktop) != 3 {
+		t.Fatalf("the desktop select offers %v, want all three transports", desktop)
+	}
+
+	if len(mobile) != 2 {
+		t.Fatalf("the phone select offers %v, want the two network transports", mobile)
+	}
+
+	for _, name := range mobile {
+		if name == labelBluetooth {
+			t.Errorf("the phone select offers Bluetooth, which this build cannot run: %v", mobile)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	natscore "github.com/fiwon123/cthrone/internal/core/nats"
 	websocketcore "github.com/fiwon123/cthrone/internal/core/websocket"
 	"github.com/fiwon123/cthrone/internal/data/app"
@@ -76,6 +77,97 @@ func TestHostOptsOutOfTLS(t *testing.T) {
 	if got.Enabled {
 		t.Errorf("--no-tls still enabled TLS: %+v", got)
 	}
+}
+
+// --bluetooth has to reach the radio's host, and the first-contact question the
+// websocket host asks has to travel with it: the two transports pair by the same
+// device key, so a radio host that asked nobody would accept a stranger.
+func TestBluetoothFlagHostsOverTheRadio(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var (
+		radio     bool
+		websocket bool
+		confirm   int
+	)
+
+	originalRadio := hostBluetooth
+	t.Cleanup(func() { hostBluetooth = originalRadio })
+
+	hostBluetooth = func(_ *app.Data, _ pairing.Options, gate ...bluetoothcore.Confirm) error {
+		radio, confirm = true, len(gate)
+
+		return nil
+	}
+
+	originalWebsocket := hostWebsocket
+	t.Cleanup(func() { hostWebsocket = originalWebsocket })
+
+	hostWebsocket = func(_ *app.Data, _ pairing.Options, _ auth.TLS, _ ...websocketcore.Confirm) error {
+		websocket = true
+
+		return nil
+	}
+
+	inheritRootFlags(t)
+	resetTransportFlags(t)
+
+	Cmd.SetArgs([]string{"--bluetooth"})
+
+	if err := Cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !radio {
+		t.Fatal("--bluetooth did not start the Bluetooth host")
+	}
+
+	if websocket {
+		t.Error("--bluetooth started the websocket host as well")
+	}
+
+	if confirm != 1 {
+		t.Errorf("the Bluetooth host was given %d first-contact gates, want 1", confirm)
+	}
+}
+
+// Two switches that name different transports is a run that has not chosen one.
+// The refusal is an error rather than a guess, and it is checked here rather
+// than through log.Fatal — a test that exits proves nothing.
+func TestTransportConflict(t *testing.T) {
+	tests := []struct {
+		name      string
+		bluetooth bool
+		nats      bool
+		wantErr   bool
+	}{
+		{"no switch", false, false, false},
+		{"radio only", true, false, false},
+		{"broker only", false, true, false},
+		{"both", true, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := transportConflict(tt.bluetooth, tt.nats); (err != nil) != tt.wantErr {
+				t.Fatalf("transportConflict(%v, %v) error = %v, wantErr %v",
+					tt.bluetooth, tt.nats, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// resetTransportFlags puts the transport switches back to their defaults: the
+// command is a package-level value, so a run that passed one would otherwise
+// leave the next test hosting a radio or a broker.
+func resetTransportFlags(t *testing.T) {
+	t.Helper()
+
+	t.Cleanup(func() {
+		Cmd.SetArgs([]string{})
+		_ = Cmd.Flags().Set("bluetooth", "false")
+		_ = Cmd.Flags().Set("nats", "false")
+	})
 }
 
 // inheritRootFlags registers the switches the root command makes persistent.
