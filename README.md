@@ -726,7 +726,10 @@ decide *how* the transport does it.
 
 - **Source**: https://github.com/fiwon123/cthrone
 - **Releases**: https://github.com/fiwon123/cthrone/releases
-- **Issues & discussions**: https://github.com/fiwon123/cthrone/issues
+- **Issues**: https://github.com/fiwon123/cthrone/issues
+- **Discussions**: https://github.com/fiwon123/cthrone/discussions
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md) — including the help
+  this project needs most: running the unproven parts on real hardware
 - **Wiki**: https://github.com/fiwon123/cthrone/wiki
 
 ## How to develop
