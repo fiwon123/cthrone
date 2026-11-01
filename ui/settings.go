@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/fiwon123/cthrone/internal/auth"
+	bluetoothcore "github.com/fiwon123/cthrone/internal/core/bluetooth"
 	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
@@ -96,18 +97,30 @@ const (
 const (
 	labelWebsocket = "WebSocket (default)"
 	labelNATS      = "NATS"
-	labelBluetooth = "Bluetooth (Linux)"
+	labelBluetooth = "Bluetooth"
 )
+
+// bluetoothSupported is the fact the transport select is built from: the one
+// bluetoothcore.Supported() answers for this build.
+//
+// It is a variable rather than a direct call so a test can build the window for
+// a platform this host is not — the same seam hostBluetooth and connectBluetooth
+// give the transport tests, for the same reason: the answer belongs to the
+// build, and no window here runs on Windows or macOS.
+var bluetoothSupported = bluetoothcore.Supported
 
 // transportNames are the option labels for this build, in the order the select
 // shows them.
 //
-// Bluetooth is left out of a phone build on purpose: the transport speaks BlueZ
-// over D-Bus, which Android does not have, so the option there would only ever
-// produce "this build has no Bluetooth transport". An option that cannot work
-// reads as a broken feature; its absence reads as a platform difference.
-func transportNames(mobile bool) []string {
-	if mobile {
+// The radio is offered only by a build that has it. The decision used to follow
+// the layout — a phone was denied the option because it was a phone — which was
+// wrong in both directions: a Windows or macOS desktop offered "Bluetooth
+// (Linux)" and could only answer "this build has no Bluetooth transport", while
+// a platform that gained the transport would have stayed hidden. An option that
+// cannot work reads as a broken feature; its absence reads as a platform
+// difference.
+func transportNames(bluetooth bool) []string {
+	if !bluetooth {
 		return []string{labelWebsocket, labelNATS}
 	}
 
