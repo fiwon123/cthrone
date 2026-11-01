@@ -3,6 +3,11 @@
 package ui
 
 import (
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+
 	"context"
 	"errors"
 	"fmt"
@@ -78,6 +83,20 @@ func (g *gui) pickFile() {
 	picker.Show()
 }
 
+// sourcePath is the picked file on this device's disk, or "" when the picker
+// handed over something that is not a path — a phone's content URI, for one.
+//
+// It is only ever read for the row's preview: the bytes that travel are read
+// from the staged copy, because the picker's reader is consumed once.
+func sourcePath(reader fyne.URIReadCloser) string {
+	uri := reader.URI()
+	if uri == nil || uri.Scheme() != "file" {
+		return ""
+	}
+
+	return uri.Path()
+}
+
 // queuePick stages the picked file and hands it to the sender.
 //
 // The copy is made off the UI goroutine: a 200 MB video takes a moment to
@@ -108,7 +127,17 @@ func (g *gui) queuePick(reader fyne.URIReadCloser) {
 			return
 		}
 
-		note := &fileNote{name: name, size: size, state: transferSending}
+		// The row draws the same preview the peer will draw (#237). The file it
+		// reads from is the user's own, not the staged copy: the copy is removed
+		// as soon as the send returns, and a row pointing at it would lose its
+		// picture the moment the transfer finished.
+		note := &fileNote{
+			name:   name,
+			size:   size,
+			state:  transferSending,
+			path:   sourcePath(reader),
+			inline: showsInline(mimeOf(name), size),
+		}
 		item := outgoing{
 			id:   newTransferID(),
 			name: name,
@@ -626,7 +655,7 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyBu
 
 	path := m.file.path
 
-	if m.file.inline {
+	if m.file.inline && decodableImage(path) {
 		if res, err := fyne.LoadResourceFromPath(path); err == nil {
 			pic.Resource = res
 			pic.SetMinSize(fyne.NewSize(0, inlineImageHeight))
@@ -653,6 +682,25 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, save *widgets.CopyBu
 	default:
 		save.Hide()
 	}
+}
+
+// decodableImage reports whether the file is an image the toolkit can actually
+// draw.
+//
+// The name and the MIME say what a file claims to be; a truncated download, a
+// renamed text file or a type the toolkit has no decoder for draws an empty box,
+// and an empty box in the transcript reads as a failed transfer. The header is
+// enough to tell, and it is cheap — no pixels are decoded.
+func decodableImage(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	_, _, err = image.DecodeConfig(file)
+
+	return err == nil
 }
 
 // showImage opens a received picture at the size the window allows, which is
