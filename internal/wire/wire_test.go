@@ -478,3 +478,37 @@ func mustJSON(t *testing.T, h Header) []byte {
 
 	return out
 }
+
+// An abort names a transfer and carries nothing; it is the frame that tells a
+// receiver to stop waiting for bytes that will never come.
+func TestAbortFrame(t *testing.T) {
+	frame, err := Encode(Header{Kind: KindAbort, ID: "t1"}, nil)
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	parsed, err := Parse(frame)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if parsed.Header.Kind != KindAbort || parsed.Header.ID != "t1" {
+		t.Errorf("Parse() = %+v, want an abort for t1", parsed.Header)
+	}
+
+	if len(parsed.Payload) != 0 {
+		t.Errorf("the abort carries %d bytes, want none", len(parsed.Payload))
+	}
+
+	// An abort for nobody is a broken header, and a payload on one is too.
+	if _, err := Encode(Header{Kind: KindAbort}, nil); err == nil {
+		t.Error("Encode() accepted an abort without an id")
+	}
+
+	payload, err := Encode(Header{Kind: KindAbort, ID: "t1"}, []byte("why"))
+	if err == nil {
+		if _, err := Parse(payload); err == nil {
+			t.Error("Parse() accepted an abort with a payload")
+		}
+	}
+}

@@ -371,17 +371,39 @@ type gatedSession struct {
 
 	started chan struct{}
 	release chan struct{}
+
+	mu    sync.Mutex
+	kinds []string
 }
 
 func (s *gatedSession) Send(payload []byte) error {
+	kind := "other"
+
+	if frame, err := wire.Parse(payload); err == nil {
+		kind = string(frame.Header.Kind)
+	}
+
+	s.mu.Lock()
+	s.kinds = append(s.kinds, kind)
+	s.mu.Unlock()
+
 	select {
 	case s.started <- struct{}{}:
 	default:
 	}
 
-	<-s.release
+	if kind == string(wire.KindFile) {
+		<-s.release
+	}
 
 	return nil
+}
+
+func (s *gatedSession) seen() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.kinds...)
 }
 
 func (s *gatedSession) Close(reason string) { s.NotifyClose(reason) }
@@ -425,12 +447,17 @@ func TestCancellingASendStopsIt(t *testing.T) {
 	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text(), "cancelled") })
 
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	for _, message := range g.messages {
 		if message.file == note {
 			t.Error("a cancelled send left its row behind, want it gone")
 		}
+	}
+	g.mu.Unlock()
+
+	// The peer is told, so it does not hold a half file until a timeout.
+	seen := strings.Join(gated.seen(), ",")
+	if !strings.Contains(seen, string(wire.KindAbort)) {
+		t.Errorf("the wire saw %q, want an abort frame for the cancelled transfer", seen)
 	}
 }
 
@@ -669,4 +696,46 @@ func waitForTransferState(t *testing.T, g *gui, note *fileNote, state transferSt
 	}
 
 	t.Fatalf("the transfer never reached state %v (it is %v)", state, read())
+}
+
+// An abort from the other side drops what was being assembled, now rather than
+// when the assembler times out, and says who cancelled.
+func TestAnAbortFromThePeerDropsTheTransfer(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.prepareReceive()
+
+	size := int64(wire.ChunkSize * 2)
+	first := wire.Frame{
+		Header:  fileChunkHeader("rx-1", "clip.mp3", size, 0),
+		Payload: make([]byte, wire.ChunkSize),
+	}
+
+	g.receiveTransfer("bob", first)
+
+	g.mu.Lock()
+	held := len(g.incoming)
+	g.mu.Unlock()
+
+	if held != 1 {
+		t.Fatalf("the receive loop holds %d transfers, want 1", held)
+	}
+
+	abort, err := wire.Encode(wire.Header{Kind: wire.KindAbort, ID: "rx-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	g.receiveFrame("bob", abort)
+
+	g.mu.Lock()
+	still := len(g.incoming)
+	g.mu.Unlock()
+
+	if still != 0 {
+		t.Errorf("the aborted transfer is still tracked (%d entries)", still)
+	}
+
+	if got := g.status.Text(); !strings.Contains(got, "cancelled") || !strings.Contains(got, "bob") {
+		t.Errorf("the status line reads %q, want it to say bob cancelled the transfer", got)
+	}
 }

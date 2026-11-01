@@ -1378,11 +1378,18 @@ func (g *gui) addPeer(p bluetoothcore.Peer) {
 // selectBeacon fills the host address from a discovered device.
 func (g *gui) selectBeacon(id widget.ListItemID) {
 	rows := g.visibleBeacons()
+
+	// The log line is for the report that says "I cannot click the device": it
+	// answers the one question a screenshot cannot — did the tap arrive at all,
+	// and was there a row for it — without asking the user to read code.
 	if id < 0 || id >= len(rows) {
+		logEvent(fmt.Sprintf("device row %d tapped with %d rows shown", id, len(rows)))
+
 		return
 	}
 
 	beacon := rows[id]
+	logEvent("device row tapped: " + deviceLabel(beacon.Beacon))
 
 	g.hostEntry.SetText(beacon.Addr)
 
@@ -1549,7 +1556,13 @@ func (g *gui) setStatus(text string) {
 // the slice.
 func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
+		// The lock is what a reader on another goroutine reads under — the
+		// tests, and any helper that inspects the transcript. Painting happens
+		// on this goroutine anyway, so the cost is a mutex nobody contends for.
+		g.mu.Lock()
 		g.messages = appendMessage(g.messages, m)
+		g.mu.Unlock()
+
 		g.chatList.Refresh()
 		g.chatList.ScrollToBottom()
 	})

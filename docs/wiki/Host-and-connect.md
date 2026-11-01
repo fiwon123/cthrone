@@ -52,4 +52,8 @@ cthrone scan --all-subnets
 
 A scan reports devices that announce themselves and hosts that answer on the
 chat port. It cannot cross a subnet, a NAT or a router that isolates its
-clients — for that, see [NATS](NATS).
+clients — a device on another Wi-Fi of the same modem is found after it has been
+connected to once, because the host then also announces itself to that address
+by unicast. See
+[Finding devices across networks](Finding-devices-across-networks), and
+[NATS](NATS) when the network isolates its own clients.

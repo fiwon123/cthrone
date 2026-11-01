@@ -1,6 +1,7 @@
 package widgets
 
 import (
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -43,6 +44,11 @@ type Text struct {
 	label    *widget.Label
 	touch    bool
 	onTapped func()
+
+	// selMu guards the selectable flag. The restore runs on a timer, and a
+	// caller may ask whether the text is selectable from another goroutine; the
+	// label itself is only ever touched on the UI goroutine.
+	selMu sync.Mutex
 
 	// restore turns selection off again after selectionWindow. It is kept so a
 	// second long press extends the window instead of stacking timers.
@@ -107,7 +113,20 @@ func (t *Text) SetTextStyle(style fyne.TextStyle) {
 // Selectable reports whether the text can be selected at this moment: always on
 // a desktop, only inside the window after a long press on a touch screen.
 func (t *Text) Selectable() bool {
+	t.selMu.Lock()
+	defer t.selMu.Unlock()
+
 	return t.label.Selectable
+}
+
+// setSelectable is the only way the flag moves, so the read above has something
+// to synchronise with.
+func (t *Text) setSelectable(selectable bool) {
+	t.selMu.Lock()
+	t.label.Selectable = selectable
+	t.selMu.Unlock()
+
+	t.label.Refresh()
 }
 
 // SetOnTapped sets what a plain tap does, which is what the tap did before the
@@ -151,8 +170,7 @@ func (t *Text) TappedSecondary(ev *fyne.PointEvent) {
 // with its handles, and the word under the finger selected, exactly as a
 // double-tap selects it on a desktop.
 func (t *Text) selectAt(ev *fyne.PointEvent) {
-	t.label.Selectable = true
-	t.label.Refresh()
+	t.setSelectable(true)
 
 	// The selection lives in a child widget the label's renderer owns. There is
 	// no exporting API to say "select the word at this point", but the child is
@@ -200,8 +218,7 @@ func (t *Text) armSelectionWindow() {
 		}
 
 		fyne.Do(func() {
-			t.label.Selectable = false
-			t.label.Refresh()
+			t.setSelectable(false)
 		})
 	})
 }

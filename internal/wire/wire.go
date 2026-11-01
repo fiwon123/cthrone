@@ -85,6 +85,16 @@ const (
 	// The receiver checks it before the file is offered to anyone.
 	KindFileEnd Kind = "file-end"
 
+	// KindAbort says a transfer will send no more bytes: the sender gave up on
+	// it, and the receiver should free what it was holding.
+	//
+	// It is additive, and an older peer refuses it: a build that predates this
+	// kind answers "unknown kind", which the receive path reports as a damaged
+	// frame. That is a visible wart for one frame on a version mismatch, and it
+	// is preferable to a receiver that keeps a half file until the assembler
+	// times out.
+	KindAbort Kind = "abort"
+
 	// KindHandshake is one step of the end-to-end key exchange. Its payload is
 	// JSON and this package does not read it: the envelope carries the bytes,
 	// internal/e2e decides what they mean, and a peer that does not expect a
@@ -285,6 +295,15 @@ func (h Header) validate() error {
 		// in the header to check: a handshake carries no file and no id.
 		return nil
 
+	case KindAbort:
+		// An abort names the transfer it ends and carries nothing else: the
+		// size and chunk fields describe a file this frame is saying goodbye to.
+		if h.ID == "" {
+			return fmt.Errorf("%w: abort frame without an id", ErrHeader)
+		}
+
+		return nil
+
 	case KindFile, KindFileEnd:
 		if h.ID == "" {
 			return fmt.Errorf("%w: %s frame without an id", ErrHeader, h.Kind)
@@ -328,6 +347,13 @@ func (h Header) validate() error {
 func (h Header) checkPayload(length int) error {
 	switch h.Kind {
 	case KindText:
+		return nil
+
+	case KindAbort:
+		if length != 0 {
+			return fmt.Errorf("%w: abort frame with a %d-byte payload", ErrPayload, length)
+		}
+
 		return nil
 
 	case KindHandshake:
@@ -376,11 +402,31 @@ func checkName(name string) error {
 		return fmt.Errorf("%w: file name %q contains a path separator", ErrHeader, name)
 	}
 
-	if filepath.Base(name) != name {
+	if !SafeName(name) {
 		return fmt.Errorf("%w: file name %q is a path", ErrHeader, name)
 	}
 
 	return nil
+}
+
+// SafeName reports whether name is a single path element: something a peer may
+// call a file, and something that may be joined onto a folder without escaping
+// it.
+//
+// It is exported because the code that *writes* the file is not in this package,
+// and an invariant that lives in one place while the write happens in another is
+// an invariant that depends on a caller two packages away remembering it. One
+// rule, both sides.
+func SafeName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return false
+	}
+
+	return filepath.Base(name) == name
 }
 
 // validSum reports whether s is a SHA-256 in hex. Case is not part of the
