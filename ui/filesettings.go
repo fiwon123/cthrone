@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"github.com/fiwon123/cthrone/internal/wire"
 	"io"
 	"os"
 	"path/filepath"
@@ -132,6 +133,14 @@ func numberedName(name string, i int) string {
 // other path goes through here: a file an earlier session left in the folder is
 // never replaced silently.
 func uniquePath(dir, name string) (string, error) {
+	// The name arrives from the wire, where it has already been checked — and
+	// it is checked again here, because this is the function that joins it onto
+	// a path. A helper whose safety depends on a remote caller is one refactor
+	// away from writing outside the folder it was given.
+	if !wire.SafeName(name) {
+		return "", fmt.Errorf("refusing to save a file as %q: not a plain name", name)
+	}
+
 	for i := 0; i <= maxSuffixes; i++ {
 		candidate := filepath.Join(dir, numberedName(name, i))
 		if _, err := os.Lstat(candidate); errors.Is(err, os.ErrNotExist) {
