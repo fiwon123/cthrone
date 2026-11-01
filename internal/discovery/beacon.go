@@ -27,12 +27,22 @@ type entry struct {
 	seen   time.Time
 }
 
-// Announcer broadcasts beacons on UDP.
+// BeaconPort is the fixed UDP port beacons are sent to and read from. It is
+// not the chat port: a beacon says where the chat port is.
+const BeaconPort = 9999
+
+// Announcer broadcasts beacons on UDP, and announces to named hosts as well.
+//
+// The broadcast is what finds this device on its own segment; it never crosses
+// a router, which is why two Wi-Fis on one modem do not see each other. The
+// seeds are the answer that does: the same beacon, sent by unicast to a host
+// that has been reached before, travels wherever ordinary routing does.
 type Announcer struct {
-	mu   sync.RWMutex
-	name string
-	port int
-	stop chan struct{}
+	mu    sync.RWMutex
+	name  string
+	port  int
+	seeds []string
+	stop  chan struct{}
 
 	// stopOnce makes Stop idempotent: a host that is stopped twice — the Stop
 	// button, then the window closing — must not close the channel twice and
@@ -40,20 +50,22 @@ type Announcer struct {
 	stopOnce sync.Once
 }
 
-func NewAnnouncer(name string, port int) *Announcer {
-	return &Announcer{name: name, port: port, stop: make(chan struct{})}
+// NewAnnouncer is an announcer for a host on port. seeds are hosts — an address
+// or a host:port, as they were dialed — to announce to by unicast.
+func NewAnnouncer(name string, port int, seeds ...string) *Announcer {
+	return &Announcer{name: name, port: port, seeds: seeds, stop: make(chan struct{})}
 }
 
 func (a *Announcer) Start(interval time.Duration) {
 	go func() {
-		conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4bcast, Port: 9999})
-		if err != nil {
-			// try interface broadcasts
-			return
-		}
-		defer conn.Close()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+
+		broadcast, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4bcast, Port: BeaconPort})
+		if err == nil {
+			defer broadcast.Close()
+		}
+
 		for {
 			select {
 			case <-a.stop:
@@ -61,10 +73,56 @@ func (a *Announcer) Start(interval time.Duration) {
 			case <-ticker.C:
 				b := Beacon{Name: a.name, Port: a.port, Protocol: 1}
 				data, _ := json.Marshal(b)
-				conn.Write(data)
+
+				if broadcast != nil {
+					_, _ = broadcast.Write(data)
+				}
+
+				a.announceToSeeds(data)
 			}
 		}
 	}()
+}
+
+// announceToSeeds sends the beacon to each named host.
+//
+// A seed that cannot be reached is skipped in silence: the other segment is
+// often down, or the address is stale, and a host that complained about it
+// every two seconds would fill a status line with noise nobody can act on.
+func (a *Announcer) announceToSeeds(data []byte) {
+	a.mu.RLock()
+	seeds := append([]string(nil), a.seeds...)
+	a.mu.RUnlock()
+
+	for _, seed := range seeds {
+		host, _, err := net.SplitHostPort(seed)
+		if err != nil {
+			host = seed
+		}
+
+		if host == "" {
+			continue
+		}
+
+		conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{
+			IP:   net.ParseIP(host),
+			Port: BeaconPort,
+		})
+		if err != nil {
+			continue
+		}
+
+		_, _ = conn.Write(data)
+		_ = conn.Close()
+	}
+}
+
+// Seeds are the hosts this announcer also reaches by unicast.
+func (a *Announcer) Seeds() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	return append([]string(nil), a.seeds...)
 }
 
 // Stop ends the announcement. It is safe to call more than once.
@@ -97,7 +155,7 @@ func (l *Listener) Start() {
 				return
 			}
 		}()
-		addr := &net.UDPAddr{IP: net.IPv4zero, Port: 9999}
+		addr := &net.UDPAddr{IP: net.IPv4zero, Port: BeaconPort}
 		conn, err := net.ListenUDP("udp4", addr)
 		if err != nil {
 			return

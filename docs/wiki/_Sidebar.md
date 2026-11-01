@@ -6,6 +6,7 @@
 - [Send a file](Send-a-file)
 - [Bluetooth](Bluetooth)
 - [NATS](NATS)
+- [Across networks](Finding-devices-across-networks)
 - [Commands and flags](Commands-and-flags)
 - [Troubleshooting](Troubleshooting)
 - [Security model](Security-model)

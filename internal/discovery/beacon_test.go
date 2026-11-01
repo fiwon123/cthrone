@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"encoding/json"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,4 +87,56 @@ func TestAnnouncerStopIsIdempotent(t *testing.T) {
 
 	a.Stop()
 	a.Stop()
+}
+
+// A beacon reaches a host on another segment only by unicast: the broadcast
+// dies at the router. The seeds are the addresses this device has dialed before,
+// and they get the same beacon, on the beacon port rather than the chat port.
+func TestAnnouncerReachesItsSeeds(t *testing.T) {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: BeaconPort})
+	if err != nil {
+		t.Skipf("the beacon port is taken on this machine: %v", err)
+	}
+	defer conn.Close()
+
+	// A chat port on another segment, reached by unicast.
+	announcer := NewAnnouncer("laptop", 8080, "127.0.0.1:8080")
+	announcer.Start(20 * time.Millisecond)
+	defer announcer.Stop()
+
+	if got := announcer.Seeds(); len(got) != 1 || got[0] != "127.0.0.1:8080" {
+		t.Fatalf("Seeds() = %v, want the address it was given", got)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	buffer := make([]byte, 512)
+	n, _, err := conn.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatalf("no beacon reached the seed: %v", err)
+	}
+
+	var beacon Beacon
+	if err := json.Unmarshal(buffer[:n], &beacon); err != nil {
+		t.Fatalf("the beacon did not read as one: %v", err)
+	}
+
+	if beacon.Name != "laptop" || beacon.Port != 8080 {
+		t.Errorf("the beacon says %q on %d, want laptop on 8080", beacon.Name, beacon.Port)
+	}
+}
+
+// A seed that cannot be reached is skipped, not fatal: the announcer keeps
+// going for the other one.
+func TestAnnouncerSurvivesAnUnreachableSeed(t *testing.T) {
+	announcer := NewAnnouncer("laptop", 8080, "not-a-host", "192.0.2.1:8080")
+	announcer.Start(10 * time.Millisecond)
+	defer announcer.Stop()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Nothing to assert but the absence of a panic and a live announcer.
+	if len(announcer.Seeds()) != 2 {
+		t.Errorf("the announcer forgot its seeds: %v", announcer.Seeds())
+	}
 }
