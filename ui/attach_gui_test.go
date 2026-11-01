@@ -9,6 +9,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/test"
 )
 
 // pickedFile is what the file picker hands over: a reader that knows its name.
@@ -61,7 +62,7 @@ func TestSentPictureDrawsTheSamePreviewAsAReceivedOne(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	label, pic, _, save := chatRowObjects(t, row)
+	label, pic, _, save, _ := chatRowObjects(t, row)
 
 	if !pic.Visible() {
 		t.Error("a sent picture drew no picture in its own transcript")
@@ -118,7 +119,7 @@ func TestSentTextFileStaysAFileRow(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, _, _ := chatRowObjects(t, row)
+	_, pic, _, _, _ := chatRowObjects(t, row)
 
 	if pic.Visible() {
 		t.Error("a sent text file drew a picture")
@@ -180,7 +181,7 @@ func TestUndecodablePictureStaysAFileRow(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, _, _ := chatRowObjects(t, row)
+	_, pic, _, _, _ := chatRowObjects(t, row)
 	if pic.Visible() {
 		t.Error("a file that does not decode drew a picture")
 	}
@@ -211,7 +212,7 @@ func TestTextFileIsDrawnInTheRow(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, preview, save := chatRowObjects(t, row)
+	_, pic, preview, save, _ := chatRowObjects(t, row)
 
 	if pic.Visible() {
 		t.Error("a text file drew a picture")
@@ -261,9 +262,92 @@ func TestBinaryFileDrawsNoText(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, _, preview, _ := chatRowObjects(t, row)
+	_, _, preview, _, _ := chatRowObjects(t, row)
 
 	if preview.Visible() {
 		t.Error("a binary file was drawn as text")
+	}
+}
+
+// A file this program cannot draw is offered to the device: a PDF or an audio
+// clip opens in whatever handles that kind of file here. The button only appears
+// where it can do something — the file is on this disk and the row is not
+// already showing its content.
+func TestUndrawableFileOffersOpen(t *testing.T) {
+	dir := t.TempDir()
+	pdf := dir + "/manual.pdf"
+
+	if err := os.WriteFile(pdf, []byte("%PDF-1.4 not really"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+	recorder := withOpener(t)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{file: &fileNote{
+		name:  "manual.pdf",
+		size:  18,
+		state: transferSaved,
+		path:  pdf,
+	}}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	_, pic, preview, save, open := chatRowObjects(t, row)
+
+	if pic.Visible() || preview.Visible() {
+		t.Error("a PDF was drawn as a picture or as text, and this program has no engine for either")
+	}
+
+	if !save.Visible() {
+		t.Error("a saved PDF does not offer Save as…")
+	}
+
+	if !open.Visible() {
+		t.Fatal("a saved PDF offers no way to open it")
+	}
+
+	test.Tap(open)
+
+	if len(recorder.opened) != 1 {
+		t.Fatalf("Open asked for %d addresses, want one", len(recorder.opened))
+	}
+
+	if got := recorder.opened[0]; !strings.HasPrefix(got, "file://") || !strings.HasSuffix(got, "manual.pdf") {
+		t.Errorf("Open asked for %q, want the file's own URI", got)
+	}
+}
+
+// A row that already draws its content offers no Open: the picture is there, and
+// a button that opens it again in another window is noise.
+func TestDrawnFileOffersNoOpen(t *testing.T) {
+	path := writeTestPNG(t)
+
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{file: &fileNote{
+		name:   "pic.png",
+		size:   testFileSize(t, path),
+		state:  transferSaved,
+		path:   path,
+		inline: true,
+	}}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	_, pic, _, _, open := chatRowObjects(t, row)
+
+	if !pic.Visible() {
+		t.Fatal("the picture was not drawn")
+	}
+
+	if open.Visible() {
+		t.Error("a drawn picture also offered Open")
 	}
 }

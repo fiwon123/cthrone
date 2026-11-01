@@ -432,7 +432,14 @@ func (g *gui) build() {
 			save := widgets.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil, g.copyLabel)
 			save.Hide()
 
-			return container.NewVBox(row, pic, preview, save)
+			// A file neither drawn nor read here — a PDF, an audio clip — is
+			// opened by whatever the device uses for that kind of file. It is
+			// the one thing this program can offer without an audio or PDF
+			// engine of its own.
+			open := widgets.NewButtonWithIcon("Open", theme.DocumentIcon(), nil, g.copyLabel)
+			open.Hide()
+
+			return container.NewVBox(row, pic, preview, save, open)
 		},
 		g.updateChatRow,
 	)
@@ -1574,15 +1581,16 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	pic, _ := row.Objects[1].(*canvas.Image)
 	preview, _ := row.Objects[2].(*widgets.Text)
 	save, _ := row.Objects[3].(*widgets.CopyButton)
+	open, _ := row.Objects[4].(*widgets.CopyButton)
 
-	if label == nil || pic == nil || preview == nil || save == nil {
+	if label == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
 	m := g.messages[id]
 	label.SetText(m.line())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
-	g.fillFileRow(m, pic, preview, save)
+	g.fillFileRow(m, pic, preview, save, open)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {

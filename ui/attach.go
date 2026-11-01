@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -645,11 +646,12 @@ func (g *gui) finishReceive() {
 // A row with no path on disk is a transfer that is still in flight, or one that
 // failed: neither has anything to save or to show, so both parts stay hidden
 // and the label carries the state.
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton, open *widgets.CopyButton) {
 	if m.file == nil || m.file.path == "" {
 		pic.Hide()
 		preview.Hide()
 		save.Hide()
+		open.Hide()
 
 		return
 	}
@@ -672,15 +674,32 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	// Text is the other thing a row can show: bounded by bytes and lines, so a
 	// long log is a row that ends in an ellipsis rather than a window with no
 	// conversation under it.
+	drawn := false
+
 	if showsText(mimeOf(m.file.name), m.file.size) {
 		if body := textPreview(path); body != "" {
 			preview.SetText(body)
 			preview.Show()
+			drawn = true
 		} else {
 			preview.Hide()
 		}
 	} else {
 		preview.Hide()
+	}
+
+	// A file this program cannot draw is offered to the device instead: a PDF to
+	// its reader, an audio clip to its player. The button appears only where it
+	// can do something — the file is on this disk, and the row is not already
+	// showing its content.
+	switch {
+	case drawn || m.file.inline:
+		open.Hide()
+	case m.file.state == transferSaved || m.file.state == transferSent:
+		open.SetOnTapped(func() { g.openFile(path) })
+		open.Show()
+	default:
+		open.Hide()
 	}
 
 	switch m.file.state {
@@ -697,6 +716,15 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	default:
 		save.Hide()
 	}
+}
+
+// openFile hands a file to whatever this device uses for that kind of file.
+//
+// It is the answer for the kinds this program has no engine for — a PDF, an
+// audio clip — and it goes through the same opener the About tab's links use,
+// so there is one place that reports "no handler for this" instead of two.
+func (g *gui) openFile(path string) {
+	g.openPage(storage.NewFileURI(path).String())
 }
 
 // decodableImage reports whether the file is an image the toolkit can actually
