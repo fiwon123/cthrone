@@ -528,10 +528,16 @@ adb install cthrone_<tag>_android_gui_arm64.apk
 
 The app has four tabs:
 
-- **Chat** — the conversation, a send field and a stop button. An arriving
-  message is labelled with the device name and, on a websocket, the address it
-  came from — `laptop (192.168.1.20:51234)` — because a name alone does not say
-  which machine on the network it is. Tap a message to
+- **Chat** — the conversation, a send field and a stop button. The field is a
+  composer rather than a one-line prompt: **Enter starts a new line**, and a
+  message is sent deliberately — with **Shift+Enter** on a desktop, or with the
+  **Send** button on a phone, which has no Shift key and whose keyboard turns
+  its action key into a newline. The field shows a few lines and then scrolls
+  internally, so a paragraph does not push the conversation off the screen; a
+  multi-line message travels as one message and keeps its line breaks. An
+  arriving message is labelled with the device name and, on a websocket, the
+  address it came from — `laptop (192.168.1.20:51234)` — because a name alone
+  does not say which machine on the network it is. Tap a message to
   copy it, or drag to select a part of it; **Copy all** copies the whole
   conversation. Every message, address and error is selectable text, and an
   error dialog carries a **Copy** button, so a failure can be pasted into a bug
