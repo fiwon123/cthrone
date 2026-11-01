@@ -61,7 +61,7 @@ func TestSentPictureDrawsTheSamePreviewAsAReceivedOne(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	label, pic, save := chatRowObjects(t, row)
+	label, pic, _, save := chatRowObjects(t, row)
 
 	if !pic.Visible() {
 		t.Error("a sent picture drew no picture in its own transcript")
@@ -118,7 +118,7 @@ func TestSentTextFileStaysAFileRow(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, _ := chatRowObjects(t, row)
+	_, pic, _, _ := chatRowObjects(t, row)
 
 	if pic.Visible() {
 		t.Error("a sent text file drew a picture")
@@ -180,8 +180,90 @@ func TestUndecodablePictureStaysAFileRow(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	_, pic, _ := chatRowObjects(t, row)
+	_, pic, _, _ := chatRowObjects(t, row)
 	if pic.Visible() {
 		t.Error("a file that does not decode drew a picture")
+	}
+}
+
+// A text file is drawn in the transcript, on both sides: the sender's row and
+// the receiver's row go through one function, so a log the user sent reads the
+// same as the one the other person received (#237).
+func TestTextFileIsDrawnInTheRow(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/notes.txt"
+
+	if err := os.WriteFile(path, []byte("the first line\nthe second line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{file: &fileNote{
+		name:  "notes.txt",
+		size:  31,
+		state: transferSaved,
+		path:  path,
+	}}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	_, pic, preview, save := chatRowObjects(t, row)
+
+	if pic.Visible() {
+		t.Error("a text file drew a picture")
+	}
+
+	if !preview.Visible() {
+		t.Fatal("a text file drew no text")
+	}
+
+	for _, want := range []string{"the first line", "the second line"} {
+		if !strings.Contains(preview.Text(), want) {
+			t.Errorf("the preview = %q, want it to contain %q", preview.Text(), want)
+		}
+	}
+
+	// It is selectable text like everything else a user reads: a desktop drags
+	// over it, a phone long-presses it.
+	if !preview.Selectable() {
+		t.Error("a desktop cannot select the text it is reading")
+	}
+
+	if !save.Visible() {
+		t.Error("a saved text file does not offer Save as…")
+	}
+}
+
+// A binary is not drawn as text: the row stays a filename and an action.
+func TestBinaryFileDrawsNoText(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/blob.bin"
+
+	if err := os.WriteFile(path, []byte{0x00, 0xff, 0x01}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{file: &fileNote{
+		name:  "blob.bin",
+		size:  3,
+		state: transferSaved,
+		path:  path,
+	}}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	_, _, preview, _ := chatRowObjects(t, row)
+
+	if preview.Visible() {
+		t.Error("a binary file was drawn as text")
 	}
 }

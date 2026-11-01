@@ -423,10 +423,16 @@ func (g *gui) build() {
 			pic.FillMode = canvas.ImageFillContain
 			pic.Hide()
 
+			// A text file is drawn, not just named: a pasted log is unreadable
+			// as a filename, and the beginning of it is what the sender meant
+			// the other person to see.
+			preview := g.text("")
+			preview.Hide()
+
 			save := widgets.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil, g.copyLabel)
 			save.Hide()
 
-			return container.NewVBox(row, pic, save)
+			return container.NewVBox(row, pic, preview, save)
 		},
 		g.updateChatRow,
 	)
@@ -1566,16 +1572,17 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	label, _ := row.Objects[0].(*widgets.Text)
 	pic, _ := row.Objects[1].(*canvas.Image)
-	save, _ := row.Objects[2].(*widgets.CopyButton)
+	preview, _ := row.Objects[2].(*widgets.Text)
+	save, _ := row.Objects[3].(*widgets.CopyButton)
 
-	if label == nil || pic == nil || save == nil {
+	if label == nil || pic == nil || preview == nil || save == nil {
 		return
 	}
 
 	m := g.messages[id]
 	label.SetText(m.line())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
-	g.fillFileRow(m, pic, save)
+	g.fillFileRow(m, pic, preview, save)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {

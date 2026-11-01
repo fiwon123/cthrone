@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -486,5 +487,88 @@ func TestDropFile(t *testing.T) {
 
 	if _, found := dropFile(got, note); found {
 		t.Error("dropFile() found the row twice")
+	}
+}
+
+// A text file is drawn in the row, and the drawing is bounded twice: by bytes
+// read and by lines kept, so a pasted log ends in an ellipsis instead of
+// pushing the conversation off the screen.
+func TestTextPreview(t *testing.T) {
+	t.Run("the beginning is shown", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "notes.txt")
+		if err := os.WriteFile(path, []byte("first line\nsecond line\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := textPreview(path); !strings.Contains(got, "first line") || !strings.Contains(got, "second line") {
+			t.Errorf("textPreview() = %q, want both lines", got)
+		}
+	})
+
+	t.Run("too many lines are cut", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "log.txt")
+
+		var body strings.Builder
+		for i := 0; i < inlineTextLines+5; i++ {
+			fmt.Fprintf(&body, "line %d\n", i)
+		}
+
+		if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		got := textPreview(path)
+
+		if lines := strings.Count(got, "\n"); lines >= inlineTextLines {
+			t.Errorf("textPreview() kept %d line breaks, want fewer than %d", lines, inlineTextLines)
+		}
+
+		if !strings.HasSuffix(got, "…") {
+			t.Errorf("textPreview() = %q, want it to end in an ellipsis", got)
+		}
+	})
+
+	t.Run("a file that cannot be read is nothing", func(t *testing.T) {
+		if got := textPreview(filepath.Join(t.TempDir(), "absent.txt")); got != "" {
+			t.Errorf("textPreview() = %q for a missing file, want empty", got)
+		}
+	})
+
+	t.Run("an empty file is nothing", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "empty.txt")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := textPreview(path); got != "" {
+			t.Errorf("textPreview() = %q for an empty file, want empty", got)
+		}
+	})
+}
+
+// The type decides, and only types that are text are drawn: an image is the
+// picture path's business, and a binary is a file row.
+func TestShowsText(t *testing.T) {
+	tests := []struct {
+		name string
+		mime string
+		size int64
+		want bool
+	}{
+		{"plain text", "text/plain", 100, true},
+		{"text with parameters", "text/plain; charset=utf-8", 100, true},
+		{"markdown", "text/markdown", 100, true},
+		{"an empty file", "text/plain", 0, false},
+		{"a picture", "image/png", 100, false},
+		{"a binary", "application/octet-stream", 100, false},
+		{"too large to draw", "text/plain", inlineTextBytes * 5, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := showsText(tt.mime, tt.size); got != tt.want {
+				t.Errorf("showsText(%q, %d) = %v, want %v", tt.mime, tt.size, got, tt.want)
+			}
+		})
 	}
 }
