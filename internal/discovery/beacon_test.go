@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -138,5 +139,51 @@ func TestAnnouncerSurvivesAnUnreachableSeed(t *testing.T) {
 	// Nothing to assert but the absence of a panic and a live announcer.
 	if len(announcer.Seeds()) != 2 {
 		t.Errorf("the announcer forgot its seeds: %v", announcer.Seeds())
+	}
+}
+
+// A beacon is unauthenticated: whoever is on the segment writes the list. A
+// flood of made-up addresses must not grow it without bound — that is a local
+// attacker, or one broken host, taking the app down by talking.
+func TestListenerBoundsWhatItRemembers(t *testing.T) {
+	l := NewListener()
+
+	base := beaconTime
+	for i := 0; i < MaxBeacons*3; i++ {
+		l.observe(Beacon{Addr: fmt.Sprintf("10.0.%d.%d", i/256, i%256), Port: 8080}, base.Add(time.Duration(i)*time.Millisecond))
+	}
+
+	l.mu.RLock()
+	held := len(l.found)
+	l.mu.RUnlock()
+
+	if held > MaxBeacons {
+		t.Errorf("the listener remembers %d devices, want at most %d", held, MaxBeacons)
+	}
+}
+
+// The device that goes is the quietest one: a flood must not be able to hide a
+// device that is announcing itself right now.
+func TestListenerEvictsTheQuietest(t *testing.T) {
+	l := NewListener()
+
+	// The real device speaks last and often.
+	l.observe(Beacon{Addr: "10.0.0.1", Name: "real", Port: 8080}, beaconTime)
+
+	for i := 0; i < MaxBeacons+10; i++ {
+		l.observe(Beacon{Addr: fmt.Sprintf("10.9.%d.%d", i/256, i%256), Port: 8080}, beaconTime.Add(time.Duration(i+1)*time.Millisecond))
+	}
+
+	// It speaks again, after the flood.
+	l.observe(Beacon{Addr: "10.0.0.1", Name: "real", Port: 8080}, beaconTime.Add(time.Hour).Add(-time.Minute))
+
+	// The map, not Found(): Found() filters by the wall clock, and this test
+	// moves the clock itself.
+	l.mu.RLock()
+	_, present := l.found[beaconKey(Beacon{Addr: "10.0.0.1", Name: "real", Port: 8080})]
+	l.mu.RUnlock()
+
+	if !present {
+		t.Error("the device that was announcing itself was evicted by the flood")
 	}
 }
