@@ -340,6 +340,30 @@ func (a *Assembler) finishEmpty(h Header) (*File, error) {
 	return &File{Name: h.Name, Path: path, Size: 0, MIME: h.MIME}, nil
 }
 
+// Abandon gives up on a transfer that is still arriving: the part file is
+// removed and its bytes are forgotten, so the session is not left holding a
+// file nobody will ever finish.
+//
+// It reports whether there was one. Abandoning twice is not an error — the
+// first call did the work — and a transfer that has already finished is left
+// alone, because its file is the user's now.
+//
+// Like Add, it belongs to the goroutine that feeds the assembler: it is not
+// safe to abandon a transfer from a UI thread while chunks are being written.
+// A caller on another goroutine records the request and lets the receive loop
+// make it.
+func (a *Assembler) Abandon(id string) bool {
+	a.init()
+
+	if a.transfers[id] == nil {
+		return false
+	}
+
+	a.drop(id)
+
+	return true
+}
+
 // drop forgets a transfer and takes its part file with it.
 func (a *Assembler) drop(id string) {
 	t := a.transfers[id]

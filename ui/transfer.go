@@ -294,6 +294,9 @@ const (
 
 // fileNote is the file-shaped row in the transcript.
 type fileNote struct {
+	// id is the transfer's identity on the wire, and what a Cancel reaches for.
+	// It is empty for a row that is not a live transfer.
+	id    string
 	name  string
 	size  int64
 	sent  int64
