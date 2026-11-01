@@ -186,3 +186,57 @@ func TestPeerNamePrefersTheHandshake(t *testing.T) {
 		}
 	})
 }
+
+// TestComposerHint checks what the message field promises: Enter starts a new
+// line on both platforms, and the hint names the action that sends — a key
+// combination on a desktop, the button on a phone, which has no Shift+Enter.
+func TestComposerHint(t *testing.T) {
+	tests := []struct {
+		name    string
+		stack   bool
+		want    string
+		mustHas string
+	}{
+		{"desktop", false, "Type a message… Enter starts a new line, Shift+Enter sends it", "Shift+Enter"},
+		{"touch", true, "Type a message… Enter starts a new line, Send sends it", "Send"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := composerHint(tt.stack)
+			if got != tt.want {
+				t.Errorf("composerHint(%v) = %q, want %q", tt.stack, got, tt.want)
+			}
+
+			// The hint has to keep saying what Enter does: a user who expects
+			// it to send reads a field that looks broken otherwise.
+			if !strings.Contains(got, "new line") {
+				t.Errorf("composerHint(%v) = %q, which does not say what Enter does", tt.stack, got)
+			}
+
+			if !strings.Contains(got, tt.mustHas) {
+				t.Errorf("composerHint(%v) = %q, which does not name %q", tt.stack, got, tt.mustHas)
+			}
+		})
+	}
+}
+
+// TestComposerRowCount checks the composer's height ceiling: a few lines and
+// then the text scrolls, with less room taken on a phone than on a desktop.
+func TestComposerRowCount(t *testing.T) {
+	desktop, touch := composerRowCount(false), composerRowCount(true)
+
+	if desktop != composerRowsDesktop || touch != composerRowsTouch {
+		t.Fatalf("composerRowCount = %d/%d, want %d/%d", desktop, touch, composerRowsDesktop, composerRowsTouch)
+	}
+
+	if touch > desktop {
+		t.Errorf("the phone gets %d rows and the desktop %d, want the phone to get no more", touch, desktop)
+	}
+
+	// Past half a dozen rows the field stops being a composer and starts being
+	// the screen; the transcript is what the window is for.
+	if desktop > 5 {
+		t.Errorf("the composer shows %d rows, want a small ceiling", desktop)
+	}
+}

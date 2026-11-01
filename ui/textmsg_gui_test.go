@@ -3,9 +3,15 @@
 package ui
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
@@ -147,4 +153,154 @@ func waitForMessages(t *testing.T, g *gui, n int) []chatMessage {
 	t.Fatalf("the transcript never reached %d rows", n)
 
 	return nil
+}
+
+// The composer is a chat field rather than a form field: Enter starts a new
+// line, Shift+Enter sends the whole body as one message, and the Send button is
+// the third way in — the only one a phone has, since its soft keyboard turns
+// the action key into a newline.
+//
+// The assertion that matters is the negative one: a finished line followed by
+// Enter must not send, because that is what a message typed in two parts used
+// to do.
+func TestComposerStartsANewLineAndSendsOnShiftEnter(t *testing.T) {
+	g := newTestGUI(t)
+
+	sess := newSendRecorder()
+	g.mu.Lock()
+	g.sess = sess
+	g.mu.Unlock()
+
+	if !g.entry.MultiLine {
+		t.Fatal("the composer is single-line, so a message can never be more than one line")
+	}
+
+	typeRunes(g.entry, "first line")
+	g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+	typeRunes(g.entry, "second line")
+
+	if got, want := g.entry.Text, "first line\nsecond line"; got != want {
+		t.Fatalf("after Enter the field reads %q, want %q", got, want)
+	}
+
+	select {
+	case <-sess.done:
+		t.Fatal("Enter sent the message, want a new line")
+	default:
+	}
+
+	g.entry.KeyDown(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+	g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+	g.entry.KeyUp(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+
+	// Ordinary text is handed over byte for byte — the envelope only wraps a
+	// line that begins with the magic — so the newline is what the peer gets.
+	if got, want := string(sess.wait(t)), "first line\nsecond line"; got != want {
+		t.Fatalf("sent %q, want %q", got, want)
+	}
+
+	if got := g.entry.Text; got != "" {
+		t.Errorf("the field still reads %q after sending, want it cleared", got)
+	}
+}
+
+// A long message must not grow the composer: the text scrolls inside the field
+// rather than pushing the transcript off the screen. Fyne sizes a multi-line
+// entry from its visible-row count, so the height the field reports is the same
+// before and after a paragraph is typed into it.
+func TestComposerKeepsItsHeightWhateverIsTyped(t *testing.T) {
+	g := newTestGUI(t)
+
+	before := test.WidgetRenderer(g.entry).MinSize().Height
+
+	g.entry.SetText(strings.Repeat("a line of a much longer message\n", 20))
+
+	after := test.WidgetRenderer(g.entry).MinSize().Height
+
+	if after > before {
+		t.Fatalf("the composer grew from %.1f to %.1f for a longer message, want a fixed height", before, after)
+	}
+}
+
+// typeRunes types one rune at a time, so the cursor follows the text the way a
+// keyboard leaves it — SetText would leave the cursor where it was.
+func typeRunes(entry *widget.Entry, text string) {
+	for _, r := range text {
+		entry.TypedRune(r)
+	}
+}
+
+// A multi-line message is trimmed at its ends and nowhere else: the line breaks
+// a user typed inside it are part of the message.
+func TestSendKeepsInnerNewlinesAndTrimsTheEnds(t *testing.T) {
+	g := newTestGUI(t)
+
+	sess := newSendRecorder()
+	g.mu.Lock()
+	g.sess = sess
+	g.mu.Unlock()
+
+	g.send("\n  first paragraph\n\nsecond paragraph  \n")
+
+	if got, want := string(sess.wait(t)), "first paragraph\n\nsecond paragraph"; got != want {
+		t.Fatalf("sent %q, want %q", got, want)
+	}
+}
+
+// A message of nothing but whitespace is not a message: the line breaks Enter
+// now types would otherwise be enough to send an empty line to the room.
+func TestSendRefusesAMessageOfOnlyWhitespace(t *testing.T) {
+	g := newTestGUI(t)
+
+	sess := newSendRecorder()
+	g.mu.Lock()
+	g.sess = sess
+	g.mu.Unlock()
+
+	g.entry.SetText(" \n\t\n ")
+
+	g.send(g.entry.Text)
+
+	select {
+	case <-sess.done:
+		t.Fatal("whitespace-only text reached the session, want nothing sent")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	g.mu.Lock()
+	messages := len(g.messages)
+	g.mu.Unlock()
+
+	if messages != 0 {
+		t.Errorf("the transcript has %d rows after a whitespace-only send, want none", messages)
+	}
+}
+
+// The transcript shows the line breaks: a row is a wrapping label whose item
+// height is taken from its minimum, so a message that is three lines tall has
+// to report a taller row than a one-line message at the same width — otherwise
+// the list clips it to its first line.
+func TestChatRowGrowsForAMultiLineMessage(t *testing.T) {
+	g := newTestGUI(t)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{
+		{text: "one line"},
+		{text: "first line\nsecond line\nthird line"},
+	}
+	g.mu.Unlock()
+
+	height := func(id int) float32 {
+		row := g.chatList.CreateItem()
+		row.Resize(fyne.NewSize(400, row.MinSize().Height))
+		g.updateChatRow(id, row)
+
+		return row.MinSize().Height
+	}
+
+	one, many := height(0), height(1)
+
+	if many <= one {
+		t.Fatalf("a three-line message reports %.1f and a one-line message %.1f, want the taller row to show its lines", many, one)
+	}
 }

@@ -9,6 +9,46 @@ import (
 // without limit. The oldest line and its row are dropped together.
 const maxMessages = 500
 
+// composerRowsDesktop and composerRowsTouch are how many lines the message
+// field shows before the text scrolls inside it. A phone gets one row fewer:
+// the transcript above it has less room to spare, and the Send button sits
+// under the field rather than beside it.
+const (
+	composerRowsDesktop = 4
+	composerRowsTouch   = 3
+)
+
+// composerRowCount is the visible-row count for the layout in force.
+//
+// It is a ceiling, not a starting size: Fyne sizes a multi-line entry from its
+// row count rather than from the text in it, so the composer is the same height
+// whether it holds one line or twenty. Growing with the text would mean a
+// scroll wrapper with a height recomputed on every keystroke, and this layout
+// has been broken by height arithmetic before (#186, #189).
+func composerRowCount(stack bool) int {
+	if stack {
+		return composerRowsTouch
+	}
+
+	return composerRowsDesktop
+}
+
+// composerHint is the message field's placeholder. The two platforms differ in
+// exactly one thing — how a message is sent — so the hint names that, and both
+// say that Enter starts a new line: a user who expects Enter to send would
+// otherwise think the field was broken.
+//
+// The phone has no Shift+Enter to press — its soft keyboard turns the action
+// key into a newline for a multi-line field — so the button is what the touch
+// hint names.
+func composerHint(stack bool) string {
+	if stack {
+		return "Type a message… Enter starts a new line, Send sends it"
+	}
+
+	return "Type a message… Enter starts a new line, Shift+Enter sends it"
+}
+
 // chatMessage is one line of the transcript: what was said, and who said it. A
 // message the user typed themselves carries no sender and renders as "You".
 //

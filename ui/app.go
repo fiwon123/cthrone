@@ -373,8 +373,19 @@ func (g *gui) build() {
 	)
 	g.chatList.OnSelected = g.selectChatRow
 
-	g.entry = widget.NewEntry()
-	g.entry.SetPlaceHolder("Type a message…")
+	// The composer is a chat field, not a form field: a message can be more
+	// than one line, Enter starts a new line, and sending is a deliberate
+	// action. Fyne already implements that half for a multi-line entry — it
+	// stores Enter as a newline and calls OnSubmitted on Shift+Enter — so the
+	// only thing left to wire is the same send the button calls.
+	//
+	// A word-wrapped body and a small visible-row count together keep the
+	// composer's height fixed: a long paragraph scrolls inside the field
+	// instead of pushing the transcript off the screen.
+	g.entry = widget.NewMultiLineEntry()
+	g.entry.Wrapping = fyne.TextWrapWord
+	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
+	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
