@@ -539,11 +539,13 @@ The app has four tabs:
   multi-line message travels as one message and keeps its line breaks. An
   arriving message is labelled with the device name and, on a websocket, the
   address it came from — `laptop (192.168.1.20:51234)` — because a name alone
-  does not say which machine on the network it is. Tap a message to
-  copy it, or drag to select a part of it; **Copy all** copies the whole
-  conversation. Every message, address and error is selectable text, and an
-  error dialog carries a **Copy** button, so a failure can be pasted into a bug
-  report instead of retyped from a screenshot.
+  does not say which machine on the network it is. Tap a message to copy it —
+  or hold it still for a moment to select part of it and get a **Copy** menu,
+  the phone's gesture, because the drag belongs to the scrolling pane; on a
+  desktop the drag selects, as it does everywhere. **Copy all** copies the whole
+  conversation. Every message, status line and address is selectable text that
+  way, and an error dialog carries a **Copy** button, so a failure can be
+  pasted into a bug report instead of retyped from a screenshot.
 - **Setup** — the port, the credential (device key by default, or a shared
   secret), the transport and the TLS options, with **Host** and **Connect**.
   The transport is WebSocket, NATS, or Bluetooth where the build carries it —
@@ -566,7 +568,8 @@ The app has four tabs:
 
 Any button or tab label can be copied with a **long press**; on a desktop the
 same gesture is a right-click. A short **Copied** hint confirms it, and a
-normal tap still does what the button is for.
+normal tap still does what the button is for. Text works the other way round:
+a tap still does what it did, and the long press is what selects.
 
 A phone that hosts shows **its own fingerprint** in a dialog. Nothing is copied
 to the other device: connect to the phone and compare the fingerprints each
