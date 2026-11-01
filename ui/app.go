@@ -1281,7 +1281,7 @@ func (g *gui) scan() {
 				return
 			}
 
-			g.setStatus(fmt.Sprintf("Found %d host(s) — tap one to connect", len(found)))
+			g.setStatus(fmt.Sprintf("Found %d host(s) — tap one, then Connect", len(found)))
 		})
 	}()
 }
@@ -1319,7 +1319,7 @@ func (g *gui) scanBluetooth(mode transportMode) {
 				return
 			}
 
-			g.setStatus(fmt.Sprintf("Found %d Bluetooth device(s) — tap one to connect", found))
+			g.setStatus(fmt.Sprintf("Found %d Bluetooth device(s) — tap one, then Connect", found))
 		})
 	}()
 }
@@ -1399,7 +1399,7 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 		g.portEntry.SetText(strconv.Itoa(beacon.Port))
 	}
 
-	g.setStatus("Selected " + deviceLabel(beacon.Beacon))
+	g.setStatus("Selected " + deviceLabel(beacon.Beacon) + " — press Connect")
 	g.tabs.SelectIndex(1)
 	g.beaconList.UnselectAll()
 }
