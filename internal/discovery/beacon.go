@@ -27,9 +27,21 @@ type entry struct {
 	seen   time.Time
 }
 
-// BeaconPort is the fixed UDP port beacons are sent to and read from. It is
-// not the chat port: a beacon says where the chat port is.
-const BeaconPort = 9999
+const (
+	// BeaconPort is the fixed UDP port beacons are sent to and read from. It is
+	// not the chat port: a beacon says where the chat port is.
+	BeaconPort = 9999
+
+	// MaxBeacons bounds how many devices one listener remembers.
+	//
+	// A beacon is unauthenticated and comes from anyone on the segment, so the
+	// list it feeds is written by whoever chooses to send one. Without a bound,
+	// a flood of made-up addresses grows the map until the process runs out of
+	// memory: a local attacker, or a broken host, takes the app down by talking.
+	// A /24 has at most 254 addresses, so a little more than that is the whole
+	// of a network and enough headroom for a second segment's seeds.
+	MaxBeacons = 320
+)
 
 // Announcer broadcasts beacons on UDP, and announces to named hosts as well.
 //
@@ -184,12 +196,38 @@ func (l *Listener) Start() {
 // device heard twice stays one entry.
 func (l *Listener) observe(b Beacon, at time.Time) {
 	l.mu.Lock()
-	l.found[beaconKey(b)] = entry{beacon: b, seen: at}
+
+	key := beaconKey(b)
+	if _, known := l.found[key]; !known && len(l.found) >= MaxBeacons {
+		// A new device on a full list evicts the quietest one: evicting the
+		// newest instead would let a flood hide every real device for as long as
+		// it kept talking.
+		l.evictOldest()
+	}
+
+	l.found[key] = entry{beacon: b, seen: at}
 	fn := l.onFound
 	l.mu.Unlock()
 
 	if fn != nil {
 		fn(b)
+	}
+}
+
+// evictOldest drops the device that has been quiet longest, so a new one can be
+// remembered. The caller holds the lock.
+func (l *Listener) evictOldest() {
+	oldestKey := ""
+	oldest := time.Time{}
+
+	for key, e := range l.found {
+		if oldestKey == "" || e.seen.Before(oldest) {
+			oldestKey, oldest = key, e.seen
+		}
+	}
+
+	if oldestKey != "" {
+		delete(l.found, oldestKey)
 	}
 }
 
