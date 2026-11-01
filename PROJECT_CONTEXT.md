@@ -169,7 +169,7 @@ tag, `ui.Run` prints a message and exits, so the CLI needs no GUI toolkit.
 ## Directory Layout
 
 ```text
-cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec (+ the assets package)
+cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec, update (+ the assets package)
 internal/core/       one package per transport (websocket, nats, bluetooth)
 internal/handlers/   one package per transport (websocket, nats, bluetooth)
 internal/data/app/   the in-memory configuration
