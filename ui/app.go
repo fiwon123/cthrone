@@ -528,17 +528,11 @@ func (g *gui) build() {
 	// of one transport never leaves the other's rows in the way.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.visibleBeacons()) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			rows := g.visibleBeacons()
-			if id < 0 || id >= len(rows) {
-				return
-			}
-
-			if lbl, ok := obj.(*widget.Label); ok {
-				lbl.SetText(deviceLabel(rows[id].Beacon))
-			}
-		},
+		// A row is text a user copies, so it is the same wrapper the transcript
+		// uses: on a phone a long press selects the address, and the tap keeps
+		// the action the list gave it — filling the address field.
+		func() fyne.CanvasObject { return g.text("") },
+		g.updateBeaconRow,
 	)
 	g.beaconList.OnSelected = g.selectBeacon
 
@@ -1266,6 +1260,26 @@ func (g *gui) scanBluetooth(mode transportMode) {
 			g.setStatus(fmt.Sprintf("Found %d Bluetooth device(s) — tap one to connect", found))
 		})
 	}()
+}
+
+// updateBeaconRow fills one device row: the text, and the tap the list would
+// have handled before the row became a long-press widget.
+//
+// It is a method rather than a closure so a test can drive the real binding
+// instead of rebuilding what it thinks the binding does.
+func (g *gui) updateBeaconRow(id widget.ListItemID, obj fyne.CanvasObject) {
+	rows := g.visibleBeacons()
+	if id < 0 || id >= len(rows) {
+		return
+	}
+
+	label, ok := obj.(*widgets.Text)
+	if !ok {
+		return
+	}
+
+	label.SetText(deviceLabel(rows[id].Beacon))
+	label.SetOnTapped(func() { g.beaconList.Select(id) })
 }
 
 // visibleBeacons is the rows the Devices list shows for the transport in force.
