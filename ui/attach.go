@@ -23,6 +23,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
@@ -213,6 +214,10 @@ func (g *gui) sendTransfer(item outgoing) {
 		g.updateTransfer(item.note, transferSent)
 
 	case errors.Is(err, context.Canceled):
+		// Tell the other side rather than leaving it holding a half file until
+		// its assembler times out. Best effort: a session that has gone away
+		// carries nothing, and the timeout is still the backstop.
+		g.sendAbort(sess, item.id)
 		g.removeTransfer(item.note)
 		g.setStatus("Sending " + item.name + " cancelled")
 
@@ -220,6 +225,45 @@ func (g *gui) sendTransfer(item outgoing) {
 		g.updateTransfer(item.note, transferFailed)
 		g.setStatus("Sending " + item.name + " failed: " + err.Error())
 	}
+}
+
+// sendAbort tells the peer that a transfer will send no more bytes.
+func (g *gui) sendAbort(sess session.Session, id string) {
+	frame, err := wire.Encode(wire.Header{Kind: wire.KindAbort, ID: id}, nil)
+	if err != nil {
+		return
+	}
+
+	_ = sess.Send(frame)
+}
+
+// receiveAbort is the other end of sendAbort: the sender gave up, so what was
+// being assembled is dropped and the row goes.
+//
+// It runs on the receive goroutine, which is the one that owns the assembler.
+func (g *gui) receiveAbort(from, id string) {
+	g.mu.Lock()
+	entry := g.incoming[id]
+	delete(g.incoming, id)
+	assembler := g.assembler
+	g.mu.Unlock()
+
+	if assembler != nil {
+		assembler.Abandon(id)
+	}
+
+	if entry == nil {
+		return
+	}
+
+	g.removeTransfer(entry.note)
+
+	name := entry.note.name
+	if name == "" {
+		name = "the file"
+	}
+
+	g.setStatus(from + " cancelled " + name)
 }
 
 // trackTransfer remembers how to cancel a transfer, so Stop can reach it.
@@ -555,6 +599,12 @@ func (g *gui) receiveFrame(from string, payload []byte) {
 
 	if frame.Header.Kind == wire.KindText {
 		g.addMessage(chatMessage{from: from, text: string(frame.Payload)})
+
+		return
+	}
+
+	if frame.Header.Kind == wire.KindAbort {
+		g.receiveAbort(from, frame.Header.ID)
 
 		return
 	}
