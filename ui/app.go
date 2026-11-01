@@ -41,6 +41,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
+	updatepkg "github.com/fiwon123/cthrone/internal/update"
 	"github.com/fiwon123/cthrone/internal/wire"
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
@@ -138,6 +139,7 @@ type gui struct {
 	aboutCredential *widget.Label
 	aboutNote       *widget.Label
 	updateBtn       *widgets.CopyButton
+	releaseBtn      *widgets.CopyButton
 
 	// chat
 	tabs      *widgets.Tabs
@@ -1769,6 +1771,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 
 	g.updateBtn = widgets.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates, g.copyLabel)
 
+	g.releaseBtn = widgets.NewButtonWithIcon("Release page", theme.DownloadIcon(), g.openReleasePage, g.copyLabel)
+
 	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
@@ -1780,6 +1784,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		g.updateBtn,
 		g.aboutNote,
 		note,
+		g.releaseBtn,
 	)
 
 	// The credential line was filled in before this tab existed, so it is
@@ -1807,15 +1812,33 @@ func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 // reason a desktop has no browser or a phone has no handler, and a swallowed
 // one leaves the user clicking a dead button.
 func (g *gui) openRepository() {
-	link, err := url.Parse(RepositoryURL)
+	g.openPage(RepositoryURL)
+}
+
+// openReleasePage opens the release page: the list the update check's answer
+// points at, so a user who has just been told a newer release exists can reach
+// it without going to find the repository first.
+func (g *gui) openReleasePage() {
+	g.openPage(ReleasesURL)
+}
+
+// openPage opens an address in the platform's browser, reporting a failure.
+//
+// The opener is a variable so a test can see which address a button asked for:
+// the failure this guards against is a button wired to the wrong URL, which
+// looks identical to a working one until somebody taps it.
+var openPageInBrowser = func(app fyne.App, link *url.URL) error { return app.OpenURL(link) }
+
+func (g *gui) openPage(address string) {
+	link, err := url.Parse(address)
 	if err != nil {
 		g.showError(err)
 
 		return
 	}
 
-	if err := g.app.OpenURL(link); err != nil {
-		g.showError(fmt.Errorf("could not open %s: %w", RepositoryURL, err))
+	if err := openPageInBrowser(g.app, link); err != nil {
+		g.showError(fmt.Errorf("could not open %s: %w", address, err))
 	}
 }
 
@@ -1824,6 +1847,8 @@ func (g *gui) openRepository() {
 // The answer is always written back through fyne.Do, including the failures: a
 // button left disabled or a note left saying "Checking…" is the spinner that
 // never resolves this tab is built to avoid.
+var checkReleaseURL = updatepkg.LatestReleaseURL
+
 func (g *gui) checkUpdates() {
 	if g.updateBtn != nil {
 		g.updateBtn.Disable()
@@ -1832,10 +1857,10 @@ func (g *gui) checkUpdates() {
 	g.setAboutNote("Checking…")
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), updatepkg.CheckTimeout)
 		defer cancel()
 
-		tag, err := latestReleaseTag(ctx, &http.Client{Timeout: updateCheckTimeout}, LatestReleaseURL)
+		tag, err := updatepkg.LatestTag(ctx, &http.Client{Timeout: updatepkg.CheckTimeout}, checkReleaseURL)
 
 		fyne.Do(func() {
 			if g.updateBtn != nil {
@@ -1848,7 +1873,7 @@ func (g *gui) checkUpdates() {
 				return
 			}
 
-			g.setAboutNote(updateText(aboutVersion(Version, g.app.Metadata().Version), tag))
+			g.setAboutNote(aboutUpdateText(aboutVersion(Version, g.app.Metadata().Version), tag))
 		})
 	}()
 }
