@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -497,5 +498,139 @@ func fileChunkHeader(id, name string, size int64, index int) wire.Header {
 		Size:   size,
 		Index:  index,
 		Chunks: wire.Chunks(size),
+	}
+}
+
+// recordingSession records what reaches the wire, and holds only file frames:
+// text goes straight through while a file is held between chunks. That is the
+// property #238 asks for — a transfer in flight does not block the conversation
+// — made observable without a socket.
+type recordingSession struct {
+	*session.Base
+
+	mu      sync.Mutex
+	order   []string
+	held    chan struct{}
+	release chan struct{}
+}
+
+func newRecordingSession() *recordingSession {
+	return &recordingSession{
+		Base:    session.NewBase("alice", "alice:8080"),
+		held:    make(chan struct{}, 16),
+		release: make(chan struct{}),
+	}
+}
+
+func (s *recordingSession) Send(payload []byte) error {
+	kind := "text"
+
+	if frame, err := wire.Parse(payload); err == nil && frame.Header.Kind == wire.KindFile {
+		kind = "file"
+	}
+
+	s.mu.Lock()
+	s.order = append(s.order, kind)
+	s.mu.Unlock()
+
+	if kind == "file" {
+		select {
+		case s.held <- struct{}{}:
+		default:
+		}
+
+		<-s.release
+	}
+
+	return nil
+}
+
+func (s *recordingSession) Close(reason string) { s.NotifyClose(reason) }
+
+func (s *recordingSession) kinds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]string(nil), s.order...)
+}
+
+// A text message sent while a file is on its way reaches the wire between two
+// chunks, not after the file: the conversation does not wait for the transfer.
+func TestTextFlowsWhileAFileIsSending(t *testing.T) {
+	dir := t.TempDir()
+	staged := dir + "/.cthrone-send-1"
+
+	// Two chunks and an end frame, so there is a "between chunks" to land in.
+	body := bytes.Repeat([]byte("x"), int(wire.ChunkSize)+1)
+	if err := os.WriteFile(staged, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+
+	recorder := newRecordingSession()
+	g.mu.Lock()
+	g.sess = recorder
+	g.mu.Unlock()
+
+	note := &fileNote{id: "send-1", name: "clip.mp3", size: int64(len(body)), state: transferSending}
+	item := outgoing{id: "send-1", name: "clip.mp3", mime: "audio/mpeg", path: staged, size: int64(len(body)), note: note}
+
+	go g.sendTransfer(item)
+
+	// The first chunk is held: the file is in flight and the wire is busy.
+	select {
+	case <-recorder.held:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the transfer never started sending")
+	}
+
+	// A text message while that is true.
+	g.send("hello from the composer")
+
+	deadline := time.After(2 * time.Second)
+
+	for {
+		kinds := recorder.kinds()
+		if len(kinds) >= 2 && kinds[1] == "text" {
+			break
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("the text never reached the wire while the file was held: %v", kinds)
+		default:
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+
+	// Let the transfer finish.
+	go func() {
+		for {
+			select {
+			case <-recorder.held:
+			case <-time.After(200 * time.Millisecond):
+				return
+			}
+		}
+	}()
+
+	for i := 0; i < 8; i++ {
+		select {
+		case recorder.release <- struct{}{}:
+		default:
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	kinds := recorder.kinds()
+
+	if len(kinds) < 2 || kinds[0] != "file" {
+		t.Fatalf("the wire saw %v, want the file first", kinds)
+	}
+
+	if kinds[1] != "text" {
+		t.Errorf("the wire saw %v, want the text between the file's chunks", kinds)
 	}
 }
