@@ -564,7 +564,10 @@ The app has four tabs:
   **Setup** instead, as *This device — &lt;address&gt;:&lt;port&gt;*, limited to
   the addresses a peer on that network can reach.
 - **About** — the build version, the repository link and a **Check for
-  updates** button that asks, and only reports, whether a newer release exists.
+  updates** button. When it finds a newer release it offers to **install** it:
+  the download is checked against the release's own `checksums.txt` before
+  anything is replaced, the binary it replaces is kept beside it, and
+  **Revert to previous** puts that one back without a network call.
 
 Any button or tab label can be copied with a **long press**; on a desktop the
 same gesture is a right-click. A short **Copied** hint confirms it, and a
@@ -629,6 +632,29 @@ What the Android CLI does and does not give you:
   [reporting](https://github.com/fiwon123/cthrone/issues) rather than a
   surprise.
 
+### Keeping it up to date
+
+`cthrone update --check` asks the public release list whether a newer version
+exists. On a desktop the About tab's **Check for updates** does the same, and
+when it finds one it offers to install it — so does
+`cthrone update --install`, which takes `--to <tag>` to go to a version other
+than the newest.
+
+The install is deliberately conservative:
+
+- the download is checked against the **`checksums.txt` the release publishes**
+  before anything is replaced; a mismatch aborts and prints both hashes;
+- the swap is a rename of a fully written file, so an interrupted run leaves a
+  working binary — the old one or the new one, never a truncated one;
+- the binary it replaces is kept beside it as `<name>.previous`, and
+  `cthrone update --revert` (or **Revert to previous** on the About tab) swaps
+  it back with no network call. Reverting twice returns to where you started.
+
+Only the binary that is running is replaced. The rest of the archive — the `ct`
+alias, the window build, the docs — is left alone; unpack the archive for those.
+Android is not covered by this: an APK is installed by the phone's own installer,
+so the app links to the release page instead.
+
 ## Commands
 
 | Command | What it does |
@@ -640,7 +666,9 @@ What the Android CLI does and does not give you:
 | `cthrone ui` | same as `cthrone_gui` when built with `-tags gui`; the release CLI binaries only print a message — use the GUI archive's `cthrone_gui` |
 | `cthrone recv` | opt-in remote command receiver with allowlist and audit logging |
 | `cthrone exec <device> -- <cmd>` | run a command via an opt-in receiver (allowlist + logging enforced) |
-| `cthrone update --check` | ask the public release list whether a newer version exists; names the archive for this platform and exits 0 either way — non-zero only when the check could not be made. Nothing is installed yet (#214) |
+| `cthrone update --check` | ask the public release list whether a newer version exists; names the archive for this platform and exits 0 either way — non-zero only when the check could not be made |
+| `cthrone update --install [--to <tag>]` | replace this binary with the one from the newest published release, or the one named by `--to`; the download is verified against the release's `checksums.txt` first, and the binary it replaces is kept as `<name>.previous` |
+| `cthrone update --revert` | put the previous binary back, without a network call |
 
 | Flag | What it does |
 |---|---|
