@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/test"
 
 	installpkg "github.com/fiwon123/cthrone/internal/install"
 )
@@ -273,5 +274,30 @@ func TestRevertFailureIsReported(t *testing.T) {
 
 	if !strings.Contains(note, "no previous binary") {
 		t.Errorf("the note = %q, want it to carry the reason", note)
+	}
+}
+
+// The About tab links the walk-through, because the README is the release
+// claim and the wiki is the page a user at "how do I host?" actually wants.
+func TestAboutWikiButtonOpensTheWiki(t *testing.T) {
+	g := newScreenGUI(t, false)
+	recorder := withOpener(t)
+
+	if g.wikiBtn == nil {
+		t.Fatal("the About tab has no wiki button")
+	}
+
+	test.Tap(g.wikiBtn)
+
+	if len(recorder.opened) != 1 {
+		t.Fatalf("the wiki button opened %v, want one address", recorder.opened)
+	}
+
+	if got, want := recorder.opened[0], WikiURL; got != want {
+		t.Errorf("the wiki button opened %q, want %q", got, want)
+	}
+
+	if !strings.HasSuffix(WikiURL, "/cthrone/wiki") {
+		t.Errorf("WikiURL = %q, want the repository's wiki", WikiURL)
 	}
 }
