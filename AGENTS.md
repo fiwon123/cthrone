@@ -28,7 +28,8 @@ through a NATS broker.
 - **Language**: Go 1.26.10 (pinned in `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default), nats-io/nats.go (`--nats`), and
-  tinygo.org/x/bluetooth over BlueZ/D-Bus (`--bluetooth`, Linux only)
+  tinygo.org/x/bluetooth (`--bluetooth`: BlueZ over D-Bus on Linux, WinRT on
+  Windows — the Windows path is compiled and never run)
 - **Terminal handling**: golang.org/x/term
 - **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
@@ -86,7 +87,10 @@ interchangeable", and the exception is the radio's, not a shortcut:
   file chunk is thousands of notifications. Nothing refuses a file frame, and
   nothing offers one on a radio host: the terminal has no file support, and the
   GUI's transfer would arrive eventually, not usefully;
-- **Linux only, for now** — the GATT layer speaks BlueZ over D-Bus, and
+- **Linux and Windows** — the GATT layer speaks whatever stack the library
+  selects: BlueZ over D-Bus on Linux, WinRT on Windows. The Windows path
+  **compiles and has never been run** (no Windows machine and no radio in the
+  environment it was written in), so its behaviour is an open question on #215.
   `internal/core/bluetooth/unsupported.go` refuses everywhere else. The Android
   binding is a separate piece of work (issue #206): a phone build has no
   `--bluetooth` transport and the GUI does not offer the option.
@@ -98,7 +102,7 @@ refused, exactly as on a websocket.
 ## Project Structure
 
 ```text
-cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec
+cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec, update
 internal/core/       one package per transport (websocket, nats, bluetooth)
 internal/handlers/   one package per transport (websocket, nats, bluetooth)
 internal/data/app/   the in-memory configuration
@@ -164,19 +168,21 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 29 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 32 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (29 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (32 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
-  `cmd/recv`, `cmd/scan`, `cmd/ui`, `internal/auth`, `internal/chat`,
-  `internal/core/bluetooth`, `internal/core/nats`, `internal/core/websocket`
-  (the scanner included), `internal/data/app`, `internal/discovery`,
-  `internal/e2e`, `internal/exec`, `internal/handlers/bluetooth` (framing,
-  reassembly and keepalive — portable, so tested without a radio),
-  `internal/handlers/nats`, `internal/handlers/websocket`, `internal/pairing`,
-  `internal/session`, `internal/shutdown`, `internal/wire`, `mobile`, `ui` (its
+  `cmd/recv`, `cmd/scan`, `cmd/ui`, `cmd/update`, `internal/auth`,
+  `internal/chat`, `internal/core/bluetooth`, `internal/core/nats`,
+  `internal/core/websocket` (the scanner included), `internal/data/app`,
+  `internal/discovery`, `internal/e2e`, `internal/exec`,
+  `internal/handlers/bluetooth` (framing, reassembly and keepalive —
+  portable, so tested without a radio), `internal/handlers/nats`,
+  `internal/handlers/websocket`, `internal/install`, `internal/pairing`,
+  `internal/session`, `internal/shutdown`, `internal/update`, `internal/wire`,
+  `mobile`, `ui` (its
   non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
   copyable button and tab bar), and the gui-tagged widget tree (headless — see
   below).

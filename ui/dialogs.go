@@ -21,8 +21,8 @@ import (
 // into drag-selectable text with the platform's copy shortcut, which is what a
 // bug report needs. On a touch screen the same drag has to reach the scroll
 // container underneath, or a pane cannot be scrolled by starting the gesture on
-// text, so selection is off there and copying goes through a tap on the row or
-// an explicit Copy button.
+// text — so a line a user reads on a phone is made with text below, which takes
+// the selection on a long press and leaves the drag to the pane.
 //
 // It delegates so the one definition of "selectable" lives in ui/widgets,
 // beside the caption and form helpers that need the same behaviour.
@@ -33,6 +33,23 @@ func (g *gui) label(text string) *widget.Label {
 // heading is label for a tab's or a section's title.
 func (g *gui) heading(text string) *widget.Label {
 	return widgets.Heading(text, !g.mobile)
+}
+
+// text is label for text a touch screen must be able to select on a long press:
+// the transcript, the status and hint lines, and the read-only values on Setup
+// and About.
+//
+// It is not the default for every label because it costs a tap callback: on a
+// phone it is the object the driver hands a tap to, so a line whose tap means
+// something has to say what that is. A heading or a caption nobody selects
+// keeps the plain label.
+func (g *gui) text(text string) *widgets.Text {
+	return widgets.NewText(text, g.mobile)
+}
+
+// textHeading is text in bold: the same rule, for a title.
+func (g *gui) textHeading(text string) *widgets.Text {
+	return widgets.NewHeading(text, g.mobile)
 }
 
 // fitDialogText is the size of a dialog's message box, kept inside the window.

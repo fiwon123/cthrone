@@ -41,6 +41,7 @@ import (
 	"github.com/fiwon123/cthrone/internal/e2e"
 	"github.com/fiwon123/cthrone/internal/pairing"
 	"github.com/fiwon123/cthrone/internal/session"
+	updatepkg "github.com/fiwon123/cthrone/internal/update"
 	"github.com/fiwon123/cthrone/internal/wire"
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
@@ -112,19 +113,19 @@ type gui struct {
 	moreBtn     *widgets.CopyButton
 	formHolder  *fyne.Container
 	transport   *widget.Select
-	hint        *widget.Label
+	hint        *widgets.Text
 
 	// thisDevice is the read-only line that shows a hosting device its own
 	// address. It is hidden until this device hosts: the Devices list never
 	// lists this device, so this is where its address lives.
-	thisDevice *widget.Label
+	thisDevice *widgets.Text
 
 	// credential is the read-only line that names the credential in force and
 	// where it came from — this device's key, or a shared secret typed here or
 	// set in the environment. It also reports a token file an older version
 	// left behind: that file decides nothing now, and a user who is told so is
 	// the one who can stop looking for the cause in the wrong place.
-	credential *widget.Label
+	credential *widgets.Text
 
 	// forgetSecret deletes the token file an older version read. It decides
 	// nothing now, so the button is an offer to remove a leftover that used to
@@ -135,13 +136,20 @@ type gui struct {
 	// and — on a press, never on a start — whether there is a newer release.
 	// aboutCredential repeats the Setup tab's line, because "which model am I
 	// in?" belongs on the screen a bug report is written from.
-	aboutCredential *widget.Label
-	aboutNote       *widget.Label
+	aboutCredential *widgets.Text
+	aboutNote       *widgets.Text
 	updateBtn       *widgets.CopyButton
+	releaseBtn      *widgets.CopyButton
+	installBtn      *widgets.CopyButton
+	revertBtn       *widgets.CopyButton
+
+	// aboutOffer is the release the check found and the Install button offers;
+	// empty means this build is the newest one, and the button is hidden.
+	aboutOffer string
 
 	// chat
 	tabs      *widgets.Tabs
-	status    *widget.Label
+	status    *widgets.Text
 	chatList  *widget.List
 	entry     *widget.Entry
 	sendBtn   *widgets.CopyButton
@@ -171,7 +179,7 @@ type gui struct {
 	beacons    []device
 	beaconList *widget.List
 	scanBtn    *widgets.CopyButton
-	listHint   *widget.Label
+	listHint   *widgets.Text
 	listener   *discovery.Listener
 
 	mu     sync.Mutex
@@ -343,8 +351,8 @@ func (g *gui) build() {
 	header.Add(filesBtn)
 	header.Add(copyBtn)
 
-	g.status = g.label("Ready — open Setup to connect or host.")
-	g.status.TextStyle = fyne.TextStyle{Bold: true}
+	g.status = g.text("Ready — open Setup to connect or host.")
+	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -358,7 +366,7 @@ func (g *gui) build() {
 	g.chatList = widget.NewList(
 		func() int { return len(g.messages) },
 		func() fyne.CanvasObject {
-			row := g.label("")
+			row := g.text("")
 
 			pic := canvas.NewImageFromResource(nil)
 			pic.FillMode = canvas.ImageFillContain
@@ -373,8 +381,19 @@ func (g *gui) build() {
 	)
 	g.chatList.OnSelected = g.selectChatRow
 
-	g.entry = widget.NewEntry()
-	g.entry.SetPlaceHolder("Type a message…")
+	// The composer is a chat field, not a form field: a message can be more
+	// than one line, Enter starts a new line, and sending is a deliberate
+	// action. Fyne already implements that half for a multi-line entry — it
+	// stores Enter as a newline and calls OnSubmitted on Shift+Enter — so the
+	// only thing left to wire is the same send the button calls.
+	//
+	// A word-wrapped body and a small visible-row count together keep the
+	// composer's height fixed: a long paragraph scrolls inside the field
+	// instead of pushing the transcript off the screen.
+	g.entry = widget.NewMultiLineEntry()
+	g.entry.Wrapping = fyne.TextWrapWord
+	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
+	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
@@ -458,9 +477,9 @@ func (g *gui) build() {
 
 	// The transport select is the one control for the carrier: the three are
 	// exclusive, so three checkboxes would be three ways to disagree. It is
-	// built from transportNames, which leaves the radio out of a build that
-	// cannot run it.
-	g.transport = widget.NewSelect(transportNames(g.mobile), func(string) {
+	// built from transportNames over this build's capability, so a binary
+	// without the radio does not offer it at all.
+	g.transport = widget.NewSelect(transportNames(bluetoothSupported()), func(string) {
 		g.rebuildSetupForm()
 		g.refreshDeviceList()
 	})
@@ -475,12 +494,12 @@ func (g *gui) build() {
 
 	actions := container.NewGridWithColumns(2, g.hostBtn, g.connectBtn)
 
-	g.hint = g.label("")
+	g.hint = g.text("")
 
-	g.thisDevice = g.label("")
+	g.thisDevice = g.text("")
 	g.thisDevice.Hide()
 
-	g.credential = g.label("")
+	g.credential = g.text("")
 
 	g.forgetSecret = widgets.NewButtonWithIcon("Delete the old token file", theme.ContentClearIcon(), g.forgetSecretFile, g.copyLabel)
 	g.forgetSecret.Hide()
@@ -509,24 +528,18 @@ func (g *gui) build() {
 	// of one transport never leaves the other's rows in the way.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.visibleBeacons()) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			rows := g.visibleBeacons()
-			if id < 0 || id >= len(rows) {
-				return
-			}
-
-			if lbl, ok := obj.(*widget.Label); ok {
-				lbl.SetText(deviceLabel(rows[id].Beacon))
-			}
-		},
+		// A row is text a user copies, so it is the same wrapper the transcript
+		// uses: on a phone a long press selects the address, and the tap keeps
+		// the action the list gave it — filling the address field.
+		func() fyne.CanvasObject { return g.text("") },
+		g.updateBeaconRow,
 	)
 	g.beaconList.OnSelected = g.selectBeacon
 
 	// The beacon hint wraps on a phone, where the button and the sentence do
 	// not share a line without the sentence running off the screen.
 	var beaconHeader fyne.CanvasObject
-	g.listHint = g.label(scanHint(transportWebsocket))
+	g.listHint = g.text(scanHint(transportWebsocket))
 	if g.lay.Stack {
 		beaconHeader = container.NewVBox(g.scanBtn, g.listHint)
 	} else {
@@ -1249,6 +1262,26 @@ func (g *gui) scanBluetooth(mode transportMode) {
 	}()
 }
 
+// updateBeaconRow fills one device row: the text, and the tap the list would
+// have handled before the row became a long-press widget.
+//
+// It is a method rather than a closure so a test can drive the real binding
+// instead of rebuilding what it thinks the binding does.
+func (g *gui) updateBeaconRow(id widget.ListItemID, obj fyne.CanvasObject) {
+	rows := g.visibleBeacons()
+	if id < 0 || id >= len(rows) {
+		return
+	}
+
+	label, ok := obj.(*widgets.Text)
+	if !ok {
+		return
+	}
+
+	label.SetText(deviceLabel(rows[id].Beacon))
+	label.SetOnTapped(func() { g.beaconList.Select(id) })
+}
+
 // visibleBeacons is the rows the Devices list shows for the transport in force.
 func (g *gui) visibleBeacons() []device {
 	return visibleDevices(g.beacons, g.mode())
@@ -1482,7 +1515,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		return
 	}
 
-	label, _ := row.Objects[0].(*widget.Label)
+	label, _ := row.Objects[0].(*widgets.Text)
 	pic, _ := row.Objects[1].(*canvas.Image)
 	save, _ := row.Objects[2].(*widgets.CopyButton)
 
@@ -1492,6 +1525,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	m := g.messages[id]
 	label.SetText(m.line())
+	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, save)
 
 	width := row.Size().Width
@@ -1744,8 +1778,8 @@ func (g *gui) tokenFile() string {
 func (g *gui) buildAbout() fyne.CanvasObject {
 	version := aboutVersion(Version, g.app.Metadata().Version)
 
-	g.aboutCredential = g.label("")
-	g.aboutNote = g.label("")
+	g.aboutCredential = g.text("")
+	g.aboutNote = g.text("")
 
 	// The name is the heading and the version sits under it, rather than the
 	// two sharing one line: at phone width "cthrone v0.8.3" in a horizontal box
@@ -1754,9 +1788,20 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	header := g.aboutHeader(version)
 
 	repoBtn := widgets.NewButtonWithIcon("Open", theme.InfoIcon(), g.openRepository, g.copyLabel)
-	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.label(RepositoryURL))
+	repoLine := container.NewBorder(nil, nil, nil, repoBtn, g.text(RepositoryURL))
 
 	g.updateBtn = widgets.NewButtonWithIcon("Check for updates", theme.ViewRefreshIcon(), g.checkUpdates, g.copyLabel)
+
+	g.releaseBtn = widgets.NewButtonWithIcon("Release page", theme.DownloadIcon(), g.openReleasePage, g.copyLabel)
+
+	// The install and the way back start hidden: one appears when a check finds
+	// a newer release, the other when there is a previous binary beside this
+	// one. A button that can only fail reads as a broken feature.
+	g.installBtn = widgets.NewButtonWithIcon("Install", theme.DownloadIcon(), g.installRelease, g.copyLabel)
+	g.installBtn.Hide()
+
+	g.revertBtn = widgets.NewButtonWithIcon("Revert to previous", theme.ContentUndoIcon(), g.revertRelease, g.copyLabel)
+	g.revertBtn.Hide()
 
 	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
@@ -1768,12 +1813,16 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		widget.NewSeparator(),
 		g.updateBtn,
 		g.aboutNote,
+		g.installBtn,
+		g.revertBtn,
 		note,
+		g.releaseBtn,
 	)
 
 	// The credential line was filled in before this tab existed, so it is
 	// brought up to date now rather than staying empty until the next rebuild.
 	g.refreshCredential()
+	g.refreshRevert()
 
 	return container.NewVScroll(container.NewPadded(body))
 }
@@ -1785,8 +1834,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 // version out of the pane.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 	return container.NewVBox(
-		g.heading("cthrone"),
-		g.label(version),
+		g.textHeading("cthrone"),
+		g.text(version),
 	)
 }
 
@@ -1796,15 +1845,33 @@ func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 // reason a desktop has no browser or a phone has no handler, and a swallowed
 // one leaves the user clicking a dead button.
 func (g *gui) openRepository() {
-	link, err := url.Parse(RepositoryURL)
+	g.openPage(RepositoryURL)
+}
+
+// openReleasePage opens the release page: the list the update check's answer
+// points at, so a user who has just been told a newer release exists can reach
+// it without going to find the repository first.
+func (g *gui) openReleasePage() {
+	g.openPage(ReleasesURL)
+}
+
+// openPage opens an address in the platform's browser, reporting a failure.
+//
+// The opener is a variable so a test can see which address a button asked for:
+// the failure this guards against is a button wired to the wrong URL, which
+// looks identical to a working one until somebody taps it.
+var openPageInBrowser = func(app fyne.App, link *url.URL) error { return app.OpenURL(link) }
+
+func (g *gui) openPage(address string) {
+	link, err := url.Parse(address)
 	if err != nil {
 		g.showError(err)
 
 		return
 	}
 
-	if err := g.app.OpenURL(link); err != nil {
-		g.showError(fmt.Errorf("could not open %s: %w", RepositoryURL, err))
+	if err := openPageInBrowser(g.app, link); err != nil {
+		g.showError(fmt.Errorf("could not open %s: %w", address, err))
 	}
 }
 
@@ -1813,6 +1880,8 @@ func (g *gui) openRepository() {
 // The answer is always written back through fyne.Do, including the failures: a
 // button left disabled or a note left saying "Checking…" is the spinner that
 // never resolves this tab is built to avoid.
+var checkReleaseURL = updatepkg.LatestReleaseURL
+
 func (g *gui) checkUpdates() {
 	if g.updateBtn != nil {
 		g.updateBtn.Disable()
@@ -1821,10 +1890,10 @@ func (g *gui) checkUpdates() {
 	g.setAboutNote("Checking…")
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), updatepkg.CheckTimeout)
 		defer cancel()
 
-		tag, err := latestReleaseTag(ctx, &http.Client{Timeout: updateCheckTimeout}, LatestReleaseURL)
+		tag, err := updatepkg.LatestTag(ctx, &http.Client{Timeout: updatepkg.CheckTimeout}, checkReleaseURL)
 
 		fyne.Do(func() {
 			if g.updateBtn != nil {
@@ -1837,7 +1906,9 @@ func (g *gui) checkUpdates() {
 				return
 			}
 
-			g.setAboutNote(updateText(aboutVersion(Version, g.app.Metadata().Version), tag))
+			current := aboutVersion(Version, g.app.Metadata().Version)
+			g.setAboutNote(aboutUpdateText(current, tag))
+			g.offerNewer(current, tag)
 		})
 	}()
 }

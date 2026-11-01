@@ -4,6 +4,7 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -14,10 +15,9 @@ import (
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
-// These tests pin the rule #179 fixed: text selection belongs to a desktop. On
-// a phone the same drag has to reach the scroll container, so every label the
-// app builds is inert there, and the copy routes are a tap on a transcript row
-// and the explicit Copy buttons.
+// These tests pin the rule #179 fixed — a drag on text must reach the scroll
+// container on a phone — and the exception #213 added to it: the text a user
+// reads is selected by a long press, while the drag stays the pane's.
 
 func newScreenGUI(t *testing.T, mobile bool) *gui {
 	t.Helper()
@@ -44,30 +44,73 @@ func newScreenGUI(t *testing.T, mobile bool) *gui {
 func TestTouchLabelsDoNotTakeTheDrag(t *testing.T) {
 	g := newScreenGUI(t, true)
 
-	if g.status.Selectable {
+	if g.status.Selectable() {
 		t.Error("the status line is selectable on touch")
 	}
-	if g.hint.Selectable {
+	if g.hint.Selectable() {
 		t.Error("the setup hint is selectable on touch")
 	}
-	if g.credential.Selectable {
+	if g.credential.Selectable() {
 		t.Error("the credential line is selectable on touch")
 	}
-	if g.aboutCredential.Selectable {
+	if g.aboutCredential.Selectable() {
 		t.Error("the About credential line is selectable on touch")
 	}
-	if g.aboutNote.Selectable {
+	if g.aboutNote.Selectable() {
 		t.Error("the update note is selectable on touch")
+	}
+}
+
+// A phone's text is selectable by a long press, not by the drag that scrolls
+// the pane: before the press it is inert, after it Fyne's own selection is on.
+func TestTouchTextSelectsOnALongPress(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	g.status.SetText("Connection failed: the host refused the handshake")
+	g.win.Resize(fyne.NewSize(320, 480))
+	g.win.Content().Refresh()
+
+	g.status.TappedSecondary(&fyne.PointEvent{AbsolutePosition: fyne.NewPos(20, 10)})
+
+	if !g.status.Selectable() {
+		t.Fatal("a long press left the status line unselectable, so nothing could be copied from it")
+	}
+
+	if g.win.Canvas().Overlays().Top() == nil {
+		t.Error("a long press on the status line offered no Copy menu")
+	}
+}
+
+// The transcript's tap-to-copy is the gesture a phone already had, and wrapping
+// the text in a long-press widget must not take it away: tap still copies the
+// row, and a different tap copies a different row.
+func TestTouchRowStillCopiesOnATap(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{from: "bob", text: "the first"}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	text, _, _ := chatRowObjects(t, row)
+
+	g.app.Clipboard().SetContent("")
+	text.Tapped(&fyne.PointEvent{})
+
+	if got := g.app.Clipboard().Content(); !strings.Contains(got, "the first") {
+		t.Errorf("a tap copied %q, want the message", got)
 	}
 }
 
 func TestDesktopLabelsStaySelectable(t *testing.T) {
 	g := newScreenGUI(t, false)
 
-	if !g.status.Selectable {
+	if !g.status.Selectable() {
 		t.Error("the status line is not selectable on a desktop")
 	}
-	if !g.hint.Selectable {
+	if !g.hint.Selectable() {
 		t.Error("the setup hint is not selectable on a desktop")
 	}
 }
@@ -154,20 +197,20 @@ func TestAboutHeaderStacksNameAboveVersion(t *testing.T) {
 		t.Fatalf("header holds %d objects, want the name and the version", len(box.Objects))
 	}
 
-	name, ok := box.Objects[0].(*widget.Label)
+	name, ok := box.Objects[0].(*widgets.Text)
 	if !ok {
 		t.Fatalf("header[0] is %T, want the name", box.Objects[0])
 	}
-	if name.Text != "cthrone" || !name.TextStyle.Bold {
-		t.Errorf("name = %q (bold %v), want the bold app name", name.Text, name.TextStyle.Bold)
+	if name.Text() != "cthrone" || !name.TextStyle().Bold {
+		t.Errorf("name = %q (bold %v), want the bold app name", name.Text(), name.TextStyle().Bold)
 	}
 
-	version, ok := box.Objects[1].(*widget.Label)
+	version, ok := box.Objects[1].(*widgets.Text)
 	if !ok {
 		t.Fatalf("header[1] is %T, want the version", box.Objects[1])
 	}
-	if version.Text != "v0.8.3" {
-		t.Errorf("version = %q, want %q", version.Text, "v0.8.3")
+	if version.Text() != "v0.8.3" {
+		t.Errorf("version = %q, want %q", version.Text(), "v0.8.3")
 	}
 }
 

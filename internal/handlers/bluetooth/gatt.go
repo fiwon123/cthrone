@@ -1,10 +1,21 @@
-//go:build linux && !android
+//go:build (linux || windows) && !android
 
-// The GATT layer speaks BlueZ over the D-Bus system bus, which is Linux's own
-// stack. Android satisfies the `linux` build tag as well, so it has to be
-// excluded explicitly: a phone has no BlueZ and no system bus, and compiling
-// this file there would turn "this build has no Bluetooth transport" into a
-// D-Bus failure at run time.
+// The GATT layer speaks whatever stack tinygo.org/x/bluetooth selects for the
+// platform: BlueZ over the D-Bus system bus on Linux, WinRT on Windows. The
+// calls are the same for both — the library is the seam — so this file is built
+// for either.
+//
+// Android satisfies the `linux` build tag as well, so it has to be excluded
+// explicitly: a phone has no BlueZ and no system bus, and compiling this file
+// there would turn "this build has no Bluetooth transport" into a D-Bus failure
+// at run time. It needs its own binding to the Java Bluetooth APIs (#206).
+//
+// **The Windows path compiles and has never been run.** No Windows machine and
+// no radio exist in the environment this was written in, and the backends
+// differ where it matters: how an address is spelled, whether a disconnect is
+// reported at all, the MTU, and how notifications are subscribed. What is
+// proven here is that `GOOS=windows go build ./...` produces it; what it does
+// when a user runs it is #215's open question.
 
 package bluetooth
 
@@ -14,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"tinygo.org/x/bluetooth"
 )
@@ -572,7 +584,7 @@ func matches(target, address, name string) bool {
 		return true
 	}
 
-	if strings.EqualFold(target, address) {
+	if sameAddress(target, address) {
 		return true
 	}
 
@@ -580,10 +592,34 @@ func matches(target, address, name string) bool {
 		return true
 	}
 
-	// A name may carry a suffix the user did not type, and a Bluetooth address
-	// is written with colons or dashes. Accepting both is what keeps a typo
-	// from looking like a device that is not there.
+	// A name may carry a suffix the user did not type. Accepting a prefix is
+	// what keeps a typo from looking like a device that is not there.
 	return strings.Contains(strings.ToLower(name), strings.ToLower(target))
+}
+
+// sameAddress compares two Bluetooth addresses whatever separator or case they
+// were written in.
+//
+// The separators are not a detail: `cthrone scan` prints "AA:BB:CC:DD:EE:FF",
+// Windows' own device list shows "AA-BB-CC-DD-EE-FF", and a paste from a bug
+// report may carry neither. A user naming the device they can see is not making
+// a typo, so the comparison drops the separators rather than the user's
+// address.
+func sameAddress(a, b string) bool {
+	return foldAddress(a) == foldAddress(b) && foldAddress(a) != ""
+}
+
+// foldAddress is an address with its separators removed and its letters
+// lowered: the form two addresses are compared in.
+func foldAddress(address string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ':', '-', ' ':
+			return -1
+		}
+
+		return unicode.ToLower(r)
+	}, address)
 }
 
 // Scan lists the cthrone devices in range, calling report for each one.

@@ -147,7 +147,7 @@ func firstContactGate() websocketcore.Confirm {
 
 func init() {
 	Cmd.Flags().BoolVar(&natsFlag, "nats", false, "use the NATS transport instead of the websocket one")
-	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "serve over Bluetooth instead of the websocket (Linux only, one device at a time)")
+	Cmd.Flags().BoolVar(&bluetoothFlag, "bluetooth", false, "serve over Bluetooth instead of the websocket (Linux and Windows; one device at a time)")
 	Cmd.Flags().StringVar(&natsURLFlag, "nats-url", natscore.DefaultBrokerURL, "the NATS broker to connect to")
 	Cmd.Flags().StringVar(&bindAddressFlag, "host", "", "the interface to bind to (default: every interface, so another device can reach it)")
 	Cmd.Flags().BoolVar(&allowAnonymousFlag, "allow-anonymous", false, "retired: every session is encrypted and authenticated")

@@ -11,6 +11,7 @@ import (
 	recvcmd "github.com/fiwon123/cthrone/cmd/recv"
 	scancmd "github.com/fiwon123/cthrone/cmd/scan"
 	uicmd "github.com/fiwon123/cthrone/cmd/ui"
+	updatecmd "github.com/fiwon123/cthrone/cmd/update"
 	"github.com/spf13/cobra"
 )
 
@@ -77,6 +78,12 @@ func init() {
 	rootCmd.AddCommand(uicmd.Cmd)
 	rootCmd.AddCommand(recvcmd.Cmd)
 	rootCmd.AddCommand(execcmd.Cmd)
+	rootCmd.AddCommand(updatecmd.Cmd)
+
+	// The subpackage cannot import this one, so the version the linker fills is
+	// handed over here — the alternative is a second -X target that would drift
+	// from cmd.Version.
+	updatecmd.Version = func() string { return Version }
 
 	rootCmd.Flags().BoolVarP(&checkVersion, "version", "v", false, "check current version")
 	rootCmd.PersistentFlags().IntVarP(&port, "port", "p", 8080, "port to connect and host cthrone")

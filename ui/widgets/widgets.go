@@ -20,7 +20,9 @@ import (
 // selectable turns it into drag-selectable text with the platform's copy
 // shortcut. It has to be false on a touch screen: a selectable label takes the
 // drag before the scroll container sees it, so a pane cannot be scrolled by
-// starting the gesture on text. Copying there is served by an explicit action.
+// starting the gesture on text. Text is the wrapper for what a phone must still
+// be able to select — it waits for a long press, which costs no drag. A caption
+// or a heading nobody selects can stay this.
 func Label(text string, selectable bool) *widget.Label {
 	label := widget.NewLabel(text)
 	label.Selectable = selectable

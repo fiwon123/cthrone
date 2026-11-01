@@ -29,7 +29,8 @@ through a NATS broker.
 - **Language**: Go 1.26.10 (see `go.mod`)
 - **CLI framework**: spf13/cobra
 - **Transports**: gorilla/websocket (default), nats-io/nats.go (`--nats`), and
-  tinygo.org/x/bluetooth over BlueZ/D-Bus (`--bluetooth`, Linux only)
+  tinygo.org/x/bluetooth (`--bluetooth`: BlueZ over D-Bus on Linux, WinRT on
+  Windows — the Windows path is compiled and never run)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
@@ -84,11 +85,12 @@ cannot tell which central wrote to a characteristic, so a host serves **one
 device at a time** and the slot frees when the keepalive notices the device has
 gone quiet; discovery is a BLE scan rather than the UDP beacon, so `cthrone scan
 --bluetooth` lists the devices in range; and a 20-byte packet makes text the
-only practical payload. The GATT layer is Linux only (`//go:build linux
-&& !android` — Android satisfies the `linux` tag and has no BlueZ, so it is
-excluded explicitly), and `internal/core/bluetooth/unsupported.go` answers
-everywhere else. The framing, the session and the keepalive are portable and
-tested on an in-memory link; no gate opens a radio.
+only practical payload. The GATT layer is built for Linux and Windows
+(`//go:build (linux || windows) && !android` — Android satisfies the `linux`
+tag and has no BlueZ, so it is excluded explicitly), and
+`internal/core/bluetooth/unsupported.go` answers everywhere else. The Windows
+path compiles and has never been run. The framing, the session and the
+keepalive are portable and tested on an in-memory link; no gate opens a radio.
 
 The GUI is not a fourth transport: `ui/` reads and writes through the same
 `internal/session.Session` the terminal loops use, and `mobile/` is a second
@@ -169,7 +171,7 @@ tag, `ui.Run` prints a message and exits, so the CLI needs no GUI toolkit.
 ## Directory Layout
 
 ```text
-cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec (+ the assets package)
+cmd/                 cobra commands: connect, host, scan, peers, ui, recv, exec, update (+ the assets package)
 internal/core/       one package per transport (websocket, nats, bluetooth)
 internal/handlers/   one package per transport (websocket, nats, bluetooth)
 internal/data/app/   the in-memory configuration
@@ -206,7 +208,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ; the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.9.0` is the published release; it also carries the v0.8.6 fixes (#192, #193, #194, #197) and the CTH1 text-frame fix (#201), which never shipped under their own version.
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, opt-in remote execution behind an allowlist (`recv`/`exec`), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ and the Windows one WinRT, which has never been run (#224); the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.10.0` is the published release. It carries the multi-line composer (#211), a transport select that reads one platform fact rather than the layout (#218), the update check on both front ends with install and revert (#212, #214), long-press selection for the text and the device rows on a phone (#213, #231), and the Bluetooth transport building for Windows as well as Linux (#215), with the addresses it accepts fixed (#225) and the checksum it reports now the one that was verified (#227). `v0.9.0` was the release before it, carrying the v0.8.6 fixes (#192, #193, #194, #197) and the CTH1 text-frame fix (#201).
 - **Encrypted and authenticated by default**: every session is sealed on every
   transport — a Bluetooth link carries ciphertext too, whatever the radio's own
   pairing — and exactly one credential authenticates it — this device's
@@ -251,7 +253,8 @@ docker-compose.yml   the dev sandbox and a local NATS server
   advertises the service and serves one device at a time; `cthrone connect
   --bluetooth [name|address]` scans and dials the first (or named) cthrone
   device; `cthrone scan --bluetooth` lists what advertises the service. The
-  GATT layer is BlueZ over D-Bus, so it is Linux only (#202); Android is #206.
+  GATT layer is BlueZ over D-Bus on Linux (#202) and WinRT on Windows (#215,
+  compiled but never run); Android is #206.
 - The websocket transport defaults to port `8080` on **every interface**; the
   client dials `wss://` and the server serves https by default, and `--no-tls`
   puts both back on `ws://`. With no secret configured — the default — the host

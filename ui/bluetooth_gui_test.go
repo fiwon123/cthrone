@@ -4,6 +4,7 @@ package ui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -68,17 +69,37 @@ func collectCaptions(obj fyne.CanvasObject, into *[]string) {
 	}
 }
 
-// The phone build has no radio transport, so the option is absent rather than
-// present and always failing.
+// The select offers what the build has, and the layout no longer decides it: a
+// phone-shaped window on this build still offers the transport this binary was
+// compiled with, and a build without it offers only the network transports on
+// every layout.
 func TestTransportSelectFollowsTheBuild(t *testing.T) {
-	desktop := newScreenGUI(t, false)
-	if len(desktop.transport.Options) != 3 {
-		t.Fatalf("the desktop select offers %v, want all three transports", desktop.transport.Options)
+	g := newScreenGUI(t, false)
+
+	// Whatever this build answers, the window has to agree with it: the list is
+	// not a literal in the GUI, it is the capability.
+	if got, want := g.transport.Options, transportNames(bluetoothcore.Supported()); !slices.Equal(got, want) {
+		t.Fatalf("the select offers %v, want %v", got, want)
 	}
 
-	phone := newScreenGUI(t, true)
-	if len(phone.transport.Options) != 2 {
-		t.Fatalf("the phone select offers %v, want the two network transports", phone.transport.Options)
+	// Flip the capability the way a Windows or macOS build answers it, then
+	// build the window that platform would have.
+	restore := bluetoothSupported
+	bluetoothSupported = func() bool { return false }
+	t.Cleanup(func() { bluetoothSupported = restore })
+
+	for _, mobile := range []bool{false, true} {
+		g := newScreenGUI(t, mobile)
+
+		for _, name := range g.transport.Options {
+			if name == labelBluetooth {
+				t.Errorf("a build without the radio offers %q (mobile=%v): %v", name, mobile, g.transport.Options)
+			}
+		}
+
+		if got := g.transport.Options; !slices.Equal(got, transportNames(false)) {
+			t.Errorf("the select offers %v, want %v", got, transportNames(false))
+		}
 	}
 }
 
@@ -105,11 +126,11 @@ func TestBluetoothModeShowsOnlyTheRowsItUses(t *testing.T) {
 
 	// The hint and the Scan button are the two places a user reads what the
 	// carrier is before pressing anything.
-	if hint := g.hint.Text; !strings.Contains(hint, "Bluetooth") {
+	if hint := g.hint.Text(); !strings.Contains(hint, "Bluetooth") {
 		t.Errorf("the hint does not name the transport: %q", hint)
 	}
 
-	if hint := g.listHint.Text; !strings.Contains(hint, "Bluetooth") {
+	if hint := g.listHint.Text(); !strings.Contains(hint, "Bluetooth") {
 		t.Errorf("the scan hint does not name the transport: %q", hint)
 	}
 }
@@ -207,7 +228,7 @@ func TestConnectBluetoothWithNoTargetTakesTheFirstDevice(t *testing.T) {
 		t.Fatalf("Connect passed %v to the transport, want no target at all", target)
 	}
 
-	if got := g.status.Text; !strings.Contains(got, "Bluetooth") {
+	if got := g.status.Text(); !strings.Contains(got, "Bluetooth") {
 		t.Errorf("the status reads %q, want it to say the session is on the radio", got)
 	}
 }
@@ -266,7 +287,7 @@ func TestConnectBluetoothReportsTheTransportsFailure(t *testing.T) {
 
 	g.connect()
 
-	waitForStatus(t, g, func() bool { return g.status.Text == "Connection failed" })
+	waitForStatus(t, g, func() bool { return g.status.Text() == "Connection failed" })
 
 	if g.sess != nil {
 		t.Error("a failed connect attached a session anyway")
@@ -300,7 +321,7 @@ func TestHostBluetoothOffersTheFingerprintAndStops(t *testing.T) {
 
 	g.host()
 
-	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text, "Bluetooth") })
+	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text(), "Bluetooth") })
 
 	openerCalled.Wait()
 
@@ -320,7 +341,7 @@ func TestHostBluetoothOffersTheFingerprintAndStops(t *testing.T) {
 
 	g.stop()
 
-	waitForStatus(t, g, func() bool { return g.status.Text == "Disconnected" })
+	waitForStatus(t, g, func() bool { return g.status.Text() == "Disconnected" })
 
 	g.mu.Lock()
 	still := g.server
@@ -370,7 +391,7 @@ func waitForStatus(t *testing.T, g *gui, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	t.Fatalf("the status line never reached the expected value: %q", g.status.Text)
+	t.Fatalf("the status line never reached the expected value: %q", g.status.Text())
 }
 
 // beaconFor is one network device as a beacon would announce it.

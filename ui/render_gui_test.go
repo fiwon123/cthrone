@@ -14,7 +14,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/ui/widgets"
@@ -55,7 +54,7 @@ func newTestGUI(t *testing.T) *gui {
 
 // chatRowObjects pulls a transcript row apart into its three parts: the
 // caption, the inline picture, and the Save action.
-func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas.Image, *widgets.CopyButton) {
+func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas.Image, *widgets.CopyButton) {
 	t.Helper()
 
 	box, ok := row.(*fyne.Container)
@@ -67,9 +66,9 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widget.Label, *canvas
 		t.Fatalf("row has %d objects, want 3", len(box.Objects))
 	}
 
-	label, ok := box.Objects[0].(*widget.Label)
+	label, ok := box.Objects[0].(*widgets.Text)
 	if !ok {
-		t.Fatalf("row[0] is %T, want *widget.Label", box.Objects[0])
+		t.Fatalf("row[0] is %T, want *widgets.Text", box.Objects[0])
 	}
 
 	pic, ok := box.Objects[1].(*canvas.Image)
@@ -112,8 +111,8 @@ func TestChatRowReportsTransferProgress(t *testing.T) {
 
 			label, pic, save := chatRowObjects(t, row)
 
-			if label.Text != tt.want {
-				t.Errorf("row %d = %q, want %q", tt.id, label.Text, tt.want)
+			if label.Text() != tt.want {
+				t.Errorf("row %d = %q, want %q", tt.id, label.Text(), tt.want)
 			}
 
 			if pic.Visible() {
@@ -168,8 +167,8 @@ func TestChatRowDrawsADecodableImageInline(t *testing.T) {
 		t.Error("a saved file did not offer Save")
 	}
 
-	if !strings.Contains(label.Text, "saved") {
-		t.Errorf("caption = %q, want it to say the file was saved", label.Text)
+	if !strings.Contains(label.Text(), "saved") {
+		t.Errorf("caption = %q, want it to say the file was saved", label.Text())
 	}
 }
 
