@@ -79,3 +79,35 @@ func TestDesktopDeviceRowSelectsFromTheStart(t *testing.T) {
 		t.Error("a desktop's device row is not selectable, so its address cannot be dragged over")
 	}
 }
+
+// Clicking a device row is how a desktop fills the address field, and wrapping
+// the row in a widget that takes taps must not take the click with it: the
+// wrapper is what the driver finds, so it has to run the list's action (#236).
+func TestDeviceRowIsClickableOnADesktop(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.beacons = []device{{Beacon: discovery.Beacon{Name: "laptop", Addr: "192.168.1.20", Port: 8080}, seen: time.Now()}}
+	g.mu.Unlock()
+
+	row := g.beaconList.CreateItem()
+	g.updateBeaconRow(0, row)
+
+	tappable, ok := row.(fyne.Tappable)
+	if !ok {
+		t.Fatalf("a device row is %T, which cannot be tapped at all", row)
+	}
+
+	g.hostEntry.SetText("")
+	g.portEntry.SetText("")
+
+	test.Tap(tappable)
+
+	if got := g.hostEntry.Text; got != "192.168.1.20" {
+		t.Errorf("tapping a device row filled %q, want the row's address", got)
+	}
+
+	if got := g.portEntry.Text; got != "8080" {
+		t.Errorf("tapping a device row filled port %q, want the row's port", got)
+	}
+}

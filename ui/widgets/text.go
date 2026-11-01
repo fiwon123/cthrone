@@ -117,10 +117,17 @@ func (t *Text) SetOnTapped(tapped func()) {
 	t.onTapped = tapped
 }
 
-// Tapped is a plain tap: the mobile driver dispatches it here because Text is
-// the deepest object that takes one, so it has to keep doing what it did.
+// Tapped is a plain tap: on every platform the driver dispatches it here,
+// because Text is the deepest object that takes one — the label's selection
+// child does not receive taps, whatever the platform. So the tap has to keep
+// doing what it did before the text was wrapped: filling an address, copying a
+// row.
+//
+// The guard on the touch-screen flag that this used to carry was wrong, and it
+// cost the Devices tab its clicks on a desktop (#236): the belief was that the
+// selection child handled desktop taps, and nothing did.
 func (t *Text) Tapped(*fyne.PointEvent) {
-	if !t.touch || t.onTapped == nil {
+	if t.onTapped == nil {
 		return
 	}
 

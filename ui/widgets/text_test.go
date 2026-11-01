@@ -63,9 +63,10 @@ func TestTextKeepsItsString(t *testing.T) {
 	}
 }
 
-// A tap has to keep doing what it did before the text was wrapped: the
-// transcript's row is selected, a status line does nothing.
-func TestTextForwardsATapOnlyOnATouchScreen(t *testing.T) {
+// A tap has to keep doing what it did before the text was wrapped, on every
+// platform: the driver dispatches it to this widget whichever screen it is, so
+// a flag that ignored it on a desktop silently took the click away (#236).
+func TestTextForwardsATapOnEveryPlatform(t *testing.T) {
 	for _, touch := range []bool{true, false} {
 		text := NewText("hello", touch)
 
@@ -74,13 +75,8 @@ func TestTextForwardsATapOnlyOnATouchScreen(t *testing.T) {
 
 		text.Tapped(&fyne.PointEvent{})
 
-		want := 0
-		if touch {
-			want = 1
-		}
-
-		if taps != want {
-			t.Errorf("touch=%v: the tap ran %d times, want %d", touch, taps, want)
+		if taps != 1 {
+			t.Errorf("touch=%v: the tap ran %d times, want 1", touch, taps)
 		}
 	}
 }
