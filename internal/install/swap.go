@@ -23,9 +23,15 @@ var ErrNoPrevious = errors.New("install: no previous binary to revert to")
 // The order is the point. The new file is written and synced first, under a
 // temporary name in the same directory; the current binary is copied aside
 // next; and only then is the new one moved into place. A failure at any step
-// leaves the target exactly as it was, and a crash leaves either the old
-// binary or the new one — never a half-written file, because the target is only
-// ever replaced by a rename of a fully written file.
+// leaves the target exactly as it was, and nothing half-written is ever
+// published, because the target is only ever replaced by a rename of a
+// complete file.
+//
+// What a crash leaves behind depends on the platform, and that lives in
+// replace(): on Linux and macOS the rename is atomic, so the target is always
+// one of the two binaries; on Windows the running executable cannot be replaced,
+// so it is renamed aside first (see swap_windows.go) and the next install
+// restores it if the process died in between.
 //
 // It returns the path of the copy the way back uses.
 func Install(target string, content []byte) (string, error) {

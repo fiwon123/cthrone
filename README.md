@@ -647,8 +647,13 @@ The install is deliberately conservative:
 
 - the download is checked against the **`checksums.txt` the release publishes**
   before anything is replaced; a mismatch aborts and prints both hashes;
-- the swap is a rename of a fully written file, so an interrupted run leaves a
-  working binary — the old one or the new one, never a truncated one;
+- the swap only ever publishes a fully written file, so nothing half-written is
+  ever run. On Linux and macOS the replacement is one `rename`, which is atomic:
+  an interrupted run leaves either the old binary or the new one. Windows cannot
+  replace a running executable, so it renames the old one aside first and puts
+  it back if the new one cannot be moved into place; cut short between those two
+  steps, the binary is left as `<name>.old` beside `<name>.previous`, and the
+  next install restores it;
 - the binary it replaces is kept beside it as `<name>.previous`, and
   `cthrone update --revert` (or **Revert to previous** on the About tab) swaps
   it back with no network call. Reverting twice returns to where you started.
