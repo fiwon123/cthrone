@@ -15,6 +15,13 @@ nkeys is licensed under the Apache License, Version 2.0.
 compress (https://github.com/klauspost/compress)
 compress is licensed under the Apache License, Version 2.0.
 
+tinygo.org/x/bluetooth (https://github.com/tinygo-org/bluetooth)
+Copyright (c) TinyGo Authors. All rights reserved.
+tinygo.org/x/bluetooth is licensed under the BSD 3-Clause License: redistribution
+in source or binary form must keep this copyright notice, the list of
+conditions and the disclaimer; neither the copyright holder's name nor the names
+of its contributors may be used to endorse a derived product without permission.
+
 --------------------------------------------------------------------------------
 Keep the LICENSE-APACHE file next to this one.
 

@@ -11,7 +11,8 @@ import (
 	"github.com/fiwon123/cthrone/internal/discovery"
 )
 
-// defaultPort is the port both transports use unless another is given.
+// defaultPort is the port the network transports use unless another is given.
+// The radio has none: a Bluetooth link has no address to type.
 const defaultPort = 8080
 
 // labelConnectTo names the Setup row that holds the host to dial.
@@ -74,59 +75,148 @@ func subjectOrDefault(text, fallback string) string {
 	return subject
 }
 
+// transportMode names the carrier the Setup tab configures.
+//
+// The three need different things from the user, which is why this is a mode
+// rather than a switch: a websocket needs an address and a port, NATS needs a
+// broker and a subject, and the radio needs neither — only a device name, and
+// optionally which device to look for.
+type transportMode int
+
+const (
+	transportWebsocket transportMode = iota
+	transportNATS
+	transportBluetooth
+)
+
+// The transport select's option text. They are constants because the mapping
+// runs both ways — the option a user picks is a mode, and a mode has to be
+// written back into the select — and two string literals that have to agree are
+// a bug waiting for a typo.
+const (
+	labelWebsocket = "WebSocket (default)"
+	labelNATS      = "NATS"
+	labelBluetooth = "Bluetooth (Linux)"
+)
+
+// transportNames are the option labels for this build, in the order the select
+// shows them.
+//
+// Bluetooth is left out of a phone build on purpose: the transport speaks BlueZ
+// over D-Bus, which Android does not have, so the option there would only ever
+// produce "this build has no Bluetooth transport". An option that cannot work
+// reads as a broken feature; its absence reads as a platform difference.
+func transportNames(mobile bool) []string {
+	if mobile {
+		return []string{labelWebsocket, labelNATS}
+	}
+
+	return []string{labelWebsocket, labelNATS, labelBluetooth}
+}
+
+// transportOf maps the selected option back to a mode. Anything unrecognised —
+// including the empty string a select reports before it has a value — is the
+// websocket, which is the default.
+func transportOf(selected string) transportMode {
+	switch selected {
+	case labelNATS:
+		return transportNATS
+	case labelBluetooth:
+		return transportBluetooth
+	default:
+		return transportWebsocket
+	}
+}
+
+// transportName is the option text a mode is shown as.
+func transportName(mode transportMode) string {
+	switch mode {
+	case transportNATS:
+		return labelNATS
+	case transportBluetooth:
+		return labelBluetooth
+	default:
+		return labelWebsocket
+	}
+}
+
 // setupView records which Setup rows apply to the configuration in force.
 type setupView struct {
-	// Options is the "More options" button. It belongs to the websocket
-	// transport, whose advanced rows it opens; the NATS rows are always shown.
+	// Options is the "More options" button. It opens the advanced rows of the
+	// transport selected: the websocket's credential and bind address, or the
+	// radio's credential. The NATS rows are always shown.
 	Options bool
 
-	// SharedSecret, Fingerprint and BindAddress are the advanced websocket
-	// rows, shown only once "More options" is open. Fingerprint joins them
-	// only while TLS is on — a certificate fingerprint means nothing to a
-	// plain ws:// connection.
+	// Port is the row both network transports use. The radio has no port to
+	// listen on or dial, so the row is absent rather than ignored.
+	Port bool
+
+	// SharedSecret, Fingerprint and BindAddress are the advanced rows, shown
+	// only once "More options" is open. The credential is the one of the three
+	// that every transport has — a session is authenticated whichever carrier
+	// it runs on — while Fingerprint (a host certificate) and BindAddress (a
+	// listening socket) belong to the websocket alone. Fingerprint joins them
+	// only while TLS is on: a certificate fingerprint means nothing to a plain
+	// ws:// connection.
 	SharedSecret bool
 	Fingerprint  bool
 	BindAddress  bool
 
 	// Insecure is the "Skip the certificate check" row: it is meaningless
-	// without TLS.
+	// without TLS, which the radio and the broker URL do not use.
 	Insecure bool
 
 	// NATSBroker and NATSSubject describe the broker, so only the NATS
 	// transport uses them. The websocket transport has an address and a port
-	// instead.
+	// instead, and the radio has neither.
 	NATSBroker  bool
 	NATSSubject bool
 }
 
 // setupVisibility decides which Setup rows apply to the current mode.
 //
-// useNATS is the transport in force, tls whether encryption is on, and
+// mode is the transport in force, tls whether encryption is on, and
 // moreOptions whether the advanced websocket rows have been opened.
-func setupVisibility(useNATS, tls, moreOptions bool) setupView {
-	if useNATS {
-		return setupView{Insecure: tls, NATSBroker: true, NATSSubject: true}
-	}
+func setupVisibility(mode transportMode, tls, moreOptions bool) setupView {
+	switch mode {
+	case transportNATS:
+		// A broker is reached, not bound: no port, no address to advertise, no
+		// certificate of this device's to pin. The shared secret still applies,
+		// because it is the credential, not a property of the carrier.
+		return setupView{Port: true, Insecure: tls, NATSBroker: true, NATSSubject: true}
 
-	return setupView{
-		Options:      true,
-		SharedSecret: moreOptions,
-		Fingerprint:  moreOptions && tls,
-		BindAddress:  moreOptions,
-		Insecure:     tls,
+	case transportBluetooth:
+		// The radio has no port, no bind address and no certificate. What it
+		// does have is the credential: a session on Bluetooth is sealed and
+		// authenticated exactly as the other two are.
+		return setupView{Options: true, SharedSecret: moreOptions}
+
+	default:
+		return setupView{
+			Port:         true,
+			Options:      true,
+			SharedSecret: moreOptions,
+			Fingerprint:  moreOptions && tls,
+			BindAddress:  moreOptions,
+			Insecure:     tls,
+		}
 	}
 }
 
-// setupHint is the line under the actions. The two transports are configured
-// differently enough that one sentence cannot serve both: a websocket chat
+// setupHint is the line under the actions. The transports are configured
+// differently enough that one sentence cannot serve them: a websocket chat
 // pairs two devices — by device key, or with a shared secret — and can pin a
-// certificate, while the NATS path also needs a broker it is allowed to join.
-func setupHint(useNATS bool) string {
-	if useNATS {
+// certificate, the NATS path also needs a broker it is allowed to join, and the
+// radio needs neither an address nor a broker, only proximity.
+func setupHint(mode transportMode) string {
+	switch mode {
+	case transportNATS:
 		return "NATS: Host or Connect joins the broker, pairing by device key or with the shared secret; the broker's own credentials come from NATS_USER and NATS_PASSWORD."
+	case transportBluetooth:
+		return "Bluetooth: select Host to advertise, or Connect to the first device in range — a device name or address narrows the search. Text only: one packet carries 20 bytes, so a file is impractical."
+	default:
+		return "Fast: select Host to start, or pick a device from Devices and Connect. The connection is encrypted and the certificate is pinned on first contact; with no shared secret the devices also pair by key — compare the fingerprint each shows."
 	}
-
-	return "Fast: select Host to start, or pick a device from Devices and Connect. The connection is encrypted and the certificate is pinned on first contact; with no shared secret the devices also pair by key — compare the fingerprint each shows."
 }
 
 // resolveConfigDir returns the directory the app keeps its token and its TLS
