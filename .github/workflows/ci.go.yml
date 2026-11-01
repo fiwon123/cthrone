@@ -71,6 +71,13 @@ jobs:
       - name: Test the GUI headless
         run: CGO_ENABLED=0 go test -tags "gui ci" ./ui/... ./cmd/ui/...
 
+      # The race detector, on the non-GUI build. It is a separate step rather
+      # than part of `make check` because it needs cgo; the GUI suite is left
+      # out on purpose, and the Makefile's `race` target says why (Fyne's test
+      # driver runs fyne.Do inline, so the detector would report the harness).
+      - name: Test with the race detector
+        run: make race
+
       - name: Build
         run: go build ./...
 

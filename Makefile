@@ -373,6 +373,25 @@ check: ## gofmt, vet, test, build — the local verification gate
 test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
 	$(GUI_TEST)
 
+# `-race` is a separate target rather than part of `check` because it needs a C
+# compiler, and `make check` must keep working on a host without one. CI runs
+# it, so a race that appears in a change is caught there; a local run is one
+# command.
+#
+# The gui-tagged suite is deliberately not in this run. Fyne's *test* driver
+# executes fyne.Do inline, so a worker goroutine's UI write lands on the
+# worker's goroutine while the test reads the widget — the detector reports a
+# race in the harness, not in the program, and it cannot be silenced without a
+# different driver. `go test -race ./...` here is the non-GUI build of the same
+# code, which is where this project's concurrency lives anyway.
+race: ## test with the race detector (needs a C compiler)
+	@if [ "$$(CGO_ENABLED=1 go env CGO_ENABLED)" != "1" ] || ! echo 'int main(void){return 0;}' | $${CC:-cc} -x c - -o /dev/null 2>/dev/null; then \
+	  echo "ERROR: -race needs cgo and a C compiler (CC=${CC:-cc}); neither is available here." >&2; \
+	  echo "  This target cannot run, so it verifies nothing. Install a C compiler or run it in CI." >&2; \
+	  exit 1; \
+	fi
+	CGO_ENABLED=1 go test -race -count=1 ./...
+
 # ---------------------------------------------------------------------------
 # Dev sandbox
 #

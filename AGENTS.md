@@ -132,6 +132,9 @@ go run ./ --help     # run from source
 go test ./...        # tests only
 ```
 
+`make race` runs the suite under the race detector (needs a C compiler; the
+gui-tagged tests are excluded, and the target says why). CI runs it.
+
 `make check` is the gate every agent runs before committing. It fails when the
 toolchain is missing — a gate that cannot run reports nothing, and reporting
 nothing must not look like reporting success.

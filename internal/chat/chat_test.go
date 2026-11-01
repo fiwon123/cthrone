@@ -81,10 +81,11 @@ func pipeTerminal(t *testing.T) (*os.File, *os.File, *syncBuffer) {
 		t.Fatal(err)
 	}
 
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
+	// Only the write end is closed here. Closing the read end is what the race
+	// detector flagged: the room's reader goroutine may still be inside a read
+	// on it when the test finishes, and a file closed under a reader is a race
+	// however the test would like the descriptor back.
+	t.Cleanup(func() { _ = w.Close() })
 
 	return r, w, &syncBuffer{}
 }

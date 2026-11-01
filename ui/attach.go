@@ -311,9 +311,11 @@ func (g *gui) updateTransfer(note *fileNote, state transferState) {
 // line says what happened, which is where a transient event belongs.
 func (g *gui) removeTransfer(note *fileNote) {
 	fyne.Do(func() {
-		var found bool
+		g.mu.Lock()
+		messages, found := dropFile(g.messages, note)
+		g.messages = messages
+		g.mu.Unlock()
 
-		g.messages, found = dropFile(g.messages, note)
 		if found {
 			g.chatList.Refresh()
 		}
