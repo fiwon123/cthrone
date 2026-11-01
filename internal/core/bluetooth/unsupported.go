@@ -23,6 +23,14 @@ import (
 // a separate piece of work.
 var ErrUnsupported = errors.New("bluetooth: this build has no Bluetooth transport — it speaks BlueZ over D-Bus, which only Linux provides")
 
+// Supported reports that this build carries no Bluetooth transport at all.
+//
+// It is the other answer to the question supported_linux.go answers, and it
+// exists so a caller can ask once instead of duplicating the platform rule: the
+// GUI reads it to decide whether the transport is an option, and a build that
+// says no here answers ErrUnsupported from every entry point below.
+func Supported() bool { return false }
+
 // HostHandle is the running host a caller can stop. There is never one on this
 // platform; it exists so the callers compile the same way everywhere.
 type HostHandle struct {

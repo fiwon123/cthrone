@@ -216,24 +216,48 @@ func TestTransportOfRoundTrip(t *testing.T) {
 	}
 }
 
-// A phone build has no Bluetooth transport — the implementation speaks BlueZ
-// over D-Bus — so the option is absent rather than present and always failing.
+// The select offers the transports this build can run, and only those: a build
+// without the radio does not show an option that could only fail.
 func TestTransportNames(t *testing.T) {
-	desktop := transportNames(false)
-	mobile := transportNames(true)
-
-	if len(desktop) != 3 {
-		t.Fatalf("the desktop select offers %v, want all three transports", desktop)
+	tests := []struct {
+		name      string
+		bluetooth bool
+		want      []string
+	}{
+		{"a build with the radio", true, []string{labelWebsocket, labelNATS, labelBluetooth}},
+		{"a build without it", false, []string{labelWebsocket, labelNATS}},
 	}
 
-	if len(mobile) != 2 {
-		t.Fatalf("the phone select offers %v, want the two network transports", mobile)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := transportNames(tt.bluetooth)
 
-	for _, name := range mobile {
-		if name == labelBluetooth {
-			t.Errorf("the phone select offers Bluetooth, which this build cannot run: %v", mobile)
-		}
+			if len(got) != len(tt.want) {
+				t.Fatalf("transportNames(%v) = %v, want %v", tt.bluetooth, got, tt.want)
+			}
+
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("transportNames(%v) = %v, want %v", tt.bluetooth, got, tt.want)
+				}
+			}
+
+			// The radio is never the default and never the first option: a
+			// device that hosts is found by a scan, which is what the top of
+			// the list has to stay able to do.
+			if len(got) > 0 && got[0] != labelWebsocket {
+				t.Errorf("transportNames(%v) starts with %q, want %q", tt.bluetooth, got[0], labelWebsocket)
+			}
+		})
+	}
+}
+
+// The label no longer qualifies the platform: the option is only offered by a
+// build that has the transport, so "(Linux)" would be noise on the one platform
+// that shows it and wrong on a platform that gained it later.
+func TestBluetoothLabelNamesNoPlatform(t *testing.T) {
+	if strings.Contains(labelBluetooth, "Linux") {
+		t.Errorf("the transport is labelled %q, want no platform qualifier", labelBluetooth)
 	}
 }
 

@@ -469,9 +469,9 @@ func (g *gui) build() {
 
 	// The transport select is the one control for the carrier: the three are
 	// exclusive, so three checkboxes would be three ways to disagree. It is
-	// built from transportNames, which leaves the radio out of a build that
-	// cannot run it.
-	g.transport = widget.NewSelect(transportNames(g.mobile), func(string) {
+	// built from transportNames over this build's capability, so a binary
+	// without the radio does not offer it at all.
+	g.transport = widget.NewSelect(transportNames(bluetoothSupported()), func(string) {
 		g.rebuildSetupForm()
 		g.refreshDeviceList()
 	})
