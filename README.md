@@ -45,7 +45,9 @@ There are three transports, and the command set is the same either way:
 - **Bluetooth** — the two devices talk over the radio, so no network, router or
   broker is needed at all. It is the transport for a phone with no Wi-Fi, or two
   laptops on a network that isolates its clients. Linux only for now, one device
-  at a time, and built for text: a Bluetooth packet carries 20 bytes.
+  at a time, and built for text: a Bluetooth packet carries 20 bytes. A build
+  that does not carry the transport — Windows, macOS, and a phone until the
+  Android binding lands — does not offer the option at all.
 
 There is nothing to configure: the only setting is the port, and it comes from
 the command line. The `ct` short alias ships next to the `cthrone` binary,
@@ -544,10 +546,12 @@ The app has four tabs:
   report instead of retyped from a screenshot.
 - **Setup** — the port, the credential (device key by default, or a shared
   secret), the transport and the TLS options, with **Host** and **Connect**.
-  The transport is WebSocket, NATS or — on a desktop Linux build — Bluetooth;
-  a phone build leaves Bluetooth out, because the transport speaks BlueZ, which
-  Android does not have. Encryption is on unless the box is cleared, and the
-  host's certificate is pinned on first contact.
+  The transport is WebSocket, NATS, or Bluetooth where the build carries it —
+  a Linux build today, one device at a time. A Windows, macOS or phone build
+  offers the two network transports only, because the Bluetooth transport
+  speaks BlueZ over D-Bus, which Linux provides and the others do not; Android
+  needs its own binding (#206). Encryption is on unless the box is cleared, and
+  the host's certificate is pinned on first contact.
 - **Devices** — **Scan network** walks the `/24` the default route uses for a
   host on the chat port (with Bluetooth selected, the same button scans the
   radio); tap a result to fill in its address. A row reads
