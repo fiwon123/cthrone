@@ -21,6 +21,11 @@ const (
 	// where the archives the note names are listed.
 	ReleasesURL = updatepkg.ReleasesURL
 
+	// WikiURL is the walk-through: one page per task, for the reader the README
+	// is too long for. Its source lives in docs/wiki, so it is reviewed with the
+	// code it describes.
+	WikiURL = RepositoryURL + "/wiki"
+
 	// zeroMetadataVersion is the version Fyne reports when nothing set one. It
 	// is not this program's version, so it is treated as absent.
 	zeroMetadataVersion = "0.0.1"

@@ -142,6 +142,7 @@ type gui struct {
 	releaseBtn      *widgets.CopyButton
 	installBtn      *widgets.CopyButton
 	revertBtn       *widgets.CopyButton
+	wikiBtn         *widgets.CopyButton
 
 	// aboutOffer is the release the check found and the Install button offers;
 	// empty means this build is the newest one, and the button is hidden.
@@ -1803,6 +1804,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.revertBtn = widgets.NewButtonWithIcon("Revert to previous", theme.ContentUndoIcon(), g.revertRelease, g.copyLabel)
 	g.revertBtn.Hide()
 
+	g.wikiBtn = widgets.NewButtonWithIcon("Wiki", theme.HelpIcon(), g.openWiki, g.copyLabel)
+
 	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
@@ -1817,6 +1820,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		g.revertBtn,
 		note,
 		g.releaseBtn,
+		g.wikiBtn,
 	)
 
 	// The credential line was filled in before this tab existed, so it is
@@ -1846,6 +1850,12 @@ func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 // one leaves the user clicking a dead button.
 func (g *gui) openRepository() {
 	g.openPage(RepositoryURL)
+}
+
+// openWiki opens the walk-through: one page per task, for the reader the README
+// is too long for. Its source is in docs/wiki, reviewed with the code.
+func (g *gui) openWiki() {
+	g.openPage(WikiURL)
 }
 
 // openReleasePage opens the release page: the list the update check's answer
