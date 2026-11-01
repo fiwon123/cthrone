@@ -1026,6 +1026,8 @@ NATS_PORT=4223 NATS_MONITOR_PORT=8223 docker compose up -d nats
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The Apache-2.0 dependencies are attributed in
-[NOTICE](NOTICE), and their licence text ships in
-[LICENSE-APACHE](LICENSE-APACHE).
+MIT — see [LICENSE](LICENSE). Copyright © 2025 Felipe Inoue.
+
+The archives ship that file and nothing else: every dependency's own licence
+stays with its module, and nothing in this project is offered under a second
+licence.
