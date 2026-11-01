@@ -226,7 +226,7 @@ func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession
 	if name == "" {
 		name = "cthrone"
 	}
-	ann := discovery.NewAnnouncer(name, app.Port)
+	ann := discovery.NewAnnouncer(name, app.Port, knownHosts(opts.PinsFile)...)
 	ann.Start(2 * time.Second)
 
 	return &HostHandle{
@@ -236,6 +236,39 @@ func OpenServer(app *app.Data, opts pairing.Options, tlsConf auth.TLS, onSession
 		Fingerprint:       fingerprint,
 		announcer:         ann,
 	}, nil
+}
+
+// knownHosts are the hosts this device has reached before, as the seeds a
+// beacon is also sent to by unicast.
+//
+// That is what reaches a second Wi-Fi on the same modem: a broadcast dies at the
+// router, a unicast to an address that was dialed once does not. The list is the
+// pin file the device already keeps — every host whose certificate it trusted —
+// so no new state is invented for this.
+//
+// It answers with nothing when the pins cannot be read: a host that stopped
+// announcing because a file was unreadable would be a worse failure than a
+// segment that has to be reached by hand.
+func knownHosts(pinsFile string) []string {
+	if pinsFile == "" {
+		return nil
+	}
+
+	store, err := discovery.NewPinStore(pinsFile)
+	if err != nil {
+		return nil
+	}
+
+	pinned := store.Certificates()
+	seeds := make([]string, 0, len(pinned))
+
+	for _, cert := range pinned {
+		if cert.Address != "" {
+			seeds = append(seeds, cert.Address)
+		}
+	}
+
+	return seeds
 }
 
 // describeBind says what the bind address means, so a host status is not just
