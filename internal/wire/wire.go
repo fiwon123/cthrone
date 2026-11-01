@@ -402,11 +402,31 @@ func checkName(name string) error {
 		return fmt.Errorf("%w: file name %q contains a path separator", ErrHeader, name)
 	}
 
-	if filepath.Base(name) != name {
+	if !SafeName(name) {
 		return fmt.Errorf("%w: file name %q is a path", ErrHeader, name)
 	}
 
 	return nil
+}
+
+// SafeName reports whether name is a single path element: something a peer may
+// call a file, and something that may be joined onto a folder without escaping
+// it.
+//
+// It is exported because the code that *writes* the file is not in this package,
+// and an invariant that lives in one place while the write happens in another is
+// an invariant that depends on a caller two packages away remembering it. One
+// rule, both sides.
+func SafeName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return false
+	}
+
+	return filepath.Base(name) == name
 }
 
 // validSum reports whether s is a SHA-256 in hex. Case is not part of the
