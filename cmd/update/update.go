@@ -168,7 +168,7 @@ func install(ctx context.Context, out io.Writer) error {
 	// Said before the restart, because the release this replaces may be the one
 	// that cannot start.
 	fmt.Fprintf(out, "Installed %s from %s.\n", result.Tag, result.Asset)
-	fmt.Fprintf(out, "Verified sha256 %s.\n", result.SHA256)
+	fmt.Fprintf(out, "Verified %s against the release's checksums.txt.\n", result.Checksum)
 	fmt.Fprintf(out, "%s replaced; the previous binary is kept at %s.\n", result.Target, result.Previous)
 	fmt.Fprintln(out, "Restart cthrone to run it. `cthrone update --revert` puts the previous one back.")
 

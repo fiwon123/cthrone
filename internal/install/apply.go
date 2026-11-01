@@ -2,7 +2,6 @@ package install
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -45,7 +44,14 @@ type Result struct {
 	Asset    string
 	Target   string
 	Previous string
-	SHA256   string
+
+	// Checksum is the archive's sha256 as the release recorded it in its own
+	// checksums.txt — the value the download was checked against.
+	//
+	// It is not the extracted binary's hash. That one was never compared to
+	// anything, and reporting it under "verified" would put a true-looking
+	// number beside a check that did not happen.
+	Checksum string
 }
 
 // Run installs one release: fetch its document, name the archive for this
@@ -112,6 +118,10 @@ func ApplyRelease(ctx context.Context, client *http.Client, release *Release, as
 		return Result{}, err
 	}
 
+	// Verify has just proved these are the same value; take the release's own
+	// spelling of it, so what is reported can be checked against the asset.
+	verified, _ := ChecksumFor(sums, assetName)
+
 	binary, err := Binary(body, assetName, member)
 	if err != nil {
 		return Result{}, err
@@ -127,7 +137,7 @@ func ApplyRelease(ctx context.Context, client *http.Client, release *Release, as
 		Asset:    assetName,
 		Target:   target,
 		Previous: previous,
-		SHA256:   hex.EncodeToString(sum(binary)),
+		Checksum: verified,
 	}, nil
 }
 
