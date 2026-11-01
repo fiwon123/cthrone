@@ -3,12 +3,14 @@ package updatecmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
 	"testing"
 
+	installpkg "github.com/fiwon123/cthrone/internal/install"
 	updatepkg "github.com/fiwon123/cthrone/internal/update"
 )
 
@@ -184,4 +186,150 @@ func setCheck(t *testing.T, on bool) {
 	previous := check
 	check = on
 	t.Cleanup(func() { check = previous })
+}
+
+// withInstall swaps the install and revert for recording fakes, and points the
+// self-binary at a name the test chose.
+func withInstall(t *testing.T, result installpkg.Result) *installCalls {
+	t.Helper()
+
+	calls := &installCalls{result: result}
+
+	previousRun, previousRevert, previousSelf := runInstall, runRevert, selfBinary
+	runInstall = func(_ context.Context, _ *http.Client, _ string, _ installpkg.Request) (installpkg.Result, error) {
+		calls.installed++
+
+		return result, calls.err
+	}
+	runRevert = func(_ string) (string, error) {
+		calls.reverted++
+
+		return result.Previous, calls.err
+	}
+	selfBinary = func() (string, error) { return result.Target, nil }
+
+	t.Cleanup(func() {
+		runInstall, runRevert, selfBinary = previousRun, previousRevert, previousSelf
+	})
+
+	return calls
+}
+
+type installCalls struct {
+	installed int
+	reverted  int
+	result    installpkg.Result
+	err       error
+}
+
+// --install says what it did before the user restarts: the release, the hash it
+// matched, and the file the way back is in.
+func TestRunInstallsARelease(t *testing.T) {
+	calls := withInstall(t, installpkg.Result{
+		Tag:      "v0.10.0",
+		Asset:    "cthrone_v0.10.0_linux.tar.gz",
+		Target:   "/usr/local/bin/cthrone",
+		Previous: "/usr/local/bin/cthrone.previous",
+		SHA256:   "abc123",
+	})
+
+	setAction(t, func() { doInstall = true })
+
+	var out bytes.Buffer
+
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+
+	if calls.installed != 1 {
+		t.Fatalf("the install ran %d times, want 1", calls.installed)
+	}
+
+	got := out.String()
+
+	for _, want := range []string{"v0.10.0", "abc123", "cthrone.previous", "--revert"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
+// --revert puts the previous binary back and says the way forward is the same
+// command.
+func TestRunReverts(t *testing.T) {
+	calls := withInstall(t, installpkg.Result{
+		Target:   "/usr/local/bin/cthrone",
+		Previous: "/usr/local/bin/cthrone.previous",
+	})
+
+	setAction(t, func() { doRevert = true })
+
+	var out bytes.Buffer
+
+	if err := run(context.Background(), &out); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+
+	if calls.reverted != 1 || calls.installed != 0 {
+		t.Fatalf("revert ran %d times and install %d, want 1 and 0", calls.reverted, calls.installed)
+	}
+
+	if !strings.Contains(out.String(), "previous binary") {
+		t.Errorf("output = %q, want it to say the previous binary is back", out.String())
+	}
+}
+
+// A failed install is a non-zero exit, and the message is what the user has to
+// act on.
+func TestRunReportsAFailedInstall(t *testing.T) {
+	calls := withInstall(t, installpkg.Result{Target: "/x/cthrone"})
+	calls.err = errors.New("the download does not match the release's checksum")
+
+	setAction(t, func() { doInstall = true })
+
+	var out bytes.Buffer
+
+	err := run(context.Background(), &out)
+	if err == nil {
+		t.Fatal("run() succeeded on a failed install")
+	}
+
+	if !strings.Contains(err.Error(), "checksum") {
+		t.Errorf("run() error = %v, want it to carry the reason", err)
+	}
+}
+
+// Two actions in one command line have no order the user could have meant.
+func TestRunRefusesTwoActions(t *testing.T) {
+	setAction(t, func() {
+		doInstall = true
+		doRevert = true
+	})
+
+	if err := run(context.Background(), &bytes.Buffer{}); err == nil {
+		t.Fatal("run() accepted --install and --revert together")
+	}
+}
+
+// --to names a release to install, so it means nothing without --install.
+func TestRunRefusesToWithoutInstall(t *testing.T) {
+	setAction(t, func() { toTag = "v0.9.0" })
+
+	if err := run(context.Background(), &bytes.Buffer{}); err == nil {
+		t.Fatal("run() accepted --to without --install")
+	}
+}
+
+// setAction sets the command's flags for one test and clears them afterwards.
+func setAction(t *testing.T, set func()) {
+	t.Helper()
+
+	previousCheck, previousInstall, previousRevert, previousTo := check, doInstall, doRevert, toTag
+
+	check, doInstall, doRevert, toTag = false, false, false, ""
+	set()
+
+	t.Cleanup(func() {
+		check, doInstall, doRevert, toTag = previousCheck, previousInstall, previousRevert, previousTo
+	})
 }
