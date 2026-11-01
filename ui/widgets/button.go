@@ -112,6 +112,12 @@ func (b *CopyButton) TappedSecondary(*fyne.PointEvent) {
 	}
 }
 
+// Text is the label the button shows, and what a long press copies unless
+// SetCopyText said otherwise.
+func (b *CopyButton) Text() string {
+	return b.button.Text
+}
+
 // SetText changes the label the button shows.
 //
 // The copy text is deliberately left alone: a phone drops the text of an

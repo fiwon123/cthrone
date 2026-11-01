@@ -140,6 +140,12 @@ type gui struct {
 	aboutNote       *widgets.Text
 	updateBtn       *widgets.CopyButton
 	releaseBtn      *widgets.CopyButton
+	installBtn      *widgets.CopyButton
+	revertBtn       *widgets.CopyButton
+
+	// aboutOffer is the release the check found and the Install button offers;
+	// empty means this build is the newest one, and the button is hidden.
+	aboutOffer string
 
 	// chat
 	tabs      *widgets.Tabs
@@ -1774,6 +1780,15 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 
 	g.releaseBtn = widgets.NewButtonWithIcon("Release page", theme.DownloadIcon(), g.openReleasePage, g.copyLabel)
 
+	// The install and the way back start hidden: one appears when a check finds
+	// a newer release, the other when there is a previous binary beside this
+	// one. A button that can only fail reads as a broken feature.
+	g.installBtn = widgets.NewButtonWithIcon("Install", theme.DownloadIcon(), g.installRelease, g.copyLabel)
+	g.installBtn.Hide()
+
+	g.revertBtn = widgets.NewButtonWithIcon("Revert to previous", theme.ContentUndoIcon(), g.revertRelease, g.copyLabel)
+	g.revertBtn.Hide()
+
 	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
 
 	body := container.NewVBox(
@@ -1784,6 +1799,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		widget.NewSeparator(),
 		g.updateBtn,
 		g.aboutNote,
+		g.installBtn,
+		g.revertBtn,
 		note,
 		g.releaseBtn,
 	)
@@ -1791,6 +1808,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	// The credential line was filled in before this tab existed, so it is
 	// brought up to date now rather than staying empty until the next rebuild.
 	g.refreshCredential()
+	g.refreshRevert()
 
 	return container.NewVScroll(container.NewPadded(body))
 }
@@ -1874,7 +1892,9 @@ func (g *gui) checkUpdates() {
 				return
 			}
 
-			g.setAboutNote(aboutUpdateText(aboutVersion(Version, g.app.Metadata().Version), tag))
+			current := aboutVersion(Version, g.app.Metadata().Version)
+			g.setAboutNote(aboutUpdateText(current, tag))
+			g.offerNewer(current, tag)
 		})
 	}()
 }
