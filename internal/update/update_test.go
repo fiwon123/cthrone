@@ -39,7 +39,7 @@ func TestLatestTag(t *testing.T) {
 			name:    "a rate-limit answer",
 			status:  http.StatusForbidden,
 			body:    `{"message":"API rate limit exceeded"}`,
-			wantErr: "403",
+			wantErr: ErrRateLimited.Error(),
 		},
 		{
 			name:    "a body that is not JSON",
@@ -338,5 +338,65 @@ func TestArchiveNamesMatchTheMakefile(t *testing.T) {
 		if !strings.Contains(text, name) {
 			t.Errorf("the Makefile never builds %q, which ArchiveName names for %s", name, build.name)
 		}
+	}
+}
+
+// The release page answers with a redirect, and that is the whole point: it is
+// not under the API's per-address rate limit (#322).
+func TestLatestTagReadsTheReleasePageRedirect(t *testing.T) {
+	tests := []struct {
+		name     string
+		location string
+		want     string
+	}{
+		{"absolute", "https://github.com/fiwon123/cthrone/releases/tag/v0.12.0", "v0.12.0"},
+		{"relative", "/fiwon123/cthrone/releases/tag/v0.12.1", "v0.12.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Location", tt.location)
+				w.WriteHeader(http.StatusFound)
+			}))
+			defer server.Close()
+
+			got, err := LatestTag(context.Background(), server.Client(), server.URL)
+			if err != nil {
+				t.Fatalf("LatestTag() = %v, want the tag in the location", err)
+			}
+
+			if got != tt.want {
+				t.Errorf("LatestTag() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A 403 says the address is rate limited, which is a different thing from a
+// failed check: the release is there, and waiting works.
+func TestLatestTagNamesARateLimitAsOne(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	_, err := LatestTag(context.Background(), server.Client(), server.URL)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("LatestTag() error = %v, want ErrRateLimited", err)
+	}
+}
+
+// A redirect that does not name a tag is not a tag: the check must not invent
+// one from an URL it does not understand.
+func TestLatestTagIgnoresARedirectWithNoTag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "https://github.com/fiwon123/cthrone/releases")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	if tag, err := LatestTag(context.Background(), server.Client(), server.URL); err == nil {
+		t.Errorf("LatestTag() = %q, want an error for a redirect with no tag", tag)
 	}
 }
