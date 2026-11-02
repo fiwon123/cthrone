@@ -956,6 +956,11 @@ func decodableImage(path string) bool {
 
 // showImage opens a received picture at the size the window allows, which is
 // the "tap to open it full size" half of the inline row.
+//
+// A non-modal popup rather than a dialog: a dialog is modal and a tap outside
+// it does nothing, so the only way out was the Close button — on a phone, the
+// far corner of a screen held in one hand. A popup is dismissed by a tap
+// anywhere the picture is not (#387), which is what every picture viewer does.
 func (g *gui) showImage(path string) {
 	res, err := fyne.LoadResourceFromPath(path)
 	if err != nil {
@@ -970,7 +975,14 @@ func (g *gui) showImage(path string) {
 	size := g.dialogSize()
 	pic.SetMinSize(fyne.NewSize(size.Width*0.8, size.Height*0.8))
 
-	view := dialog.NewCustom(filepath.Base(path), "Close", container.NewStack(pic), g.win)
+	// The popup exists only so Close can reach it; the dismiss-on-tap is the
+	// toolkit's, and the picture's own size is what bounds the view.
+	var view *widget.PopUp
+
+	closeBtn := widgets.NewButton("Close", func() { view.Hide() }, g.copyLabel)
+	body := container.NewBorder(nil, closeBtn, nil, nil, pic)
+
+	view = widget.NewPopUp(body, g.win.Canvas())
 	view.Resize(size)
 	view.Show()
 }
