@@ -212,17 +212,18 @@ type gui struct {
 	// ticker writes to — dropped by whichever row is painted next, because the
 	// list reuses that widget for another message.
 	//
-	// audioDurations remembers a length once a clip has been decoded, so a
-	// repaint can show it without decoding the file again; the decode runs
-	// beside the UI, so the map is guarded by mu. playableFiles is the same
-	// answer per path, and is only touched while painting, like the picture and
-	// text caches.
+	// audioDurations remembers a length, and audioPeaks the waveform, once a
+	// clip has been decoded, so a repaint can show them without decoding the
+	// file again; the decode runs beside the UI, so both maps are guarded by mu.
+	// playableFiles is the same answer per path, and is only touched while
+	// painting, like the picture and text caches.
 	audio          audioEngine
 	audioPath      string
 	audioGen       int
 	audioDuration  time.Duration
 	audioClock     *widgets.Text
 	audioDurations map[string]time.Duration
+	audioPeaks     map[string][]float32
 	playableFiles  map[string]bool
 
 	// devices
