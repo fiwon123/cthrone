@@ -224,6 +224,20 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.11.6` is a patch on that, and the rest of the same report. A row draws the
+sender on a line of its own, bold, in a colour the name decides — the same device
+in the same colour everywhere (#346). Enter sends and Shift+Enter breaks the line,
+the way a chat app a desktop user knows behaves; a phone's enter key sends too
+(#323). With the keyboard up, a tap on the transcript puts it away instead of
+copying a message (#325). A mobile build keeps the stacked layout whatever the
+width, so a rotation cannot bring the two-column desktop layout onto a handset —
+the manifest still asks for portrait, and the request is what one device ignores
+(#302). And a transfer that fails now writes the reason to the log as well as the
+status line (#327).
+
+It does not claim the backspace repeat (#290), the sensor lock (#302), the
+phone-to-phone transfer report (#327), or audio in the app (#306).
+
 `v0.11.5` is a patch on that. The receiver now belongs to the room rather than to
 one device in it: when the newest device left a host, the assembler closed with it
 and every later file from the others was refused as "a file arrived while no
