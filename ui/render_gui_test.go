@@ -73,11 +73,20 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 	}
 
 	var label *widgets.Text
-	for _, object := range caption.Objects {
-		if text, ok := object.(*widgets.Text); ok {
-			label = text
+
+	var find func(object fyne.CanvasObject)
+	find = func(object fyne.CanvasObject) {
+		switch part := object.(type) {
+		case *widgets.Text:
+			label = part
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				find(child)
+			}
 		}
 	}
+
+	find(caption)
 
 	if label == nil {
 		t.Fatalf("the caption cell holds no *widgets.Text: %v", caption.Objects)
@@ -122,8 +131,10 @@ func TestChatRowReportsTransferProgress(t *testing.T) {
 		id   int
 		want string
 	}{
-		{"a quarter through", 0, "You: a.bin — 25% of 1000 B"},
-		{"complete", 1, "You: b.bin — 100% of 2.0 KB"},
+		// The caption carries the body: the sender is on the line above it, in
+		// its own colour (#346).
+		{"a quarter through", 0, "a.bin — 25% of 1000 B"},
+		{"complete", 1, "b.bin — 100% of 2.0 KB"},
 	}
 
 	for _, tt := range tests {

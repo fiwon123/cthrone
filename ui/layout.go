@@ -28,10 +28,12 @@ type screenLayout struct {
 // to be narrow, because stacking early only costs a little space while failing
 // to stack pushes content off the screen.
 func layoutFor(mobile bool, width int) screenLayout {
-	narrow := width > 0 && width < narrowWidth
-	if mobile && width <= 0 {
-		narrow = true
-	}
+	// A phone stays stacked whatever the width. The window's orientation is asked
+	// for as portrait (mobile/AndroidManifest.xml.tmpl), but Android 12L and later
+	// ignore that on large screens for apps targeting older APIs, and a device
+	// that rotates would otherwise bring the two-column desktop layout back onto a
+	// handset (#302). The layout is the part this program can guarantee.
+	narrow := mobile || (width > 0 && width < narrowWidth)
 
 	if !narrow {
 		return screenLayout{Stack: false, ActionColumns: 0, ChatMinWidth: 320}

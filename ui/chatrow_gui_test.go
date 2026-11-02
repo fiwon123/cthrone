@@ -24,7 +24,7 @@ func chatRowWithMessage(t *testing.T, mobile bool) (*gui, fyne.CanvasObject) {
 	g.win.Resize(fyne.NewSize(900, 640))
 	g.win.Content().Refresh()
 
-	want := g.messages[0].line()
+	want := g.messages[0].body()
 
 	row := paintedText(g.win.Content(), want, 0)
 	if row == nil {
@@ -142,5 +142,39 @@ func TestAChatRowStillCopiesOnAPhoneThroughTheTapLayer(t *testing.T) {
 
 	if g.win.Canvas().Overlays().Top() == nil {
 		t.Error("the long press offered no Copy menu")
+	}
+}
+
+// With the keyboard up on a phone, a tap on the transcript puts the keyboard away
+// instead of copying: the tap was meant for Send, and the window moves under it
+// (#325).
+func TestATapWithTheKeyboardUpDoesNotCopy(t *testing.T) {
+	g, _ := chatRowWithMessage(t, true)
+
+	g.win.Canvas().Focus(g.entry)
+
+	before := g.app.Clipboard().Content()
+	g.selectChatRow(0)
+
+	if after := g.app.Clipboard().Content(); after != before {
+		t.Errorf("a tap with the keyboard up copied %q", after)
+	}
+
+	if g.composerHasKeyboard() {
+		t.Error("the tap left the keyboard up; the next tap cannot then be deliberate")
+	}
+}
+
+// On a desktop there is no keyboard to put away: a click on a row still copies.
+func TestAClickOnADesktopCopiesEvenWithTheComposerFocused(t *testing.T) {
+	g, _ := chatRowWithMessage(t, false)
+
+	g.win.Canvas().Focus(g.entry)
+	g.app.Clipboard().SetContent("")
+
+	g.selectChatRow(0)
+
+	if got := g.app.Clipboard().Content(); got == "" {
+		t.Error("a desktop click copied nothing while the composer had focus")
 	}
 }

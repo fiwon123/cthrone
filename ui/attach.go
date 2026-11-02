@@ -457,6 +457,7 @@ func (g *gui) saveTo(note *fileNote, file *wire.File, folder string) {
 			g.refreshTransfer(note)
 		})
 		g.setStatus("Received " + file.Name + ", but could not save it in " + folder + ": " + err.Error())
+		logEvent("saving " + file.Name + " into " + folder + " failed: " + err.Error())
 
 		return
 	}
@@ -666,6 +667,7 @@ func (g *gui) receiveTransfer(from string, frame wire.Frame) {
 	g.mu.Unlock()
 
 	if assembler == nil {
+		logEvent("a frame from " + from + " arrived with no assembler")
 		g.addMessage(chatMessage{from: from, text: "A file arrived while no session was receiving"})
 
 		return
@@ -705,6 +707,7 @@ func (g *gui) receiveTransfer(from string, frame wire.Frame) {
 		g.forgetIncoming(header.ID)
 		g.updateTransfer(entry.note, transferFailed)
 		g.setStatus("Receiving " + entry.note.name + " failed: " + err.Error())
+		logEvent("receiving " + entry.note.name + " from " + from + " failed: " + err.Error())
 
 		return
 	}

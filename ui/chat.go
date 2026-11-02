@@ -92,6 +92,29 @@ func (m chatMessage) line() string {
 	return sender + ": " + m.text
 }
 
+// body is what a message says without the sender in front of it.
+//
+// The row draws the sender on a line of its own, in its own colour (#346), so the
+// caption carries the rest; line() keeps the whole thing for the clipboard, where
+// a bare message would lose who said it.
+func (m chatMessage) body() string {
+	if m.file != nil {
+		return m.file.line()
+	}
+
+	return m.text
+}
+
+// senderDisplay is the name a row shows for its sender: "You" for what this
+// device said, and the authenticated name otherwise.
+func (m chatMessage) senderDisplay() string {
+	if m.from == "" {
+		return "You"
+	}
+
+	return m.from
+}
+
 // senderLabel is how an arriving message is attributed in the transcript: the
 // device name, with the address it came from when the transport knows one.
 //
