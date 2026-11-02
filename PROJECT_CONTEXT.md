@@ -224,6 +224,17 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.11.7` is a patch on that, and the rest of the same report. Enter is
+deterministic on a phone: it always breaks the line, and the Send button or the
+keyboard's action key sends — the append rule #323 inferred could send or break the
+same key depending on a flag nothing on a phone sets (#362). A desktop keeps Enter
+sends and Shift+Enter newline. The About version is part of the name's own line
+(`cthrone  v<tag>`), the Chat tab's status line exists only while it has something
+to say, and the connection mark is a character in the same text as its word, so
+they share a baseline (#364). A transfer failure writes nothing about the file to
+the log — a name and a path are the user's — and a phone's update check names the
+release on the button that opens the release page (#366).
+
 `v0.11.6` is a patch on that, and the rest of the same report. A row draws the
 sender on a line of its own, bold, in a colour the name decides — the same device
 in the same colour everywhere (#346). Enter sends and Shift+Enter breaks the line,
