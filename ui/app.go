@@ -178,6 +178,10 @@ type gui struct {
 	attachBtn *widgets.CopyButton
 	messages  []chatMessage
 
+	// lastPick is the folder the last attached file came from: the picker opens
+	// there next time instead of walking the toolkit's place list (#386).
+	lastPick string
+
 	// statusShowsState is whether the chat header's one line is currently the
 	// connection state, rather than a message about something that just
 	// happened. A message wins until it is cleared; the state then takes the

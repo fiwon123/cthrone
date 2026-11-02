@@ -83,10 +83,65 @@ func (g *gui) pickFile() {
 			return
 		}
 
+		g.rememberPick(reader)
 		g.queuePick(reader)
 	}, g.win)
 	picker.Resize(g.dialogSize())
+
+	// Open where the user last picked from, or in the folder received files
+	// land in — not in the toolkit's default list of places. On Windows that
+	// list is the home folder and its Quick Access, which can be OneDrive or a
+	// disconnected share: enumerating it is what made Attach take seconds
+	// (#386).
+	if start := g.pickStart(); start != nil {
+		picker.SetLocation(start)
+	}
+
 	picker.Show()
+}
+
+// pickStart is the folder the file picker opens in: the one the user last
+// picked from, else the folder received files land in, else the home folder.
+//
+// It is a folder this program already knows, not the toolkit's list of places:
+// the point is that opening the picker does not walk anything slow — on
+// Windows that list can be the home folder's Quick Access, OneDrive, or a
+// share that is no longer connected (#386). A directory that is not there is
+// skipped rather than opened.
+func (g *gui) pickStart() fyne.ListableURI {
+	home, _ := os.UserHomeDir()
+
+	for _, dir := range []string{g.lastPick, g.downloadDir(), home} {
+		if dir == "" {
+			continue
+		}
+
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue
+		}
+
+		uri, err := storage.ListerForURI(storage.NewFileURI(dir))
+		if err != nil {
+			continue
+		}
+
+		return uri
+	}
+
+	return nil
+}
+
+// rememberPick records the folder a pick came from, so the next one opens
+// there. A phone's content:// URI has no folder to remember.
+func (g *gui) rememberPick(reader fyne.URIReadCloser) {
+	uri := reader.URI()
+	if uri == nil || uri.Scheme() != "file" {
+		return
+	}
+
+	if dir := filepath.Dir(uri.Path()); dir != "." && dir != "" {
+		g.lastPick = dir
+	}
 }
 
 // sourcePath is the picked file on this device's disk, or "" when the picker
