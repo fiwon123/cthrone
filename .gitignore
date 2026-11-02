@@ -50,3 +50,6 @@ go.work.sum
 
 # Rendered by `make gui-android` from mobile/AndroidManifest.xml.tmpl.
 /mobile/AndroidManifest.xml
+
+# Written by `make gui-android` with the release tag.
+/mobile/version_build.go

@@ -170,3 +170,43 @@ func TestTheBuildNumberComesFromTheVersion(t *testing.T) {
 		t.Error("the Android build number is not derived from the version")
 	}
 }
+
+// The APK's own version comes from the build, not from the packager: the desktop
+// GUI archives get `-X ui.Version`, and the APK got nothing, so its About tab
+// fell back to metadata that is not the tag (#343).
+func TestTheAPKVersionComesFromTheBuild(t *testing.T) {
+	main, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+
+	if !strings.Contains(string(main), "ui.Version = buildVersion") {
+		t.Error("main does not hand the build's version to the GUI")
+	}
+
+	makefile, err := os.ReadFile(filepath.Join("..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read the Makefile: %v", err)
+	}
+
+	recipe := string(makefile)
+
+	if !strings.Contains(recipe, "version_build.go") {
+		t.Error("the Android build does not generate the version file")
+	}
+
+	if !strings.Contains(recipe, "gui versionfile") {
+		t.Error("the Android build does not package with the versionfile tag")
+	}
+
+	// The default (no tag) must be empty, so a plain `go build` says nothing
+	// rather than an invented version.
+	versionFile, err := os.ReadFile("version.go")
+	if err != nil {
+		t.Fatalf("read version.go: %v", err)
+	}
+
+	if !strings.Contains(string(versionFile), `buildVersion = ""`) {
+		t.Error("the default buildVersion is not empty")
+	}
+}

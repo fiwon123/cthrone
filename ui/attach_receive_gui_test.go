@@ -157,3 +157,91 @@ func TestASecondDeviceJoiningKeepsTheAssembler(t *testing.T) {
 		t.Error("the newest session is not the one the window sends through")
 	}
 }
+
+// A device leaving the room must not take the receiver with it: the other device
+// is still connected and still sends files (#342).
+func TestAFileArrivesAfterAnotherDeviceLeaves(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	first := recorder(t, "laptop")
+	second := recorder(t, "phone")
+
+	g.attach(first)
+	g.attach(second)
+
+	g.mu.Lock()
+	before := g.assembler
+	g.mu.Unlock()
+
+	// The newest session leaves, which is the one g.sess pointed at.
+	second.Close("the phone went away")
+
+	g.mu.Lock()
+	after := g.assembler
+	live := g.liveSessions
+	g.mu.Unlock()
+
+	if before == nil {
+		t.Fatal("the first session installed no assembler")
+	}
+
+	if after != before {
+		t.Error("a device leaving the room closed the receiver, so the remaining device cannot send a file")
+	}
+
+	if live != 1 {
+		t.Errorf("the room counts %d live session(s), want 1", live)
+	}
+
+	// And a file from the device that stayed is accepted rather than refused.
+	body := bytes.Repeat([]byte("still here "), 4_000)
+	recorderOut := newSendRecorder()
+
+	if err := sendFile(context.Background(), recorderOut, "id-1", "notes.txt", "text/plain", int64(len(body)), bytes.NewReader(body), nil); err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+
+	recorderOut.mu.Lock()
+	frames := append([][]byte(nil), recorderOut.sent...)
+	recorderOut.mu.Unlock()
+
+	for _, frame := range frames {
+		g.receiveFrame("laptop", frame)
+	}
+
+	saved := filepath.Join(g.fileSettings().folder, "notes.txt")
+	got, err := os.ReadFile(saved)
+	if err != nil {
+		t.Fatalf("the remaining device's file did not land: %v", err)
+	}
+
+	if !bytes.Equal(got, body) {
+		t.Errorf("the file that landed has %d bytes, want %d", len(got), len(body))
+	}
+}
+
+// A client's session ending is the end of its receiving, as before.
+func TestAClientsCloseEndsItsReceiving(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	only := recorder(t, "host")
+	g.attach(only)
+
+	g.mu.Lock()
+	before := g.assembler
+	g.mu.Unlock()
+
+	only.Close("the host stopped")
+
+	g.mu.Lock()
+	after := g.assembler
+	g.mu.Unlock()
+
+	if before == nil {
+		t.Fatal("the session installed no assembler")
+	}
+
+	if after != nil {
+		t.Error("the receiver survived its only session, so a half file is kept for a connection that is gone")
+	}
+}

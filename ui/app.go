@@ -192,12 +192,23 @@ type gui struct {
 	hub    *session.Hub
 	server liveServer
 
+	// liveSessions is how many sessions this window holds. A host holds one per
+	// device in its room, and the receiver is prepared for the first and closed
+	// with the last (#342).
+	liveSessions int
+
 	// What the transcript has already decoded or read, by path, so a repaint
 	// does not do the I/O again (#321). They are only touched while painting,
 	// which happens on the UI goroutine.
 	pictures       map[string]fyne.Resource
 	decodableFiles map[string]bool
 	texts          map[string]string
+
+	// stateText and stateDot are the chat header's connection state, and
+	// peerName is who a session is with, when the handshake named one (#345).
+	stateText *widgets.Text
+	stateDot  *canvas.Circle
+	peerName  string
 
 	// updateTag and updateAt are the last successful check and when it ran, so a
 	// second press is answered from memory (#322).
@@ -388,14 +399,20 @@ func (g *gui) build() {
 	g.lay = layoutFor(g.mobile, g.canvasWidth())
 
 	// --- chat ---------------------------------------------------------
-	// The desktop window already says "cthrone" in its title bar, so the header
-	// carries only what a title bar cannot: the name on a phone, which has no
-	// title bar to show it in, the copy confirmation, and the Files action.
+	// The header says where this window stands — offline, hosting, connected to
+	// whom — because that is the one thing the transcript cannot say for itself
+	// once the status line has been overwritten. It never carries the app's name:
+	// on a phone that was the whole left side, spent on the one word the user
+	// already knows (#345).
 	//
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
 	g.copyHint = g.label("")
+	g.stateDot = canvas.NewCircle(theme.Color(theme.ColorNameDisabled))
+	g.stateText = g.text("")
+
+	g.refreshConnectionState()
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -408,11 +425,12 @@ func (g *gui) build() {
 	filesBtn := widgets.NewButtonWithIcon("Files", theme.FolderIcon(), g.showFiles, g.copyLabel)
 	filesBtn.SetText(filesLabel)
 
-	header := container.NewHBox()
-	if g.mobile {
-		header.Add(widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-	}
+	state := container.NewHBox(
+		container.NewGridWrap(fyne.NewSize(10, 10), g.stateDot),
+		g.stateText,
+	)
 
+	header := container.NewHBox(state)
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
 
@@ -494,7 +512,8 @@ func (g *gui) build() {
 	g.entry.Wrapping = fyne.TextWrapWord
 	withClear(g.entry)
 	g.entry.SetMinRowsVisible(1)
-	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
+	// No placeholder: the field says nothing until the user types, and the
+	// keyboard's behaviour belongs in the docs, not in the message (#344).
 	g.entry.OnChanged = g.growComposer
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
@@ -1206,6 +1225,7 @@ func (g *gui) stop() {
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.liveSessions = 0
 
 	// A Start that is still in flight is cancelled: its server closes itself
 	// when it opens instead of becoming the live one. Until this stop has
@@ -1251,6 +1271,7 @@ func (g *gui) shutdown() {
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.liveSessions = 0
 	g.startSeq++
 	g.mu.Unlock()
 
@@ -1466,21 +1487,43 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 // --- session plumbing -------------------------------------------------
 
 // attach makes sess the live session and renders what it carries.
-func (g *gui) attach(sess session.Session) {
-	// A session owns its assembler: a half-received file belongs to the
-	// connection that was carrying it, and the next connection starts clean.
-	//
-	// A device joining a room is not a new connection for the one already in it.
-	// A host calls attach for every peer, and resetting the assembler on each
-	// join closed the part file a running transfer was writing — the next chunk
-	// then failed with "starts at chunk N, not 0" (#286). So the reset happens
-	// only when there was no live session, which is a real start: a reconnect
-	// clears g.sess on close first.
+// sessionJoined counts one more live session and reports whether it is the
+// first, which is when the receiver has to be prepared.
+func (g *gui) sessionJoined() bool {
 	g.mu.Lock()
-	first := g.sess == nil
-	g.mu.Unlock()
+	defer g.mu.Unlock()
 
-	if first {
+	g.liveSessions++
+
+	return g.liveSessions == 1
+}
+
+// sessionLeft counts one out and reports whether the room is now empty, which is
+// when the receiver goes away.
+func (g *gui) sessionLeft() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.liveSessions > 0 {
+		g.liveSessions--
+	}
+
+	return g.liveSessions == 0
+}
+
+func (g *gui) attach(sess session.Session) {
+	// The receiver belongs to the room, not to a session: a half-received file
+	// belongs to the connection that was carrying it, and the next connection
+	// starts clean — but a *device* joining a room is not a new connection for
+	// the one already in it.
+	//
+	// Preparing on every join closed the part file a running transfer was
+	// writing (#286); preparing only when g.sess was nil was worse in the other
+	// direction, because g.sess is just the newest session — when *it* left, the
+	// receiver went with it while the rest of the room was still there, and a
+	// file from a remaining device was refused with "no session was receiving"
+	// (#342). So the count of live sessions decides.
+	if g.sessionJoined() {
 		g.prepareReceive()
 	}
 
@@ -1501,6 +1544,11 @@ func (g *gui) attach(sess session.Session) {
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			g.mu.Lock()
+			g.peerName = p.Name()
+			g.mu.Unlock()
+
+			fyne.Do(g.refreshConnectionState)
 			peer.set(p.Name())
 
 			if p.First && p.Fingerprint != "" {
@@ -1547,8 +1595,11 @@ func (g *gui) attach(sess session.Session) {
 		}
 		g.mu.Unlock()
 
-		if closed {
+		if g.sessionLeft() {
 			g.finishReceive()
+		}
+
+		if closed {
 
 			// A session the user ended is not a peer who left: Stop clears the
 			// live session before it closes it, so only a close that arrives
@@ -1578,6 +1629,39 @@ func (g *gui) growComposer(text string) {
 
 	g.composerRows = rows
 	g.entry.SetMinRowsVisible(rows)
+}
+
+// refreshConnectionState writes the chat header's state: offline, connecting,
+// hosting, or connected to the device the handshake named.
+//
+// It reads the same fields the buttons do, so there is one truth about whether
+// this window is in a session (#345).
+func (g *gui) refreshConnectionState() {
+	if g.stateText == nil || g.stateDot == nil {
+		return
+	}
+
+	g.mu.Lock()
+	sess, server, starting, peer := g.sess, g.server, g.starting, g.peerName
+	g.mu.Unlock()
+
+	text, colour := "offline", theme.ColorNameDisabled
+
+	switch {
+	case starting:
+		text, colour = "connecting…", theme.ColorNameWarning
+	case server != nil:
+		text, colour = "hosting", theme.ColorNameSuccess
+	case sess != nil:
+		text, colour = "connected", theme.ColorNameSuccess
+		if peer != "" {
+			text = "connected to " + peer
+		}
+	}
+
+	g.stateText.SetText(text)
+	g.stateDot.FillColor = theme.Color(colour)
+	g.stateDot.Refresh()
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
@@ -2020,14 +2104,15 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 // not, so a phone drops the version under the name instead of squeezing it. The
 // icon is the one the window and the APK carry, not a second copy.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
-	logo := widget.NewIcon(appIcon())
-	name := container.NewHBox(logo, g.textHeading("cthrone"))
-
-	if g.lay.Stack {
-		return container.NewVBox(name, g.text(version))
-	}
-
-	return container.NewBorder(nil, nil, nil, g.text(version), name)
+	// One group: the mark, the name, and the version immediately after it. The
+	// version used to sit at the right edge of the header, which on a wide window
+	// reads as "on the right side of the screen" rather than as part of the name
+	// (#343).
+	return container.NewHBox(
+		widget.NewIcon(appIcon()),
+		g.textHeading("cthrone"),
+		g.text(version),
+	)
 }
 
 // openRepository opens the project's page in the browser.

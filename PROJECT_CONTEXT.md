@@ -224,6 +224,21 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.11.5` is a patch on that. The receiver now belongs to the room rather than to
+one device in it: when the newest device left a host, the assembler closed with it
+and every later file from the others was refused as "a file arrived while no
+session was receiving" (#342). The Android app reports the tag it was built from —
+the build writes it in, where before the APK fell back to packager metadata — and
+the version sits beside the name instead of at the screen's edge (#343). The
+composer has no placeholder (#344), and the chat header says, with a mark and a
+word, whether this window is offline, connecting, hosting, or connected to a named
+device — never the app's own name (#345).
+
+It does not claim colours per sender (#346) or Enter-to-send (#323), and the rest
+of that report is still open: backspace repeat (#290), the portrait lock on a phone
+that still rotates (#302), the two phone-only reports (#325, #327), and audio in
+the app (#306).
+
 `v0.11.4` is a patch on that. A host's own message and file now reach the whole
 room instead of the last device that joined — a host relays its clients but spoke
 through the one session it happened to hold (#320). The transcript stops decoding

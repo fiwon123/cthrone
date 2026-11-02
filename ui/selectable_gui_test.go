@@ -233,8 +233,8 @@ func headerParts(t *testing.T, root fyne.CanvasObject) (*widget.Icon, *widgets.T
 	return icon, texts[0], texts[1]
 }
 
-// The header carries the app's mark beside its name, with the version at the
-// right of that line where the width allows it (#329).
+// The header carries the app's mark, its name, and the version immediately after
+// it — one group, not a version pinned to the screen's edge (#329, #343).
 func TestAboutHeaderShowsTheLogoTheNameAndTheVersion(t *testing.T) {
 	for _, mobile := range []bool{false, true} {
 		name := "desktop"
@@ -245,7 +245,14 @@ func TestAboutHeaderShowsTheLogoTheNameAndTheVersion(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			g := newScreenGUI(t, mobile)
 
-			icon, title, version := headerParts(t, g.aboutHeader("v0.8.3"))
+			header := g.aboutHeader("v0.8.3")
+
+			box, ok := header.(*fyne.Container)
+			if !ok || len(box.Objects) != 3 {
+				t.Fatalf("the header is %T holding %d object(s), want the mark, the name and the version in one row", header, len(box.Objects))
+			}
+
+			icon, title, version := headerParts(t, header)
 
 			if !icon.Visible() {
 				t.Error("the header draws no logo")
