@@ -193,31 +193,76 @@ func TestDesktopSetupFormUsesTwoColumns(t *testing.T) {
 	}
 }
 
-func TestAboutHeaderStacksNameAboveVersion(t *testing.T) {
-	g := newScreenGUI(t, false)
+// headerParts finds the app icon, the name and the version wherever the header
+// puts them: side by side on a desktop, the version under the name on a phone
+// (#329).
+func headerParts(t *testing.T, root fyne.CanvasObject) (*widget.Icon, *widgets.Text, *widgets.Text) {
+	t.Helper()
 
-	box, ok := g.aboutHeader("v0.8.3").(*fyne.Container)
-	if !ok {
-		t.Fatalf("header is %T, want a container", g.aboutHeader("v0.8.3"))
-	}
-	if len(box.Objects) != 2 {
-		t.Fatalf("header holds %d objects, want the name and the version", len(box.Objects))
+	var icon *widget.Icon
+	var texts []*widgets.Text
+
+	var walk func(obj fyne.CanvasObject, depth int)
+	walk = func(obj fyne.CanvasObject, depth int) {
+		if obj == nil || depth > 8 {
+			return
+		}
+
+		switch part := obj.(type) {
+		case *widget.Icon:
+			icon = part
+		case *widgets.Text:
+			texts = append(texts, part)
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				walk(child, depth+1)
+			}
+		case fyne.Widget:
+			for _, child := range test.WidgetRenderer(part).Objects() {
+				walk(child, depth+1)
+			}
+		}
 	}
 
-	name, ok := box.Objects[0].(*widgets.Text)
-	if !ok {
-		t.Fatalf("header[0] is %T, want the name", box.Objects[0])
-	}
-	if name.Text() != "cthrone" || !name.TextStyle().Bold {
-		t.Errorf("name = %q (bold %v), want the bold app name", name.Text(), name.TextStyle().Bold)
+	walk(root, 0)
+
+	if icon == nil || len(texts) < 2 {
+		t.Fatalf("the header holds icon=%v and %d text(s), want the logo, the name and the version", icon != nil, len(texts))
 	}
 
-	version, ok := box.Objects[1].(*widgets.Text)
-	if !ok {
-		t.Fatalf("header[1] is %T, want the version", box.Objects[1])
-	}
-	if version.Text() != "v0.8.3" {
-		t.Errorf("version = %q, want %q", version.Text(), "v0.8.3")
+	return icon, texts[0], texts[1]
+}
+
+// The header carries the app's mark beside its name, with the version at the
+// right of that line where the width allows it (#329).
+func TestAboutHeaderShowsTheLogoTheNameAndTheVersion(t *testing.T) {
+	for _, mobile := range []bool{false, true} {
+		name := "desktop"
+		if mobile {
+			name = "phone"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			g := newScreenGUI(t, mobile)
+
+			icon, title, version := headerParts(t, g.aboutHeader("v0.8.3"))
+
+			if !icon.Visible() {
+				t.Error("the header draws no logo")
+			}
+
+			if icon.Resource == nil {
+				t.Error("the logo has no resource, so it paints nothing")
+			}
+
+			if title.Text() != "cthrone" || !title.TextStyle().Bold {
+				t.Errorf("name = %q (bold %v), want the bold app name", title.Text(), title.TextStyle().Bold)
+			}
+
+			if version.Text() != "v0.8.3" {
+				t.Errorf("version = %q, want %q", version.Text(), "v0.8.3")
+			}
+		})
 	}
 }
 

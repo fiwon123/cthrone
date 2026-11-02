@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -33,10 +34,19 @@ const (
 	// are listed. It is what the About tab's button opens.
 	ReleasesURL = RepositoryURL + "/releases"
 
-	// LatestReleaseURL is what a check reads: GitHub's newest published
-	// release. It is deliberately the public API without a token — the check
-	// runs when a user asks, and must never need a credential.
-	LatestReleaseURL = "https://api.github.com/repos/fiwon123/cthrone/releases/latest"
+	// LatestReleaseURL is what a check reads: the release page's "latest"
+	// redirect, not the API.
+	//
+	// The API allows 60 requests an hour per IP address without a token, so one
+	// user pressing the button a few times can spend an office or a phone
+	// carrier's whole budget and everyone behind it then reads 403 (#322). The
+	// page redirect is not under that limit, needs no credential, and names the
+	// same tag in its Location header.
+	LatestReleaseURL = "https://github.com/fiwon123/cthrone/releases/latest"
+
+	// LatestReleaseAPIURL is the JSON endpoint, kept for the fallback a caller
+	// may choose: it answers a tag in the body, and is rate limited.
+	LatestReleaseAPIURL = "https://api.github.com/repos/fiwon123/cthrone/releases/latest"
 
 	// CheckTimeout bounds the whole check. A window must not wait on a network:
 	// five seconds is long enough for a slow link and short enough that a dead
@@ -51,6 +61,11 @@ const (
 // ErrNoReleaseVersion is reported when the release list answered 200 with a
 // document that names no tag.
 var ErrNoReleaseVersion = errors.New("the release list named no version")
+
+// ErrRateLimited says GitHub refused the request because too many were made from
+// this address. It is a different answer from "the check failed": the release is
+// there, and trying again later works.
+var ErrRateLimited = errors.New("GitHub is rate limiting this address; try again in a while")
 
 // LatestTag asks url for the newest release's tag.
 //
@@ -67,11 +82,30 @@ func LatestTag(ctx context.Context, client *http.Client, url string) (string, er
 	// in front of it can answer an HTML page that parses as an empty release.
 	request.Header.Set("Accept", "application/vnd.github+json")
 
-	response, err := client.Do(request)
+	// The release page answers with a redirect, and the tag is in its Location:
+	// the client must stop rather than follow it. The copy keeps the caller's
+	// timeout and transport.
+	direct := *client
+	direct.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	response, err := direct.Do(request)
 	if err != nil {
 		return "", err
 	}
 	defer response.Body.Close()
+
+	// A 3xx is the answer for a release page: the tag is the last segment of the
+	// location it points at. It is checked before the status, because a redirect
+	// is a success here and not an error.
+	if tag := tagFromLocation(response.Header.Get("Location")); tag != "" {
+		return tag, nil
+	}
+
+	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests {
+		return "", ErrRateLimited
+	}
 
 	if response.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("the release list answered %s", response.Status)
@@ -95,6 +129,26 @@ func LatestTag(ctx context.Context, client *http.Client, url string) (string, er
 	}
 
 	return tag, nil
+}
+
+// tagFromLocation reads a tag out of a release redirect: /releases/tag/v1.2.3.
+func tagFromLocation(location string) string {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(location)
+	if err != nil {
+		return ""
+	}
+
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 3 || parts[len(parts)-2] != "tag" {
+		return ""
+	}
+
+	return parts[len(parts)-1]
 }
 
 // Text is the answer a user is shown: whether this build is behind, and which

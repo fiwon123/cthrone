@@ -221,23 +221,31 @@ func TestComposerHint(t *testing.T) {
 	}
 }
 
-// TestComposerRowCount checks the composer's height ceiling: a few lines and
-// then the text scrolls, with less room taken on a phone than on a desktop.
-func TestComposerRowCount(t *testing.T) {
-	desktop, touch := composerRowCount(false), composerRowCount(true)
-
-	if desktop != composerRowsDesktop || touch != composerRowsTouch {
-		t.Fatalf("composerRowCount = %d/%d, want %d/%d", desktop, touch, composerRowsDesktop, composerRowsTouch)
+// The composer starts at one line and grows with the message, up to a ceiling
+// where the text scrolls inside it (#324). Past that it stops being a composer
+// and starts being the screen.
+func TestComposerRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		columns int
+		want    int
+	}{
+		{"empty", "", 40, 1},
+		{"one line", "hello", 40, 1},
+		{"a newline", "hello\n", 40, 2},
+		{"three lines", "a\nb\nc", 40, 3},
+		{"a long paragraph wraps", strings.Repeat("x", 120), 40, 3},
+		{"more than the ceiling", strings.Repeat("x\n", 20), 40, composerRowsMax},
+		{"no measurement yet uses the default", strings.Repeat("x", 30), 0, 1},
 	}
 
-	if touch > desktop {
-		t.Errorf("the phone gets %d rows and the desktop %d, want the phone to get no more", touch, desktop)
-	}
-
-	// Past half a dozen rows the field stops being a composer and starts being
-	// the screen; the transcript is what the window is for.
-	if desktop > 5 {
-		t.Errorf("the composer shows %d rows, want a small ceiling", desktop)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := composerRows(tt.text, tt.columns); got != tt.want {
+				t.Errorf("composerRows(%q, %d) = %d, want %d", tt.text, tt.columns, got, tt.want)
+			}
+		})
 	}
 }
 

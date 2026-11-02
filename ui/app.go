@@ -183,9 +183,30 @@ type gui struct {
 	listHint   *widgets.Text
 	listener   *discovery.Listener
 
-	mu     sync.Mutex
-	sess   session.Session
+	mu   sync.Mutex
+	sess session.Session
+
+	// hub is the room this window hosts, while it hosts. A host's own message
+	// goes through it, not through the one session `sess` happens to hold: a
+	// host with two devices used to reach only the last one that joined (#320).
+	hub    *session.Hub
 	server liveServer
+
+	// What the transcript has already decoded or read, by path, so a repaint
+	// does not do the I/O again (#321). They are only touched while painting,
+	// which happens on the UI goroutine.
+	pictures       map[string]fyne.Resource
+	decodableFiles map[string]bool
+	texts          map[string]string
+
+	// updateTag and updateAt are the last successful check and when it ran, so a
+	// second press is answered from memory (#322).
+	updateTag string
+	updateAt  time.Time
+
+	// composerRows is the row count the message field is showing, so a keystroke
+	// that does not change it does not re-lay the field out (#324).
+	composerRows int
 
 	// starting and stopping guard the handover of the transport. While either
 	// is set, Host and Connect are disabled: a start that is still binding and a
@@ -472,21 +493,21 @@ func (g *gui) build() {
 	g.entry = widget.NewMultiLineEntry()
 	g.entry.Wrapping = fyne.TextWrapWord
 	withClear(g.entry)
-	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
+	g.entry.SetMinRowsVisible(1)
 	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
+	g.entry.OnChanged = g.growComposer
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
+	// Send is the primary action of the composer: the filled (high) importance
+	// makes it the thing a thumb finds without reading (#324).
+	g.sendBtn.SetImportance(widget.HighImportance)
 	g.sendBtn.Disable()
 
-	attachLabel := "Attach"
-	if g.lay.Stack {
-		// The paperclip says it on a phone, where the row has no width to spare.
-		attachLabel = ""
-	}
-
 	g.attachBtn = widgets.NewButtonWithIcon("Attach", theme.MailAttachmentIcon(), g.pickFile, g.copyLabel)
-	g.attachBtn.SetText(attachLabel)
+	// The paperclip is the label: in a chat composer the icon is the word, and
+	// the row's width belongs to the field (#324).
+	g.attachBtn.SetText("")
 	g.attachBtn.Disable()
 
 	// The queue starts with the window and outlives any one session: a file
@@ -1034,7 +1055,10 @@ func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 		return
 	}
 
-	if !g.finishStart(seq, func() { g.server = handle }) {
+	if !g.finishStart(seq, func() {
+		g.server = handle
+		g.hub = handle.Hub()
+	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)
 
@@ -1070,7 +1094,10 @@ func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts 
 	// binding released the port it was told about, not this one, so this
 	// server closes itself: otherwise the app would be running a host with
 	// nobody holding the button that stops it.
-	if !g.finishStart(seq, func() { g.server = handle }) {
+	if !g.finishStart(seq, func() {
+		g.server = handle
+		g.hub = handle.Hub()
+	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)
 
@@ -1178,7 +1205,7 @@ func (g *gui) stop() {
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
-	g.sess, g.server = nil, nil
+	g.sess, g.server, g.hub = nil, nil, nil
 
 	// A Start that is still in flight is cancelled: its server closes itself
 	// when it opens instead of becoming the live one. Until this stop has
@@ -1223,7 +1250,7 @@ func (g *gui) shutdown() {
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
-	g.sess, g.server = nil, nil
+	g.sess, g.server, g.hub = nil, nil, nil
 	g.startSeq++
 	g.mu.Unlock()
 
@@ -1243,12 +1270,9 @@ func (g *gui) send(text string) {
 		return
 	}
 
-	g.mu.Lock()
-	sess := g.sess
-	g.mu.Unlock()
-
-	if sess == nil {
-		g.setStatus("Nothing to send to — connect, or wait for a device to join")
+	sender, err := g.outgoing()
+	if err != nil {
+		g.setStatus("Nothing to send to — " + err.Error())
 
 		return
 	}
@@ -1269,7 +1293,7 @@ func (g *gui) send(text string) {
 	g.addMessage(chatMessage{text: text})
 
 	go func() {
-		if err := sess.Send(payload); err != nil {
+		if err := sender.Send(payload); err != nil {
 			g.setStatus("Send failed: " + err.Error())
 		}
 	}()
@@ -1536,6 +1560,24 @@ func (g *gui) attach(sess session.Session) {
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
 	})
+}
+
+// growComposer gives the field the rows its text needs, within the ceiling.
+//
+// Only a change of row count touches the widget: SetMinRowsVisible re-lays the
+// field out, and doing that on every keystroke is what makes typing feel heavy.
+func (g *gui) growComposer(text string) {
+	if g.entry == nil {
+		return
+	}
+
+	rows := composerRows(text, composerColumns(g.entry.Size().Width))
+	if rows == g.composerRows {
+		return
+	}
+
+	g.composerRows = rows
+	g.entry.SetMinRowsVisible(rows)
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
@@ -1971,16 +2013,21 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	return container.NewVScroll(container.NewPadded(body))
 }
 
-// aboutHeader is the app's name above the version it is running.
+// aboutHeader is the app's mark, its name and the version it is running.
 //
-// It is a block rather than one line so a phone and a desktop draw the same
-// header: side by side, a narrow window has to either wrap the name or push the
-// version out of the pane.
+// The logo sits at the left of the name, and the version at the right of the
+// same line where the width allows it — a desktop has room, and a phone does
+// not, so a phone drops the version under the name instead of squeezing it. The
+// icon is the one the window and the APK carry, not a second copy.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
-	return container.NewVBox(
-		g.textHeading("cthrone"),
-		g.text(version),
-	)
+	logo := widget.NewIcon(appIcon())
+	name := container.NewHBox(logo, g.textHeading("cthrone"))
+
+	if g.lay.Stack {
+		return container.NewVBox(name, g.text(version))
+	}
+
+	return container.NewBorder(nil, nil, nil, g.text(version), name)
 }
 
 // openRepository opens the project's page in the browser.
@@ -2025,6 +2072,12 @@ func (g *gui) openPage(address string) {
 	}
 }
 
+// updateCacheWindow is how long one check's answer is reused. The GitHub API
+// allows 60 requests an hour per address, so pressing the button repeatedly used
+// to spend a shared budget and then read 403 (#322). The release page's redirect
+// is not rate limited, and this keeps even that to one request per window.
+const updateCacheWindow = 10 * time.Minute
+
 // checkUpdates asks GitHub for the newest release, off the UI goroutine.
 //
 // The answer is always written back through fyne.Do, including the failures: a
@@ -2033,6 +2086,21 @@ func (g *gui) openPage(address string) {
 var checkReleaseURL = updatepkg.LatestReleaseURL
 
 func (g *gui) checkUpdates() {
+	// A check made a moment ago is the answer: pressing again is not a new
+	// question, and every request costs against a limit shared by the address
+	// (#322).
+	g.mu.Lock()
+	cached, when := g.updateTag, g.updateAt
+	g.mu.Unlock()
+
+	if cached != "" && time.Since(when) < updateCacheWindow {
+		current := aboutVersion(Version, g.app.Metadata().Version)
+		g.setAboutNote(aboutUpdateText(current, cached))
+		g.offerNewer(current, cached)
+
+		return
+	}
+
 	if g.updateBtn != nil {
 		g.updateBtn.Disable()
 	}
@@ -2055,6 +2123,10 @@ func (g *gui) checkUpdates() {
 
 				return
 			}
+
+			g.mu.Lock()
+			g.updateTag, g.updateAt = tag, time.Now()
+			g.mu.Unlock()
 
 			current := aboutVersion(Version, g.app.Metadata().Version)
 			g.setAboutNote(aboutUpdateText(current, tag))

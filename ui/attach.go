@@ -23,7 +23,6 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/fiwon123/cthrone/internal/wire"
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
@@ -210,13 +209,10 @@ func (g *gui) sendTransfer(item outgoing) {
 	// the outcome: cancelled, failed, or sent.
 	defer os.Remove(item.path)
 
-	g.mu.Lock()
-	sess := g.sess
-	g.mu.Unlock()
-
-	if sess == nil {
+	sender, err := g.outgoing()
+	if err != nil {
 		g.updateTransfer(item.note, transferFailed)
-		g.setStatus("Nothing to send to — connect first")
+		g.setStatus("Nothing to send to — " + err.Error())
 
 		return
 	}
@@ -235,7 +231,7 @@ func (g *gui) sendTransfer(item outgoing) {
 
 	g.trackTransfer(item.id, cancel)
 
-	err = sendFile(ctx, sess, item.id, item.name, item.mime, item.size, file, func(sent int64) {
+	err = sendFile(ctx, sender, item.id, item.name, item.mime, item.size, file, func(sent int64) {
 		g.updateProgress(item.note, sent)
 	})
 
@@ -249,7 +245,7 @@ func (g *gui) sendTransfer(item outgoing) {
 		// Tell the other side rather than leaving it holding a half file until
 		// its assembler times out. Best effort: a session that has gone away
 		// carries nothing, and the timeout is still the backstop.
-		g.sendAbort(sess, item.id)
+		g.sendAbort(sender, item.id)
 		g.removeTransfer(item.note)
 		g.setStatus("Sending " + item.name + " cancelled")
 
@@ -260,13 +256,13 @@ func (g *gui) sendTransfer(item outgoing) {
 }
 
 // sendAbort tells the peer that a transfer will send no more bytes.
-func (g *gui) sendAbort(sess session.Session, id string) {
+func (g *gui) sendAbort(sender chunkSender, id string) {
 	frame, err := wire.Encode(wire.Header{Kind: wire.KindAbort, ID: id}, nil)
 	if err != nil {
 		return
 	}
 
-	_ = sess.Send(frame)
+	_ = sender.Send(frame)
 }
 
 // receiveAbort is the other end of sendAbort: the sender gave up, so what was
@@ -826,8 +822,8 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	path := m.file.path
 
 	switch {
-	case path != "" && m.file.inline && decodableImage(path):
-		if res, err := fyne.LoadResourceFromPath(path); err == nil {
+	case path != "" && m.file.inline && g.decodable(path):
+		if res := g.previewPicture(path); res != nil {
 			showPicture(pic, res)
 		} else {
 			pic.Hide()
@@ -848,7 +844,7 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	drawn := false
 
 	if path != "" && showsText(mimeOf(m.file.name), m.file.size) {
-		if body := textPreview(path); body != "" {
+		if body := g.previewText(path); body != "" {
 			preview.SetText(body)
 			preview.Show()
 			drawn = true

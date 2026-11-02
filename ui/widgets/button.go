@@ -50,6 +50,10 @@ func NewButton(text string, tapped func(), onCopied func(string)) *CopyButton {
 	return newCopyButton(widget.NewButton(text, tapped), text, onCopied)
 }
 
+// Importance is how prominent the button is drawn, so a test can assert that a
+// primary action is the primary one (#324).
+func (b *CopyButton) Importance() widget.Importance { return b.button.Importance }
+
 // NewButtonWithIcon is NewButton with an icon beside the label.
 func NewButtonWithIcon(text string, icon fyne.Resource, tapped func(), onCopied func(string)) *CopyButton {
 	return newCopyButton(widget.NewButtonWithIcon(text, icon, tapped), text, onCopied)
