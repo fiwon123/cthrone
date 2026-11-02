@@ -568,8 +568,6 @@ func (g *gui) build() {
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		g.heading("Quick Setup"),
-		g.tlsCheck,
-		g.insecureCheck,
 		g.formHolder,
 		g.credential,
 		g.forgetSecret,
@@ -714,6 +712,17 @@ func (g *gui) rebuildSetupForm() {
 	}
 
 	rows = append(rows, widgets.Row{Caption: "Transport", Field: g.transport})
+
+	// The security switches sit where they act: after the transport they belong
+	// to, before the options that change what it dials. They are rows of the
+	// form rather than lines above it, so a user who changes the device name and
+	// the address — which is what nearly every run does — reaches them first
+	// (#291).
+	rows = append(rows,
+		widgets.Row{Caption: "", Field: g.tlsCheck},
+		widgets.Row{Caption: "", Field: g.insecureCheck},
+	)
+
 	if view.Options {
 		rows = append(rows, widgets.Row{Caption: "Options", Field: g.moreBtn})
 	}

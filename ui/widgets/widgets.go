@@ -132,6 +132,15 @@ func Form(stack, selectable bool, rows []Row) fyne.CanvasObject {
 	if stack {
 		lines := make([]fyne.CanvasObject, 0, len(rows))
 		for _, row := range rows {
+			// A row with no caption is a control that speaks for itself — the
+			// security switches — and gets the whole width instead of an empty
+			// line above it (#291).
+			if row.Caption == "" {
+				lines = append(lines, row.Field)
+
+				continue
+			}
+
 			lines = append(lines, container.NewVBox(Label(row.Caption, selectable), row.Field))
 		}
 
@@ -140,6 +149,15 @@ func Form(stack, selectable bool, rows []Row) fyne.CanvasObject {
 
 	cells := make([]fyne.CanvasObject, 0, len(rows)*2)
 	for _, row := range rows {
+		if row.Caption == "" {
+			// The two-column form has no span, so the control takes a caption
+			// cell with nothing in it and a field cell like any other row: the
+			// column stays aligned and the switch lines up with the fields.
+			cells = append(cells, formCaption("", selectable), row.Field)
+
+			continue
+		}
+
 		cells = append(cells, formCaption(row.Caption, selectable), row.Field)
 	}
 

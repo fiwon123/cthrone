@@ -145,6 +145,13 @@ func TestTouchSetupFormStacksInertCaptions(t *testing.T) {
 	}
 
 	for _, line := range form.Objects {
+		// A row with no caption is a control that speaks for itself — the
+		// security switches (#291) — and is its own line, not a caption over a
+		// field.
+		if _, ok := line.(*widgets.CheckRow); ok {
+			continue
+		}
+
 		box, ok := line.(*fyne.Container)
 		if !ok {
 			t.Fatalf("form line is %T, want a container", line)
@@ -232,4 +239,85 @@ func checkRowCaption(t *testing.T, row *widgets.CheckRow) *widget.Label {
 	t.Fatal("check row holds no caption label")
 
 	return nil
+}
+
+// The Setup tab asks in the order a user works: the device and the address, the
+// carrier, then the security switches that belong to it, then the options
+// (#291). The check rows used to sit above the whole form, so the first thing on
+// the tab was a decision the user rarely changes.
+func TestSetupAsksForTheDeviceBeforeTheSwitches(t *testing.T) {
+	for _, mobile := range []bool{false, true} {
+		name := "desktop"
+		if mobile {
+			name = "phone"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			g := newScreenGUI(t, mobile)
+			g.moreOptions = true
+			g.rebuildSetupForm()
+			g.win.Resize(fyne.NewSize(420, 900))
+			g.win.Content().Refresh()
+
+			order := fieldOrder(t, g.formHolder.Objects[0])
+
+			want := []fyne.CanvasObject{
+				fyne.CanvasObject(g.nameEntry),
+				fyne.CanvasObject(g.hostEntry),
+				fyne.CanvasObject(g.transport),
+				fyne.CanvasObject(g.tlsCheck),
+				fyne.CanvasObject(g.insecureCheck),
+				fyne.CanvasObject(g.moreBtn),
+			}
+
+			last := -1
+			for i, field := range want {
+				at, ok := order[field]
+				if !ok {
+					t.Fatalf("field %d (%T) is not in the form", i, field)
+				}
+
+				if at <= last {
+					t.Fatalf("field %d (%T) is at line %d, after the one before it at %d", i, field, at, last)
+				}
+
+				last = at
+			}
+		})
+	}
+}
+
+// fieldOrder maps each field the form holds to the line it is on: a stacked
+// form wraps a captioned row in a container, and a control with no caption is
+// the line itself.
+func fieldOrder(t *testing.T, form fyne.CanvasObject) map[fyne.CanvasObject]int {
+	t.Helper()
+
+	box, ok := form.(*fyne.Container)
+	if !ok {
+		t.Fatalf("the form is %T, want a container", form)
+	}
+
+	order := make(map[fyne.CanvasObject]int)
+
+	// Two columns: caption and field alternate through one object list.
+	if reflect.TypeOf(box.Layout) == reflect.TypeOf(layout.NewFormLayout()) {
+		for i := 1; i < len(box.Objects); i += 2 {
+			order[box.Objects[i]] = i / 2
+		}
+
+		return order
+	}
+
+	for i, line := range box.Objects {
+		if wrapped, ok := line.(*fyne.Container); ok && len(wrapped.Objects) > 1 {
+			order[wrapped.Objects[1]] = i
+
+			continue
+		}
+
+		order[line] = i
+	}
+
+	return order
 }
