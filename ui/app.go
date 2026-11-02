@@ -394,6 +394,21 @@ func (g *gui) build() {
 
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
+
+	// Stop is a connection control, not a message action: it belongs with the
+	// session's state, not beside Send, where a thumb aiming at Send could end
+	// the connection (#288). It is built here, before the composer, so the
+	// header can hold it.
+	stopLabel := "Stop"
+	if g.lay.Stack {
+		stopLabel = ""
+	}
+
+	g.stopBtn = widgets.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop, g.copyLabel)
+	g.stopBtn.SetText(stopLabel)
+	g.stopBtn.Disable()
+
+	header.Add(g.stopBtn)
 	header.Add(filesBtn)
 
 	g.status = g.text("Ready — open Setup to connect or host.")
@@ -457,9 +472,6 @@ func (g *gui) build() {
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
 	g.sendBtn.Disable()
 
-	g.stopBtn = widgets.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop, g.copyLabel)
-	g.stopBtn.Disable()
-
 	attachLabel := "Attach"
 	if g.lay.Stack {
 		// The paperclip says it on a phone, where the row has no width to spare.
@@ -480,9 +492,9 @@ func (g *gui) build() {
 	if g.lay.Stack {
 		// Touch: a full-width field, and the two actions below it, stacked
 		// one per line when even two do not fit.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.attachBtn, g.sendBtn))
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.attachBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.attachBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
