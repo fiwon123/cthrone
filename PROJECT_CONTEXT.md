@@ -228,6 +228,22 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.12.2` is a patch written from a report against Windows 11 and a phone. The
+window binary is its own entry point now, so a double-click opens it — the
+command tree used to sit between the click and the window (#382). The chat
+header is one row: the status, **Stop** and **Files**, with the connection state
+as the line's fallback rather than a second line above it (#383). A host's
+**Stop disconnects every client**: a websocket is a hijacked connection, and the
+HTTP server does not close those, so the room is closed explicitly before the
+listener goes (#385). A tap outside a picture dismisses the viewer (#387). The
+file picker opens in the last folder used, else Downloads, else home, instead of
+the toolkit's list of places — the likely reason Attach took seconds on Windows
+(#386). And the About tab gains a **Restart** button after an install, and
+**Install previous release** for a build that arrived by unpacking the archive,
+where Revert had nothing to revert to (#384). No transport, no wire format and
+no security rule changed. What is not proven: the double-click and the picker's
+timing need a Windows machine, and neither was measured on one.
+
 `v0.12.1` is a documentation patch on that: **how to prove what v0.12.0 could
 not**. A new page, *Verifying on real hardware*, turns each unproven claim into
 steps — the Windows radio (#224), the Android app and its radio (#155, #216,
