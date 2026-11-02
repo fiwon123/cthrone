@@ -12,7 +12,14 @@ a row of its own. The terminal has no file command — text only.
 
 The row reports the transfer, then offers **Save as…** once it is complete. A
 picture the toolkit can decode is drawn inline under the caption, so a
-screenshot arrives as a picture rather than a filename.
+screenshot arrives as a picture rather than a filename. A file the app cannot
+draw — a PDF, an audio clip, an archive — shows an icon for its kind beside the
+caption, so two different files do not read as the same line.
+
+**Open** hands a file to whatever the device uses for that type. It is offered on
+a desktop only: Android will not let an app pass a private `file://` path to
+another app, so on a phone the row offers **Save as…** instead — save it
+somewhere the file manager can see, then open it from there.
 
 A multi-line message and a file both carry the sender's name: text in-band as a
 prefix, a file in an optional header field that an older peer ignores.
@@ -27,7 +34,8 @@ prefix, a file in an optional header field that an older peer ignores.
 
 ## Known gaps
 
-- The sender currently sees less than the receiver: the preview the peer draws
-  is not drawn on the sending side ([#237](https://github.com/fiwon123/cthrone/issues/237)).
-- Text, PDF and audio do not preview inline yet — only images
-  ([#237](https://github.com/fiwon123/cthrone/issues/237)).
+- **Audio does not play inside the app.** The row offers the device's own player
+  where the platform allows it, and on a phone the way out is Save as…; a player
+  of our own needs a decoder and an audio device this toolkit does not carry
+  ([#306](https://github.com/fiwon123/cthrone/issues/306)).
+- A **PDF is not drawn**: it opens in the device's reader, by design.
