@@ -171,6 +171,11 @@ darwin: $(BUILD_DIR) ## build the macOS CLI archives (arm64, amd64)
 #   gui-darwin   must run on macOS; refused elsewhere
 #   gui-android  needs the Android SDK + NDK and the fyne CLI
 #
+# `gui-android` renders mobile/AndroidManifest.xml from its template first, so the
+# APK is locked to portrait and still carries the release's version (#302); the
+# generated file is removed afterwards and is not committed. `fyne package`
+# without this target falls back to the CLI's own manifest — rotation allowed.
+#
 # `gui-android` produces a debug-signed APK with the Fyne toolchain: without
 # `fyne package --release` the packager signs with its bundled debug key, which
 # is what a sideload needs. `--release` would emit an .aab that only a store or
@@ -294,15 +299,19 @@ gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and 
 	esac; \
 	build="$$(git rev-list --count HEAD 2>/dev/null || echo 1)"; \
 	mkdir -p $(GUI_BUILD) && \
-	cd mobile && $(FYNE) package \
+	sed -e "s/@VERSION@/$$version/g" -e "s/@BUILD@/$$build/g" \
+	  mobile/AndroidManifest.xml.tmpl > mobile/AndroidManifest.xml && \
+	( cd mobile && $(FYNE) package \
 	  -target android/arm64 \
 	  -name $(APP_NAME) \
 	  -app-id com.cthrone.app \
 	  -icon $(ANDROID_ICON) \
 	  -app-version "$$version" \
 	  -app-build "$$build" \
-	  -tags gui && \
-	mv $(APP_NAME).apk $(abspath $(GUI_ANDROID_APK))
+	  -tags gui ) ; status=$$?; \
+	rm -f mobile/AndroidManifest.xml; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	[ -f mobile/$(APP_NAME).apk ] && mv mobile/$(APP_NAME).apk $(abspath $(GUI_ANDROID_APK))
 
 # The GUI archives a Linux machine with the headers can produce on its own.
 release-gui: gui-linux gui-windows ## build the GUI archives a Linux host can produce (linux, windows)
