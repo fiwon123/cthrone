@@ -413,8 +413,10 @@ test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
 FUZZTIME ?= 20s
 # The parsers of input this program did not write. `wire` is the envelope every
 # frame goes through; `discovery`'s beacon is the one message anybody on the
-# segment can send without a credential (#414).
-FUZZ_TARGETS := ./internal/wire:FuzzParse ./internal/wire:FuzzChunks ./internal/discovery:FuzzBeacon
+# segment can send without a credential (#414); `e2e`'s handshake is the first
+# frame a peer sends, before it has proved anything (#416).
+FUZZ_TARGETS := ./internal/wire:FuzzParse ./internal/wire:FuzzChunks \
+	./internal/discovery:FuzzBeacon ./internal/e2e:FuzzHandshake
 
 fuzz: ## fuzz the parsers of untrusted input (FUZZTIME=20s by default)
 	@set -e; \
