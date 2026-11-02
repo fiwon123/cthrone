@@ -580,3 +580,116 @@ func TestSeekingAnIdleClipStartsItThere(t *testing.T) {
 		t.Errorf("started at %v, want about three quarters of the one-second clip", got)
 	}
 }
+
+// playingOnce starts a one-second clip through the row and waits for the
+// device to take it.
+func playingOnce(t *testing.T, g *gui, engine *fakeAudioEngine, note *fileNote) audioRow {
+	t.Helper()
+
+	audio := paintRow(t, g, 0)
+	audio.play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 1
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	return paintRow(t, g, 0)
+}
+
+// Stop keeps the playhead: the row shows where the sound was, and Play resumes
+// from there instead of starting over (#409).
+func TestStopKeepsThePlayhead(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	note := audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))
+	g.messages = []chatMessage{{file: note}}
+
+	playingOnce(t, g, engine, note)
+	engine.setPosition(500 * time.Millisecond)
+
+	g.stopAudio()
+
+	audio := paintRow(t, g, 0)
+	if got := audio.wave.Fraction(); got < 0.45 || got > 0.55 {
+		t.Errorf("the playhead is at %v after Stop, want about 0.5", got)
+	}
+
+	audio.play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to resume", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 2
+	})
+
+	if got := engine.lastSeek(); got < 450*time.Millisecond || got > 550*time.Millisecond {
+		t.Errorf("resumed at %v, want about where Stop left it", got)
+	}
+}
+
+// A clip that reached its end starts over: resuming at its last millisecond
+// would play nothing (#409).
+func TestAClipThatReachedItsEndStartsOver(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	note := audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))
+	g.messages = []chatMessage{{file: note}}
+
+	playingOnce(t, g, engine, note)
+	engine.done(nil)
+
+	waitForCondition(t, "the clip to be retired", func() bool { return !g.audioPlaying(note.path) })
+	time.Sleep(20 * time.Millisecond)
+
+	if got := paintRow(t, g, 0).wave.Fraction(); got != 0 {
+		t.Errorf("the playhead is at %v after the end, want the start", got)
+	}
+
+	paintRow(t, g, 0).play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start again", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 2
+	})
+
+	if got := engine.seekCount(); got != 0 {
+		t.Errorf("replaying a finished clip seeked %d times, want none", got)
+	}
+}
+
+// A tap on the waveform still chooses the point, even with one remembered.
+func TestATapOutranksTheRememberedPlayhead(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	note := audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))
+	g.messages = []chatMessage{{file: note}}
+
+	playingOnce(t, g, engine, note)
+	engine.setPosition(500 * time.Millisecond)
+	g.stopAudio()
+
+	audio := paintRow(t, g, 0)
+	audio.wave.Resize(fyne.NewSize(200, 40))
+	audio.wave.Tapped(&fyne.PointEvent{Position: fyne.NewPos(50, 20)}) // a quarter
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 2
+	})
+
+	if got := engine.lastSeek(); got < 200*time.Millisecond || got > 300*time.Millisecond {
+		t.Errorf("started at %v, want the quarter the tap chose, not the remembered half", got)
+	}
+}
