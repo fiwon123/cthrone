@@ -90,6 +90,79 @@ func LatestURL() string { return GitHubAPI + "/releases/latest" }
 // for by name.
 func TagURL(tag string) string { return GitHubAPI + "/releases/tags/" + tag }
 
+// ReleasesURL names the published releases, newest first. It is the list the
+// About tab asks for when it needs to know which release came before the one
+// running (#384).
+func ReleasesURL(base string) string { return base + "/releases?per_page=30" }
+
+// ReleaseTags reads the tags of the published releases, newest first.
+//
+// A draft or a prerelease is not something to go back to, and GitHub leaves
+// both out of this list by default, which is the behaviour this wants.
+func ReleaseTags(ctx context.Context, client *http.Client, url string) ([]string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	request.Header.Set("Accept", "application/vnd.github+json")
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the release list answered %s", response.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxChecksums))
+	if err != nil {
+		return nil, err
+	}
+
+	var documents []struct {
+		TagName string `json:"tag_name"`
+		Draft   bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(body, &documents); err != nil {
+		return nil, fmt.Errorf("the release list did not read as JSON: %w", err)
+	}
+
+	tags := make([]string, 0, len(documents))
+	for _, document := range documents {
+		tag := strings.TrimSpace(document.TagName)
+		if tag == "" || document.Draft {
+			continue
+		}
+
+		tags = append(tags, tag)
+	}
+
+	return tags, nil
+}
+
+// PreviousTag is the tag published immediately before current, or "" when the
+// list does not carry current — a build from source, or a release that was
+// unpublished. Nothing is guessed from version arithmetic: the list is the
+// record of what was published, and its order is the order they came out.
+func PreviousTag(tags []string, current string) string {
+	for i, tag := range tags {
+		if tag != current {
+			continue
+		}
+
+		if i+1 < len(tags) {
+			return tags[i+1]
+		}
+
+		return ""
+	}
+
+	return ""
+}
+
 // Fetch reads a release document: the tag, and the files it published.
 //
 // The URL is a parameter so a test can serve a release it built itself; a test

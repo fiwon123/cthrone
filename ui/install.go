@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 
 	"fyne.io/fyne/v2"
@@ -25,6 +26,18 @@ var (
 	runInstall  = installpkg.Run
 	runRevert   = installpkg.Revert
 	selfBinary  = installpkg.RunningBinary
+
+	// listReleases reads the published releases, newest first: the About tab
+	// needs the order they came out in to know which one is "before this"
+	// (#384).
+	listReleases = installpkg.ReleaseTags
+
+	// launchAgain starts a binary and does not wait for it, and quit is how the
+	// window leaves after it. Both are variables for the same reason as the
+	// rest: a test must see a restart without actually spawning a process or
+	// closing the test app.
+	launchAgain = startDetached
+	quitWindow  = func() { fyne.CurrentApp().Quit() }
 
 	// canOpenFiles reports whether a received file can be handed to another app
 	// on this platform.
@@ -104,6 +117,115 @@ func (g *gui) installRelease() {
 		func() { g.runInstall(tag) })
 }
 
+// installPreviousRelease offers the release published immediately before this
+// one. It is the way back for a build that arrived by unpacking the archive:
+// Revert needs a binary only an in-app install writes, so before this there was
+// no route from the newest version to the one before it (#384).
+//
+// The list is read off the UI goroutine, and the question is asked only once
+// there is a tag to name: a dialog that says "install ?" would be worse than
+// waiting a second.
+func (g *gui) installPreviousRelease() {
+	current := aboutVersion(Version, g.app.Metadata().Version)
+
+	if _, ok := updatepkg.Parse(current); !ok {
+		g.setAboutNote("This build does not carry a release version, so there is no release before it to go back to.")
+
+		return
+	}
+
+	if g.previousBtn != nil {
+		g.previousBtn.Disable()
+	}
+
+	g.setAboutNote("Looking for the release before " + current + "…")
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), installpkg.InstallTimeout)
+		defer cancel()
+
+		tags, err := listReleases(ctx, &http.Client{Timeout: installpkg.InstallTimeout}, installpkg.ReleasesURL(installBase))
+
+		fyne.Do(func() {
+			if g.previousBtn != nil {
+				g.previousBtn.Enable()
+			}
+
+			if err != nil {
+				g.setAboutNote("Could not read the release list: " + err.Error() + ".")
+
+				return
+			}
+
+			previous := installpkg.PreviousTag(tags, current)
+			if previous == "" {
+				g.setAboutNote("No published release comes before " + current + ".")
+
+				return
+			}
+
+			askConfirm(g.win, "Install "+previous+"?",
+				"This replaces the binary that is running ("+current+") with "+previous+", the release published before it. "+
+					"The download is checked against that release's checksums first, and the binary it replaces is kept "+
+					"beside it, so it can be put back.",
+				func() { g.runInstall(previous) })
+		})
+	}()
+}
+
+// startDetached runs exe again with the same arguments and does not wait for it.
+func startDetached(exe string, args []string) error {
+	cmd := exec.Command(exe, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+
+	return cmd.Start()
+}
+
+// restartAfterInstall starts the binary the install wrote and leaves this
+// process to exit: the note used to say "restart cthrone" and offer no way to,
+// so the window kept running the binary that had just been replaced (#384).
+func (g *gui) restartAfterInstall() {
+	exe, err := selfBinary()
+	if err != nil {
+		g.setAboutNote("Could not restart: " + err.Error() + ".")
+
+		return
+	}
+
+	if err := launchAgain(exe, os.Args[1:]); err != nil {
+		g.setAboutNote("Could not restart: " + err.Error() + ".")
+
+		return
+	}
+
+	// The new process owns the port and the window now.
+	g.shutdown()
+	quitWindow()
+}
+
+// refreshPrevious shows the way back to a published release only where there is
+// one: a build from source carries no release version, and a phone cannot
+// replace its own package (#285).
+func (g *gui) refreshPrevious() {
+	if g.previousBtn == nil {
+		return
+	}
+
+	if !selfInstallable() {
+		g.previousBtn.Hide()
+
+		return
+	}
+
+	if _, ok := updatepkg.Parse(aboutVersion(Version, g.app.Metadata().Version)); !ok {
+		g.previousBtn.Hide()
+
+		return
+	}
+
+	g.previousBtn.Show()
+}
+
 // revertRelease puts the previous binary back, after asking. It needs no
 // network: the binary it returns to is already beside this one.
 func (g *gui) revertRelease() {
@@ -158,8 +280,9 @@ func (g *gui) runInstall(tag string) {
 				return
 			}
 
-			g.setAboutNote("Installed " + tag + ". Restart cthrone to run it.")
+			g.setAboutNote("Installed " + tag + ". Restart to run it.")
 			g.refreshRevert()
+			g.offerRestart()
 		})
 	}()
 }
@@ -185,6 +308,16 @@ func (g *gui) runRevert() {
 			g.refreshRevert()
 		})
 	}()
+}
+
+// offerRestart shows the restart button after an install: the binary on disk is
+// the new one, and this process is still the old one (#384).
+func (g *gui) offerRestart() {
+	if g.restartBtn == nil || !selfInstallable() {
+		return
+	}
+
+	g.restartBtn.Show()
 }
 
 // refreshRevert shows the way back only when there is one: a button that can
