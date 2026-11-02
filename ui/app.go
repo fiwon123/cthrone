@@ -235,6 +235,14 @@ type gui struct {
 	// to its end has no entry.
 	audioResumeAt map[string]float64
 
+	// perf is the message path's cost, counted while CTHRONE_PERF is set:
+	// a report of "it lags" needs numbers from the device that lags, and this
+	// is the cheapest way to get them (#432).
+	perfEnabled bool
+	perfCount   int
+	perfTotal   time.Duration
+	perfLast    time.Duration
+
 	// lastBottom is the transcript's scroll offset when the view was last at
 	// the end, and jumpBtn is the way back down when the reader is not there.
 	// A new message follows only if the reader was at the bottom (#434).
@@ -387,7 +395,7 @@ func run() (err error) {
 		w.SetIcon(ic)
 	}
 
-	g := &gui{app: a, win: w, mobile: mobile, video: &videoPlayer{}}
+	g := &gui{app: a, win: w, mobile: mobile, video: &videoPlayer{}, perfEnabled: os.Getenv("CTHRONE_PERF") != ""}
 
 	// A window that cannot be built has nothing to show, and a blank window is
 	// a worse answer than a report: the panic propagates to the recover above.
@@ -2178,6 +2186,12 @@ func (g *gui) setStatus(text string) {
 // the slice.
 func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
+		var started time.Time
+
+		if g.perfEnabled {
+			started = time.Now()
+		}
+
 		// Whether to follow is decided before the message is added: it is the
 		// reader's position that decides, not the row's (#434).
 		follow := g.atBottom()
@@ -2193,12 +2207,46 @@ func (g *gui) addMessage(m chatMessage) {
 
 		if follow {
 			g.scrollToLatest()
-
-			return
+		} else {
+			g.jumpBtn.Show()
 		}
 
-		g.jumpBtn.Show()
+		if g.perfEnabled {
+			if line := g.noteMessageCost(time.Since(started)); line != "" {
+				logEvent(line)
+			}
+		}
 	})
+}
+
+// perfEvery is how many messages one perf line covers.
+const perfEvery = 25
+
+// noteMessageCost records one message's cost and returns the line to log when a
+// block of them has been measured, or "" (#432).
+//
+// It is called on the UI goroutine, from addMessage, and only while
+// CTHRONE_PERF is set.
+func (g *gui) noteMessageCost(cost time.Duration) string {
+	g.perfCount++
+	g.perfTotal += cost
+	g.perfLast = cost
+
+	if g.perfCount%perfEvery != 0 {
+		return ""
+	}
+
+	g.mu.Lock()
+	rows := len(g.messages)
+	g.mu.Unlock()
+
+	return fmt.Sprintf("perf: %d messages, %.2f ms each on average, last %.2f ms, %d rows, %d live",
+		g.perfCount,
+		float64(g.perfTotal)/float64(g.perfCount)/float64(time.Millisecond),
+		float64(g.perfLast)/float64(time.Millisecond),
+		rows,
+		g.liveSessions,
+	)
 }
 
 // chatOffset is where the transcript is scrolled to. It is a variable so a test
