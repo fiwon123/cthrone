@@ -165,7 +165,7 @@ func (g *gui) fillAudioRow(m chatMessage, row audioRow) {
 	}
 	g.mu.Unlock()
 
-	g.fillWaveform(row, path, 0)
+	g.fillWaveform(row, path, float32(g.audioResume(path)))
 
 	row.show()
 }
@@ -202,6 +202,9 @@ func playsHere(state transferState) bool {
 }
 
 // toggleAudio starts the clip at path, or silences it if it is the one playing.
+//
+// Play resumes where Stop left the playhead: a seek bar that forgets the point
+// every time the sound is paused is half a seek bar (#409).
 func (g *gui) toggleAudio(path string) {
 	if g.audioPlaying(path) {
 		g.stopAudio()
@@ -210,7 +213,7 @@ func (g *gui) toggleAudio(path string) {
 		return
 	}
 
-	g.startAudio(path, 0)
+	g.startAudio(path, g.audioResume(path))
 }
 
 // seekAudio moves through the clip at path: while it plays, playback continues
@@ -357,7 +360,8 @@ func (g *gui) startAudio(path string, from float64) {
 	}()
 }
 
-// stopAudio silences the clip that is sounding.
+// stopAudio silences the clip that is sounding, keeping the playhead where the
+// sound had got to, so Play resumes there (#409).
 //
 // It touches the engine and the window's state, and no widget: the window's
 // close has no event loop to repaint on, and a caller that wants the rows to
@@ -365,16 +369,41 @@ func (g *gui) startAudio(path string, from float64) {
 func (g *gui) stopAudio() {
 	g.mu.Lock()
 	engine := g.audio
-	playing := g.audioPath != ""
+	path := g.audioPath
+	duration := g.audioDuration
 	g.audioPath = ""
 	g.audioDuration = 0
 	g.audioClock = nil
 	g.audioGen++
 	g.mu.Unlock()
 
-	if playing && engine != nil {
-		engine.Stop()
+	if engine == nil || path == "" {
+		return
 	}
+
+	// The position is read before the device is stopped: a stopped player has
+	// no playhead to ask.
+	position := engine.Position()
+	engine.Stop()
+
+	if duration > 0 && position > 0 {
+		g.mu.Lock()
+		if g.audioResumeAt == nil {
+			g.audioResumeAt = make(map[string]float64)
+		}
+
+		g.audioResumeAt[path] = float64(position) / float64(duration)
+		g.mu.Unlock()
+	}
+}
+
+// audioResume is where Play should continue from: the playhead Stop left, or
+// the start for a clip that has not been stopped or has played to its end.
+func (g *gui) audioResume(path string) float64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.audioResumeAt[path]
 }
 
 // endAudio retires the clip gen started, if it is still the one playing.
@@ -389,10 +418,14 @@ func (g *gui) endAudio(gen int) {
 		return
 	}
 
+	// A clip that reached its end starts over: "resuming" at its last
+	// millisecond would play nothing.
+	path := g.audioPath
 	g.audioPath = ""
 	g.audioDuration = 0
 	g.audioClock = nil
 	g.audioGen++
+	delete(g.audioResumeAt, path)
 	g.mu.Unlock()
 
 	if g.chatList != nil {
