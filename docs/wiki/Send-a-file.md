@@ -53,12 +53,22 @@ prefix, a file in an optional header field that an older peer ignores.
 - A Bluetooth link is text in practice: a 20-byte packet turns one file chunk
   into thousands of notifications, so nothing offers a file on a radio host.
 
+## Playing an animated picture
+
+An **animated GIF** plays in its row: **Play** starts it and becomes **Stop**,
+the clock shows the position, and the bar under the picture moves you through
+it. It is decoded when you press Play, not when the row is painted, and only one
+animation is kept in memory at a time — a picture that moves is a picture that
+costs.
+
+The player is the same controller a video decoder would feed; what is missing is
+the decoder, not the player (see [Video in the app](Video-in-the-app)).
+
 ## Known gaps
 
-- **Video does not play in the app.** It opens with the device's player, or
-  **Save as…** on a phone. Playing it inside the chat needs a codec this build
-  does not carry; the decision and the plan are on
-  [Video in the app](Video-in-the-app)
+- **A GIF plays; a video does not.** MP4, H.264 and WebM need a codec this build
+  does not carry, so those rows keep **Open** (desktop) or **Save as…** (phone).
+  The decision and the plan are on [Video in the app](Video-in-the-app)
   ([#389](https://github.com/fiwon123/cthrone/issues/389)).
 - A **PDF is not drawn**: it opens in the device's reader, by design.
 - **Audio plays only as WAV or MP3.** Ogg, AAC/M4A and FLAC have no decoder in

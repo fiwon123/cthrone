@@ -876,7 +876,15 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 
 	path := m.file.path
 
+	// A file this build can animate belongs to the player row, which draws its
+	// own surface: the still preview would sit above it showing frame one
+	// forever (#421).
+	animated := path != "" && g.animatable(path)
+
 	switch {
+	case animated:
+		pic.Hide()
+
 	case path != "" && m.file.inline && g.decodable(path):
 		if res := g.previewPicture(path); res != nil {
 			showPicture(pic, res)
@@ -912,7 +920,7 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 
 	// A row that draws nothing says what kind of file it is: the icon is the
 	// only thing distinguishing a PDF from a song (#304).
-	if pic.Visible() || drawn {
+	if pic.Visible() || drawn || animated {
 		icon.Hide()
 	} else {
 		icon.SetResource(fileIconFor(m.file.name))
