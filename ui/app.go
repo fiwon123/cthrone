@@ -493,7 +493,16 @@ func (g *gui) build() {
 			icon := widget.NewIcon(theme.FileIcon())
 			icon.Hide()
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, row), pic, preview, save, open)
+			// The sender has a line of its own, in a colour of its own, so a room
+			// of three is readable at a glance (#346). It is a canvas.Text
+			// because that carries any colour; a themed label takes a colour
+			// name.
+			sender := canvas.NewText("", theme.Color(theme.ColorNameForeground))
+			sender.TextStyle = fyne.TextStyle{Bold: true}
+
+			caption := container.NewVBox(sender, row)
+
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open)
 		},
 		g.updateChatRow,
 	)
@@ -1772,9 +1781,10 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	var label *widgets.Text
 	var icon *widget.Icon
+	var sender *canvas.Text
 
-	// The caption cell holds the icon and the text; their order is the layout's,
-	// so they are found by type rather than by index.
+	// The caption cell holds the icon and a box of the sender line over the
+	// message; the parts are found by type rather than by index.
 	if caption != nil {
 		for _, object := range caption.Objects {
 			switch part := object.(type) {
@@ -1782,16 +1792,26 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 				label = part
 			case *widget.Icon:
 				icon = part
+			case *fyne.Container:
+				for _, inner := range part.Objects {
+					switch piece := inner.(type) {
+					case *widgets.Text:
+						label = piece
+					case *canvas.Text:
+						sender = piece
+					}
+				}
 			}
 		}
 	}
 
-	if label == nil || icon == nil || pic == nil || preview == nil || save == nil || open == nil {
+	if label == nil || icon == nil || sender == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
 	m := g.messages[id]
-	label.SetText(m.line())
+	g.setSenderLine(sender, &m)
+	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, preview, icon, save, open)
 
