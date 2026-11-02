@@ -18,6 +18,8 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/storage"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
@@ -149,6 +151,7 @@ func TestAFileRowDrawsItsThumbnailWhenItHasNoPath(t *testing.T) {
 
 	pic := canvas.NewImageFromResource(nil)
 	preview := g.text("")
+	icon := widget.NewIcon(theme.FileIcon())
 	save := widgets.NewButton("Save as…", nil, nil)
 	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
 
@@ -164,7 +167,7 @@ func TestAFileRowDrawsItsThumbnailWhenItHasNoPath(t *testing.T) {
 
 	note := &fileNote{id: "id-1", name: "photo.jpg", size: 1000, state: transferSent, thumb: thumb, inline: true}
 
-	g.fillFileRow(chatMessage{from: "me", file: note}, pic, preview, save, open)
+	g.fillFileRow(chatMessage{from: "me", file: note}, pic, preview, icon, save, open)
 
 	if !pic.Visible() {
 		t.Error("the row hid the picture although it holds a thumbnail")

@@ -66,9 +66,21 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 		t.Fatalf("row has %d objects, want 5", len(box.Objects))
 	}
 
-	label, ok := box.Objects[0].(*widgets.Text)
+	// The caption cell is a border holding the file-type icon and the text.
+	caption, ok := box.Objects[0].(*fyne.Container)
 	if !ok {
-		t.Fatalf("row[0] is %T, want *widgets.Text", box.Objects[0])
+		t.Fatalf("row[0] is %T, want the caption cell", box.Objects[0])
+	}
+
+	var label *widgets.Text
+	for _, object := range caption.Objects {
+		if text, ok := object.(*widgets.Text); ok {
+			label = text
+		}
+	}
+
+	if label == nil {
+		t.Fatalf("the caption cell holds no *widgets.Text: %v", caption.Objects)
 	}
 
 	pic, ok := box.Objects[1].(*canvas.Image)

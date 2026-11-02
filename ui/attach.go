@@ -812,10 +812,11 @@ func showPicture(pic *canvas.Image, res fyne.Resource) {
 	pic.Show()
 }
 
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton, open *widgets.CopyButton) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, icon *widget.Icon, save *widgets.CopyButton, open *widgets.CopyButton) {
 	if m.file == nil {
 		pic.Hide()
 		preview.Hide()
+		icon.Hide()
 		save.Hide()
 		open.Hide()
 
@@ -856,6 +857,15 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 		}
 	} else {
 		preview.Hide()
+	}
+
+	// A row that draws nothing says what kind of file it is: the icon is the
+	// only thing distinguishing a PDF from a song (#304).
+	if pic.Visible() || drawn {
+		icon.Hide()
+	} else {
+		icon.SetResource(fileIconFor(m.file.name))
+		icon.Show()
 	}
 
 	// A file this program cannot draw is offered to the device instead: a PDF to
