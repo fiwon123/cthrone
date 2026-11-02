@@ -13,5 +13,11 @@ package main
 import "github.com/fiwon123/cthrone/ui"
 
 func main() {
+	// The tag this APK was built from, when the build knows one (#343). A plain
+	// `go build` leaves it empty and the About tab falls back to Fyne's metadata.
+	if buildVersion != "" {
+		ui.Version = buildVersion
+	}
+
 	ui.Run()
 }
