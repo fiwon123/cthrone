@@ -205,6 +205,24 @@ var (
 	ErrConfirm = errors.New("e2e: first contact not confirmed")
 )
 
+// IsRefusal reports whether err is this package deciding a peer cannot be
+// talked to, rather than the link going away underneath it. A failure that is
+// not in this set — a write that failed because the connection dropped in the
+// middle of a handshake — is a drop: dialling again may work, and a caller that
+// refused to retry would leave the user offline for no reason (#326).
+func IsRefusal(err error) bool {
+	for _, target := range []error{
+		ErrSecret, ErrHandshake, ErrMAC, ErrPlaintext, ErrSeal,
+		ErrAuth, ErrSequence, ErrPeer, ErrConfirm, ErrPin,
+	} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // peer is one correspondent: what it told us about itself and the two ciphers
 // derived from the exchange.
 type peer struct {
@@ -293,6 +311,13 @@ type Conn struct {
 	timer   *time.Timer
 	onError func(error)
 	onPeer  func(Peer)
+
+	// refused is the error that ended a single-correspondent session at this
+	// package's own hand — a peer that could not prove its key, a frame that
+	// failed its check, a pin the store would not record — rather than the
+	// link going away underneath it. A client reads it before dialling again:
+	// a refusal is an answer, a drop is not (#326).
+	refused error
 
 	// sendMu makes one payload's whole send atomic: the sequence number is
 	// assigned to the frame before the frame is written, so two sends that
@@ -552,6 +577,18 @@ func (c *Conn) Fingerprint() string {
 	}
 
 	return discovery.Fingerprint(pub)
+}
+
+// Refusal returns the error that ended a single-correspondent session at this
+// package's own hand, or nil if the session closed for another reason (a drop,
+// the user stopping it, or a bus peer being dropped). A reconnect loop uses it
+// to tell "the host/peer would not accept this device" from "the link went
+// away".
+func (c *Conn) Refusal() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.refused
 }
 
 // Peers lists the peers whose confirm arrived, in the order they were heard.
@@ -1132,6 +1169,15 @@ func (c *Conn) fail(err error, key string) {
 
 	if key != "" {
 		c.dropLocked(key)
+	}
+
+	// Only a session that is about to close records the refusal: a bus keeps
+	// the room, and one stranger out of line must not make its close look like
+	// an answer to a question the client did not ask. A transport write that
+	// failed mid-handshake is a drop rather than a refusal, so it is not
+	// recorded either (#326).
+	if c.mode == Single && IsRefusal(err) {
+		c.refused = err
 	}
 
 	handler := c.onError
