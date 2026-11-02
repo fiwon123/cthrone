@@ -228,6 +228,17 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.13.0` adds the shape of the sound. An audio row now carries a **waveform**
+under its Play button — one peak per column, from the decode the player already
+did — and the waveform is the **seek control**: tap or drag it, and the clip
+continues from there, or starts there if it was idle. The clock follows, because
+the device is told to re-anchor it, and the peaks are cached per path so a
+repaint draws from memory rather than decoding again (#399). No dependency was
+added. **Video is still not drawn**: the report asked for it with a seek bar,
+and that needs a codec this build does not carry — the decision and its cost are
+in #389, which stays open. The four hardware claims are unchanged: the Windows
+radio (#224), the Android app and its radio (#155, #216, #206).
+
 `v0.12.2` is a patch written from a report against Windows 11 and a phone. The
 window binary is its own entry point now, so a double-click opens it — the
 command tree used to sit between the click and the window (#382). The chat
