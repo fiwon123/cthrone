@@ -388,6 +388,30 @@ func (h *Hub) Unregister(id string) {
 	h.mu.Unlock()
 }
 
+// Close ends every session in the room and reports how many there were.
+//
+// It is what a host's Stop calls. Closing the transport's listener is not
+// enough — a websocket is a hijacked connection, and http.Server.Close leaves
+// hijacked connections alone — so without this the sessions stay registered and
+// a client keeps writing into a socket nobody reads (#385).
+//
+// The sessions are snapshotted and closed outside the lock: closing one
+// unregisters it, which takes the same lock.
+func (h *Hub) Close(reason string) int {
+	h.mu.RLock()
+	targets := make([]Session, 0, len(h.sessions))
+	for _, s := range h.sessions {
+		targets = append(targets, s)
+	}
+	h.mu.RUnlock()
+
+	for _, s := range targets {
+		s.Close(reason)
+	}
+
+	return len(targets)
+}
+
 // deliver hands a message to the consumer, if there is one.
 func (h *Hub) deliver(m Message) {
 	h.mu.RLock()
