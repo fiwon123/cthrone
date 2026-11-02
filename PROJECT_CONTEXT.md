@@ -208,7 +208,7 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
-- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, an allowlist and audit log for remote execution whose transport is not written yet (#275), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ and the Windows one WinRT, which has never been run (#224); the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.11.0` is the published release. It carries a messenger that shows what it
+- **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, an allowlist and audit log for remote execution whose transport is not written yet (#275), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ and the Windows one WinRT, which has never been run (#224); the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.11.0` brought a messenger that shows what it
 sends: a sent file draws the same preview as a received one, a text file is drawn
 in its row, a PDF or an audio clip opens in the device's own app, and a transfer
 in flight can be cancelled from either side — the peer is told, so it drops its
@@ -224,12 +224,26 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
-`v0.11.1` is a patch on it: a row that takes a tap is the object the driver finds
-on a desktop too, so the Devices list and the transcript respond to a click again
-(#280). The selectable label's own selection child had been swallowing the click
-and returning, and the two earlier attempts (#236, #267) changed the handler
-without changing which object receives the click — their tests called the handler
-directly and so proved nothing about a click on the row.
+`v0.11.2` is a patch on that, written from the first field report on a phone. A
+received file is no longer called failed when it arrived intact and only the save
+could not happen — the row keeps the staged file and offers *Save as…* — and a
+folder is accepted only after the app has written a byte into it, because a
+phone's picker returns a path that is absolute and is not a directory (#286). A
+phone is no longer offered an update it cannot install: the package, not a file,
+is replaced by the release page (#285). A device row is a button, because that is
+what it does (#287); Stop moved out of the composer row, away from Send (#288);
+Copy all is gone, since a tap on a row is the precise gesture (#289); and Setup
+asks for the device, the address and the carrier before the security switches
+(#291).
+
+It does not claim a fix for holding backspace on a phone keyboard: that repeat
+stops in Fyne's Android bridge, every field in every app is affected, and the
+finding is recorded and tracked upstream (#290). Nothing in this patch was run on
+a phone (#155).
+
+`v0.11.1` was the patch before it: a row that takes a tap is the object the driver
+finds on a desktop too, so the Devices list and the transcript respond to a click
+again — the selectable label's own selection child had been swallowing it (#280).
 
 `v0.10.1` was the release before it: the README as a landing page with a wiki
 behind it (#242, #241), CONTRIBUTING (#244), one licence — MIT (#243), the window
@@ -242,8 +256,9 @@ Windows (#215).
 What this release does not claim: **audio does not play inside the app** and PDFs
 are not drawn — both open with the device's own viewer, because the audio package
 needs CGO the headless GUI gate cannot carry and there is no pure-Go PDF
-renderer; **`recv`/`exec` are not implemented** (#275); and the **Windows radio**,
-the **phone build** and the **APK** are still unrun (#224, #206, #155).
+renderer; **`recv`/`exec` are not implemented** (#275); **backspace does not
+repeat on a phone** (#290); and the **Windows radio**, the **phone build** and the
+**APK** are still unrun (#224, #206, #155).
 
 - **Encrypted and authenticated by default**: every session is sealed on every
   transport — a Bluetooth link carries ciphertext too, whatever the radio's own
