@@ -228,6 +228,16 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.12.1` is a documentation patch on that: **how to prove what v0.12.0 could
+not**. A new page, *Verifying on real hardware*, turns each unproven claim into
+steps — the Windows radio (#224), the Android app and its radio (#155, #216,
+#206), a rendered window, and the in-app player — with the exact commands, what
+to record, and the issue the result belongs on. The Bluetooth page now carries
+the **Android scope decision** #216 asked for: the central role first, because a
+phone that joins a host is the case the transport exists for, and the platform
+fact therefore becomes a per-role capability rather than one boolean. No
+behaviour changes, and no test is claimed: this release is instructions.
+
 `v0.12.0` adds the two things a chat window was still missing. A **dropped
 client asks for its link again**: a GUI connection that closes without the user
 pressing Stop retries with a backoff from one second to a minute, says

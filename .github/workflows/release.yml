@@ -518,6 +518,10 @@ jobs:
             heard on a phone either: the in-app player is compiled into the APK
             and has never been run on one.
 
+          Each of those has an issue, and the wiki's
+          [Verifying on real hardware](https://github.com/fiwon123/cthrone/blob/main/docs/wiki/Verifying-on-real-hardware.md)
+          page has the steps, what to record, and where to report it.
+
           <details>
           <summary>🧾 Every change</summary>
 

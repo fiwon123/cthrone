@@ -37,4 +37,5 @@ nobody has run:
 - a **rendered GUI frame** under the native driver.
 
 If you can run any of those, [CONTRIBUTING](https://github.com/fiwon123/cthrone/blob/dev/CONTRIBUTING.md)
-explains what would help most.
+explains what would help most — and [Verifying on real hardware](Verifying-on-real-hardware)
+gives the exact steps, what to record, and which issue the result goes on.
