@@ -124,6 +124,17 @@ func (t *Text) TextStyle() fyne.TextStyle {
 	return t.label.TextStyle
 }
 
+// SetImportance sets the label's importance, which is how a themed label takes a
+// colour: a low-importance line for metadata, a success one for a good state
+// (#364).
+func (t *Text) SetImportance(importance widget.Importance) {
+	t.label.Importance = importance
+	t.label.Refresh()
+}
+
+// Importance is the label's importance, and therefore its colour.
+func (t *Text) Importance() widget.Importance { return t.label.Importance }
+
 // SetTextStyle sets the style, so a caller can make this line bold.
 func (t *Text) SetTextStyle(style fyne.TextStyle) {
 	t.label.TextStyle = style

@@ -204,10 +204,10 @@ type gui struct {
 	decodableFiles map[string]bool
 	texts          map[string]string
 
-	// stateText and stateDot are the chat header's connection state, and
-	// peerName is who a session is with, when the handshake named one (#345).
+	// stateText is the chat header's connection state — a mark and a word on one
+	// line, coloured by importance — and peerName is who a session is with when
+	// the handshake named one (#345, #364).
 	stateText *widgets.Text
-	stateDot  *canvas.Circle
 	peerName  string
 
 	// updateTag and updateAt are the last successful check and when it ran, so a
@@ -415,7 +415,6 @@ func (g *gui) build() {
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
 	g.copyHint = g.label("")
-	g.stateDot = canvas.NewCircle(theme.Color(theme.ColorNameDisabled))
 	g.stateText = g.text("")
 
 	g.refreshConnectionState()
@@ -431,12 +430,7 @@ func (g *gui) build() {
 	filesBtn := widgets.NewButtonWithIcon("Files", theme.FolderIcon(), g.showFiles, g.copyLabel)
 	filesBtn.SetText(filesLabel)
 
-	state := container.NewHBox(
-		container.NewGridWrap(fyne.NewSize(10, 10), g.stateDot),
-		g.stateText,
-	)
-
-	header := container.NewHBox(state)
+	header := container.NewHBox(g.stateText)
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
 
@@ -456,7 +450,8 @@ func (g *gui) build() {
 	header.Add(g.stopBtn)
 	header.Add(filesBtn)
 
-	g.status = g.text("Ready — open Setup to connect or host.")
+	g.status = g.text("")
+	g.status.Hide()
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 
 	// One row per message, not one label holding the whole log: appending then
@@ -1738,7 +1733,7 @@ func (g *gui) growComposer(text string) {
 // It reads the same fields the buttons do, so there is one truth about whether
 // this window is in a session (#345).
 func (g *gui) refreshConnectionState() {
-	if g.stateText == nil || g.stateDot == nil {
+	if g.stateText == nil {
 		return
 	}
 
@@ -1746,23 +1741,24 @@ func (g *gui) refreshConnectionState() {
 	sess, server, starting, peer := g.sess, g.server, g.starting, g.peerName
 	g.mu.Unlock()
 
-	text, colour := "offline", theme.ColorNameDisabled
+	// One line, one baseline: the mark is a character in the same text as the
+	// word, so they cannot drift apart (#364). The importance is the colour.
+	text, importance := "● offline", widget.LowImportance
 
 	switch {
 	case starting:
-		text, colour = "connecting…", theme.ColorNameWarning
+		text, importance = "● connecting…", widget.WarningImportance
 	case server != nil:
-		text, colour = "hosting", theme.ColorNameSuccess
+		text, importance = "● hosting", widget.SuccessImportance
 	case sess != nil:
-		text, colour = "connected", theme.ColorNameSuccess
+		text, importance = "● connected", widget.SuccessImportance
 		if peer != "" {
-			text = "connected to " + peer
+			text = "● connected to " + peer
 		}
 	}
 
 	g.stateText.SetText(text)
-	g.stateDot.FillColor = theme.Color(colour)
-	g.stateDot.Refresh()
+	g.stateText.SetImportance(importance)
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
@@ -1821,7 +1817,19 @@ func (g *gui) canvasWidth() int {
 // --- rendering --------------------------------------------------------
 
 func (g *gui) setStatus(text string) {
-	fyne.Do(func() { g.status.SetText(text) })
+	fyne.Do(func() {
+		g.status.SetText(text)
+
+		// The line exists only while it has something to say: a permanent
+		// sentence under the header was the report (#364).
+		if text == "" {
+			g.status.Hide()
+
+			return
+		}
+
+		g.status.Show()
+	})
 }
 
 // addMessage appends a line to the transcript and scrolls to it.
@@ -2239,14 +2247,12 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 // not, so a phone drops the version under the name instead of squeezing it. The
 // icon is the one the window and the APK carry, not a second copy.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
-	// One group: the mark, the name, and the version immediately after it. The
-	// version used to sit at the right edge of the header, which on a wide window
-	// reads as "on the right side of the screen" rather than as part of the name
-	// (#343).
+	// The version is part of the name's own line rather than a second object
+	// beside it: a box of two texts can wrap or clip on a narrow phone, and the
+	// version was reported as sitting above the name (#343, #364).
 	return container.NewHBox(
 		widget.NewIcon(appIcon()),
-		g.textHeading("cthrone"),
-		g.text(version),
+		g.textHeading("cthrone  "+version),
 	)
 }
 
