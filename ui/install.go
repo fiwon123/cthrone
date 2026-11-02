@@ -26,6 +26,13 @@ var (
 	runRevert   = installpkg.Revert
 	selfBinary  = installpkg.RunningBinary
 
+	// selfInstallable reports whether this build may offer Install and Revert.
+	// It is a variable so a test can put a phone in front of the window: what
+	// matters is the platform the binary was built for, not the layout.
+	selfInstallable = func() bool {
+		return runtime.GOOS != "android" && runtime.GOOS != "ios"
+	}
+
 	// askConfirm is the question before anything is replaced. A test swaps it
 	// for one that answers, or leaves it and asserts that nothing happened.
 	askConfirm = func(parent fyne.Window, title, message string, onYes func()) {
@@ -45,7 +52,10 @@ func (g *gui) offerInstall(tag string) {
 		return
 	}
 
-	if tag == "" {
+	// A phone cannot replace its own package, so it is not offered a button
+	// that can only fail: the check's answer names the APK, and the release
+	// page installs it (#285).
+	if tag == "" || !selfInstallable() {
 		g.installBtn.Hide()
 
 		return
@@ -83,6 +93,12 @@ func (g *gui) revertRelease() {
 func (g *gui) runInstall(tag string) {
 	if g.installBtn != nil {
 		g.installBtn.Disable()
+	}
+
+	if !selfInstallable() {
+		g.setAboutNote(appInstallsFromTheReleasePage)
+
+		return
 	}
 
 	g.setAboutNote("Installing " + tag + "…")
@@ -154,6 +170,13 @@ func (g *gui) refreshRevert() {
 		return
 	}
 
+	// Same reason as Install: the package, not a file (#285).
+	if !selfInstallable() {
+		g.revertBtn.Hide()
+
+		return
+	}
+
 	target, err := selfBinary()
 	if err != nil {
 		g.revertBtn.Hide()
@@ -161,12 +184,19 @@ func (g *gui) refreshRevert() {
 		return
 	}
 
-	if _, err := os.Stat(target + installpkg.PreviousSuffix); err != nil {
+	info, err := os.Stat(target + installpkg.PreviousSuffix)
+	if err != nil {
 		g.revertBtn.Hide()
 
 		return
 	}
 
+	// The button says which version it goes back to as far as the disk can
+	// tell — when that binary was written — so "go back" is a choice a user
+	// can weigh against "go forward" rather than a leap (#285).
+	label := "Revert to previous (" + info.ModTime().Format("2006-01-02 15:04") + ")"
+	g.revertBtn.SetText(label)
+	g.revertBtn.SetCopyText(label)
 	g.revertBtn.Show()
 }
 

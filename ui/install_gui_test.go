@@ -301,3 +301,64 @@ func TestAboutWikiButtonOpensTheWiki(t *testing.T) {
 		t.Errorf("WikiURL = %q, want the repository's wiki", WikiURL)
 	}
 }
+
+// A phone is not shown a button that can only fail: the app is a package, and
+// the About tab says where it comes from instead (#285).
+func TestAPhoneIsNotOfferedInstallOrRevert(t *testing.T) {
+	recorder, target := withInstallRecorder(t)
+
+	previous := selfInstallable
+	selfInstallable = func() bool { return false }
+	t.Cleanup(func() { selfInstallable = previous })
+
+	g := newScreenGUI(t, true)
+
+	g.offerInstall("v9.9.9")
+	if g.installBtn.Visible() {
+		t.Error("a phone was offered an Install button for a published release")
+	}
+
+	// A previous binary is beside this one, and still no way back is offered.
+	if err := os.WriteFile(target+installpkg.PreviousSuffix, []byte("older"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g.refreshRevert()
+	if g.revertBtn.Visible() {
+		t.Error("a phone was offered a Revert button")
+	}
+
+	// The path itself refuses, in case a caller reaches it another way.
+	g.runInstall("v9.9.9")
+
+	if got := len(recorder.installs()); got != 0 {
+		t.Errorf("the phone started %d install(s), want none", got)
+	}
+
+	if note := g.aboutNote.Text(); !strings.Contains(note, "Release page") {
+		t.Errorf("the About tab = %q, want it to point at the release page", note)
+	}
+}
+
+// The way back names when the previous binary was written, so "back" and
+// "forward" can be compared rather than guessed at (#285).
+func TestRevertNameCarriesWhenThePreviousBinaryIsFrom(t *testing.T) {
+	_, target := withInstallRecorder(t)
+
+	path := target + installpkg.PreviousSuffix
+	if err := os.WriteFile(path, []byte("older"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	when := time.Date(2026, 11, 1, 22, 59, 0, 0, time.UTC)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newScreenGUI(t, false)
+	g.refreshRevert()
+
+	if !strings.Contains(g.revertBtn.Text(), "2026-11-01 22:59") {
+		t.Errorf("the Revert button reads %q, want the time of the previous binary", g.revertBtn.Text())
+	}
+}
