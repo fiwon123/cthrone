@@ -8,35 +8,40 @@ import (
 	"fyne.io/fyne/v2/test"
 )
 
-// The header's one icon answers "where does this window stand?" without a
-// sentence (#453).
+// The icon and its one word answer "where does this window stand?" (#453,
+// #464).
 func TestTheStateIcon(t *testing.T) {
 	tests := []struct {
 		name                            string
 		starting, reconnecting, hosting bool
 		connected, lost                 bool
 		want                            string
+		word                            string
 	}{
-		{"nothing running", false, false, false, false, false, "⚪"},
-		{"a host or connect is starting", true, false, false, false, false, "🟡"},
-		{"the retry loop is asking", false, true, false, false, true, "🟠"},
-		{"this window hosts", false, false, true, false, false, "🟢"},
-		{"a client with its peer", false, false, false, true, false, "🔵"},
-		{"a session dropped", false, false, false, false, true, "🔴"},
+		{"nothing running", false, false, false, false, false, "⚪", "offline"},
+		{"a host or connect is starting", true, false, false, false, false, "🟡", "starting"},
+		{"the retry loop is asking", false, true, false, false, true, "🟠", "reconnecting"},
+		{"this window hosts", false, false, true, false, false, "🟢", "hosting"},
+		{"a client with its peer", false, false, false, true, false, "🔵", "connected"},
+		{"a session dropped", false, false, false, false, true, "🔴", "lost"},
 		// A session that is live outranks an older loss, and a host outranks a
 		// client: the icon is about now, not about what happened before.
-		{"connected after a loss", false, false, false, true, true, "🔵"},
-		{"hosting after a loss", false, false, true, false, true, "🟢"},
+		{"connected after a loss", false, false, false, true, true, "🔵", "connected"},
+		{"hosting after a loss", false, false, true, false, true, "🟢", "hosting"},
 		// A retry outranks the drop that started it.
-		{"reconnecting after a drop", false, true, false, false, true, "🟠"},
+		{"reconnecting after a drop", false, true, false, false, true, "🟠", "reconnecting"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := stateGlyphFor(tt.starting, tt.reconnecting, tt.hosting, tt.connected, tt.lost)
+			got, word, _ := stateGlyphFor(tt.starting, tt.reconnecting, tt.hosting, tt.connected, tt.lost)
 
 			if got != tt.want {
 				t.Errorf("stateGlyphFor() = %q, want %q", got, tt.want)
+			}
+
+			if word != tt.word {
+				t.Errorf("stateGlyphFor() word = %q, want %q", word, tt.word)
 			}
 		})
 	}

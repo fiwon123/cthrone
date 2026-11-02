@@ -321,7 +321,9 @@ func TestHostBluetoothOffersTheFingerprintAndStops(t *testing.T) {
 
 	g.host()
 
-	waitForStatus(t, g, func() bool { return strings.Contains(g.status.Text(), "Bluetooth") })
+	// The state is the header's word now, not a sentence on the status line
+	// (#464): a Bluetooth host is "hosting".
+	waitForStatus(t, g, func() bool { return g.stateWord.Text() == "hosting" })
 
 	openerCalled.Wait()
 
