@@ -507,12 +507,16 @@ jobs:
 
           ## ⚠️ What this build does not do
 
-          - **Audio does not play inside the app**, and **PDFs are not drawn** —
-            both open with another app. On a phone, press **Save as…** and open
-            the file from the file manager.
+          - **Only WAV and MP3 play inside the app.** Those two play on the file's
+            own row; Ogg/Vorbis, AAC/M4A and FLAC have no decoder in this build,
+            so they open with another app — and on a phone that means **Save as…**
+            and the file manager.
+          - **PDFs are not drawn**: they open with the device's viewer.
           - **`recv`/`exec` are not implemented.**
           - The **Windows Bluetooth transport**, the **phone build** and the
-            **APK on a device** have not been run yet.
+            **APK on a device** have not been run yet. Nothing here has been
+            heard on a phone either: the in-app player is compiled into the APK
+            and has never been run on one.
 
           <details>
           <summary>🧾 Every change</summary>
