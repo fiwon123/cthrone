@@ -150,3 +150,23 @@ func TestTheManifestPackageMatchesTheAppsID(t *testing.T) {
 		t.Errorf("manifest package = %q, Makefile -app-id = %q", facts.pkg, want)
 	}
 }
+
+// The Android build number comes from the version, not from the commit count: CI
+// checks out shallow, where the count is 1, and a versionCode that never changes
+// makes an update indistinguishable from a reinstall (#315).
+func TestTheBuildNumberComesFromTheVersion(t *testing.T) {
+	makefile, err := os.ReadFile(filepath.Join("..", "Makefile"))
+	if err != nil {
+		t.Fatalf("read the Makefile: %v", err)
+	}
+
+	recipe := string(makefile)
+
+	if strings.Contains(recipe, "rev-list --count") {
+		t.Error("the Android build number is taken from git history, which a shallow CI checkout reports as 1")
+	}
+
+	if !strings.Contains(recipe, "10000") {
+		t.Error("the Android build number is not derived from the version")
+	}
+}
