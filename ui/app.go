@@ -226,6 +226,12 @@ type gui struct {
 	// to its end has no entry.
 	audioResumeAt map[string]float64
 
+	// lastBottom is the transcript's scroll offset when the view was last at
+	// the end, and jumpBtn is the way back down when the reader is not there.
+	// A new message follows only if the reader was at the bottom (#434).
+	lastBottom float32
+	jumpBtn    *widgets.CopyButton
+
 	// video is the window's player for animated pictures (#421). Only one clip
 	// is kept: an animation is large, and a transcript that scrolled through ten
 	// would hold all ten. videoSurface and videoClock are the widgets of the row
@@ -536,8 +542,14 @@ func (g *gui) build() {
 	g.stopBtn.SetText(stopLabel)
 	g.stopBtn.Disable()
 
+	// The way back to the end of the transcript: hidden while the reader is
+	// there, shown when a message arrives and the reader is not (#434).
+	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
+	g.jumpBtn.Hide()
+
 	header := container.NewHBox(g.status)
 	header.Add(layout.NewSpacer())
+	header.Add(g.jumpBtn)
 	header.Add(g.stopBtn)
 	header.Add(filesBtn)
 
@@ -1513,6 +1525,7 @@ func (g *gui) send(text string) {
 
 	g.entry.SetText("")
 	g.addMessage(chatMessage{text: text})
+	g.scrollToLatest()
 
 	go func() {
 		if err := sender.Send(payload); err != nil {
@@ -2153,6 +2166,10 @@ func (g *gui) setStatus(text string) {
 // the slice.
 func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
+		// Whether to follow is decided before the message is added: it is the
+		// reader's position that decides, not the row's (#434).
+		follow := g.atBottom()
+
 		// The lock is what a reader on another goroutine reads under — the
 		// tests, and any helper that inspects the transcript. Painting happens
 		// on this goroutine anyway, so the cost is a mutex nobody contends for.
@@ -2161,8 +2178,50 @@ func (g *gui) addMessage(m chatMessage) {
 		g.mu.Unlock()
 
 		g.chatList.Refresh()
-		g.chatList.ScrollToBottom()
+
+		if follow {
+			g.scrollToLatest()
+
+			return
+		}
+
+		g.jumpBtn.Show()
 	})
+}
+
+// chatOffset is where the transcript is scrolled to. It is a variable so a test
+// can put the reader somewhere without a rendered list (#434).
+var chatOffset = func(list *widget.List) float32 { return list.GetScrollOffset() }
+
+// atBottom reports whether the transcript is at its end, which is where a new
+// message is followed from.
+func (g *gui) atBottom() bool {
+	if g.chatList == nil {
+		return true
+	}
+
+	// Before the list has ever been scrolled there is no end to compare with:
+	// a fresh transcript follows, which is what a window opening to a room
+	// wants.
+	if g.lastBottom == 0 {
+		return true
+	}
+
+	return chatOffset(g.chatList) >= g.lastBottom-2
+}
+
+// scrollToLatest takes the transcript to its end and remembers where that is.
+func (g *gui) scrollToLatest() {
+	if g.chatList == nil {
+		return
+	}
+
+	g.chatList.ScrollToBottom()
+	g.lastBottom = chatOffset(g.chatList)
+
+	if g.jumpBtn != nil {
+		g.jumpBtn.Hide()
+	}
 }
 
 // updateChatRow paints one row of the transcript.
