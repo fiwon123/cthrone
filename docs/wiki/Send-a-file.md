@@ -55,6 +55,11 @@ prefix, a file in an optional header field that an older peer ignores.
 
 ## Known gaps
 
+- **Video does not play in the app.** It opens with the device's player, or
+  **Save as…** on a phone. Playing it inside the chat needs a codec this build
+  does not carry; the decision and the plan are on
+  [Video in the app](Video-in-the-app)
+  ([#389](https://github.com/fiwon123/cthrone/issues/389)).
 - A **PDF is not drawn**: it opens in the device's reader, by design.
 - **Audio plays only as WAV or MP3.** Ogg, AAC/M4A and FLAC have no decoder in
   this build; those rows offer Open or Save as…, as before.
