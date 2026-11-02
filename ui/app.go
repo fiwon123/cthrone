@@ -244,6 +244,10 @@ type gui struct {
 	perfTotal   time.Duration
 	perfLast    time.Duration
 
+	// stateWord is the short word beside the icon, and stateGlyph their colour
+	// and shape. lost is whether the last session went away without the user
+	// asking: it is what tells a drop (🔴) from a stop (⚪) (#453, #464).
+	stateWord *widgets.Text
 	// stateGlyph is the header's one-icon connection state, and lost is whether
 	// the last session went away without the user asking: it is what tells a
 	// drop (🔴) from a stop (⚪) (#453).
@@ -545,6 +549,11 @@ func (g *gui) build() {
 	g.stateGlyph.TextSize = 18
 	g.stateGlyph.TextStyle = fyne.TextStyle{Bold: true}
 
+	// One word beside it: the icon alone is not enough to read, and the address
+	// a host prints belongs on its own line, not here (#464).
+	g.stateWord = g.text("offline")
+	g.stateWord.SetTextStyle(fyne.TextStyle{Bold: true})
+
 	g.status = g.text("")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 	g.status.SetOnTapped(func() {
@@ -583,7 +592,7 @@ func (g *gui) build() {
 	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
 	g.jumpBtn.Hide()
 
-	header := container.NewHBox(g.stateGlyph)
+	header := container.NewHBox(g.stateGlyph, g.stateWord)
 	header.Add(layout.NewSpacer())
 	header.Add(g.jumpBtn)
 	header.Add(g.stopBtn)
@@ -1238,15 +1247,11 @@ func (g *gui) host() {
 	// they are only meaningful for the websocket host: the NATS path has a
 	// broker instead of an address, and the radio has neither.
 	own := ""
-	hosting := "Hosting — waiting for connection"
 
 	if mode != transportNATS {
 		route, _ := defaultRouteIP()
 		addrs := discovery.AdvertisedAddrs(localAddrs(), route)
 		own = thisDeviceText(addrs, data.Port)
-		if addresses := deviceAddresses(addrs, data.Port); addresses != "" {
-			hosting = "Hosting on " + addresses + " — waiting for connection"
-		}
 	}
 
 	g.setStatus("Starting…")
@@ -1274,7 +1279,6 @@ func (g *gui) host() {
 				return
 			}
 
-			g.setStatus("Hosting through NATS on " + broker)
 			g.attach(sess)
 			g.tabs.SelectIndex(0)
 
@@ -1283,7 +1287,7 @@ func (g *gui) host() {
 		case transportBluetooth:
 			g.hostBluetooth(seq, data, opts)
 		default:
-			g.hostWebsocket(seq, data, tlsConf, opts, own, hosting, typedToken)
+			g.hostWebsocket(seq, data, tlsConf, opts, own, typedToken)
 		}
 	}()
 }
@@ -1321,14 +1325,13 @@ func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 	}
 
 	fyne.Do(g.updateButtons)
-	g.setStatus("Hosting over Bluetooth — one device at a time")
 	g.tabs.SelectIndex(0)
 	g.offerPairing("", handle.DeviceFingerprint, "", "", false)
 }
 
 // hostWebsocket serves the websocket room: it binds the port, shows this
 // device's address, and prints what the other device needs to find it.
-func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts pairing.Options, own, hosting string, typedToken bool) {
+func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts pairing.Options, own string, typedToken bool) {
 	handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
 		g.attach(sess)
 	}, g.confirmFirstContact)
@@ -1360,7 +1363,6 @@ func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts 
 
 	fyne.Do(g.updateButtons)
 	g.showThisDevice(own)
-	g.setStatus(hosting)
 	g.tabs.SelectIndex(0)
 	g.offerPairing(handle.Token, handle.DeviceFingerprint, handle.Fingerprint, own, !typedToken)
 }
@@ -2227,21 +2229,21 @@ func (g *gui) setStatus(text string) {
 //
 // The order is the order that matters: a retry in flight outranks the session
 // that dropped, and a host outranks a client.
-func stateGlyphFor(starting, reconnecting, hosting, connected, lost bool) (string, fyne.ThemeColorName) {
+func stateGlyphFor(starting, reconnecting, hosting, connected, lost bool) (string, string, fyne.ThemeColorName) {
 	switch {
 	case starting:
-		return "🟡", theme.ColorNameWarning
+		return "🟡", "starting", theme.ColorNameWarning
 	case reconnecting:
-		return "🟠", theme.ColorNameWarning
+		return "🟠", "reconnecting", theme.ColorNameWarning
 	case hosting:
-		return "🟢", theme.ColorNameSuccess
+		return "🟢", "hosting", theme.ColorNameSuccess
 	case connected:
-		return "🔵", theme.ColorNamePrimary
+		return "🔵", "connected", theme.ColorNamePrimary
 	case lost:
-		return "🔴", theme.ColorNameError
+		return "🔴", "lost", theme.ColorNameError
 	}
 
-	return "⚪", theme.ColorNameDisabled
+	return "⚪", "offline", theme.ColorNameDisabled
 }
 
 // refreshStateGlyph redraws the header's icon from the window's state.
@@ -2256,11 +2258,13 @@ func (g *gui) refreshStateGlyph() {
 	lost := g.lost
 	g.mu.Unlock()
 
-	glyph, colour := stateGlyphFor(starting, reconnecting, hosting, connected, lost)
+	glyph, word, colour := stateGlyphFor(starting, reconnecting, hosting, connected, lost)
 
 	g.stateGlyph.Text = glyph
 	g.stateGlyph.Color = theme.Color(colour)
 	g.stateGlyph.Refresh()
+
+	g.stateWord.SetText(word)
 }
 
 // addMessage appends a line to the transcript and scrolls to it.

@@ -228,6 +228,16 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.16.2` gives the state icon a word. The header reads **"🟢 hosting", "🔵
+connected", "⚪ offline", "🟡 starting", "🟠 reconnecting", "🔴 lost"** — one
+glyph and one word, then the actions — because a coloured dot alone does not say
+which state it is. The long **"Hosting on 192.168.15.163:8080 — waiting for
+connection"** is gone from the status bar, with its NATS and Bluetooth
+equivalents: an address and a sentence where a state belongs, and the address
+already has its own line on the host's screen (#464). The client's **"Waiting for
+<device> to accept — code 123456"** stays, because that line carries the code
+that has to be compared.
+
 `v0.16.1` is a patch on the chat header. The **state icon is the header now**,
 with no sentence beside it: a device joining, an encryption, or a scan that
 found nothing no longer writes there (#459). The **message line moved under the
