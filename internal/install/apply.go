@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	updatepkg "github.com/fiwon123/cthrone/internal/update"
@@ -54,6 +55,31 @@ type Result struct {
 	Checksum string
 }
 
+// ErrSelfReplace says the platform will not let a running app replace itself.
+//
+// It is not a limitation to work around: Android runs the app from its
+// installed package, and an app cannot swap that package without the package
+// installer. A GUI build there installs from the release page, and the message
+// says so (#285).
+var ErrSelfReplace = errors.New("install: this build cannot replace itself; install the app from the release page")
+
+// selfReplaceable reports whether this platform lets the running program
+// replace its own file. A command-line binary on Android — Termux — can: it is
+// a file in a directory the user owns. The GUI cannot, because what is running
+// is an installed package, not a file.
+func selfReplaceable(request Request) bool {
+	if !request.GUIBuild {
+		return true
+	}
+
+	switch strings.ToLower(strings.TrimSpace(request.GOOS)) {
+	case "android", "ios":
+		return false
+	}
+
+	return true
+}
+
 // Run installs one release: fetch its document, name the archive for this
 // build, verify the download against the release's own checksums, and swap it
 // in.
@@ -64,6 +90,13 @@ type Result struct {
 func Run(ctx context.Context, client *http.Client, apiBase string, request Request) (Result, error) {
 	if request.Target == "" {
 		return Result{}, errors.New("install: no target named")
+	}
+
+	// Before the fetch: a phone must not download the APK only to fail on it,
+	// and the old path failed with "the archive did not read as gzip", which
+	// named the wrong problem (#285).
+	if !selfReplaceable(request) {
+		return Result{}, fmt.Errorf("%w (%s)", ErrSelfReplace, request.GOOS)
 	}
 
 	url := apiBase + "/releases/latest"

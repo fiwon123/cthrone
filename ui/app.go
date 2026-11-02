@@ -1895,7 +1895,12 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 
 	g.wikiBtn = widgets.NewButtonWithIcon("Wiki", theme.HelpIcon(), g.openWiki, g.copyLabel)
 
-	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+	noteText := "Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest."
+	if !selfInstallable() {
+		noteText = appInstallsFromTheReleasePage
+	}
+
+	note := g.label(noteText)
 
 	body := container.NewVBox(
 		header,
