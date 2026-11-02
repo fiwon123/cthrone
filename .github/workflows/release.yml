@@ -512,9 +512,10 @@ jobs:
             so they open with another app — and on a phone that means **Save as…**
             and the file manager.
           - **PDFs are not drawn**: they open with the device's viewer.
-          - **Video does not play in the app.** It opens with the device's player, or
-            **Save as…** on a phone. Playing it inside the chat needs a codec this
-            build does not carry; the plan is on the wiki's
+          - **An animated GIF plays; a video does not.** GIFs play on their row with
+            a seek bar. MP4, H.264 and WebM need a codec this build does not carry,
+            so those open with the device's player — or **Save as…** on a phone. The
+            plan is on the wiki's
             [Video in the app](https://github.com/fiwon123/cthrone/blob/main/docs/wiki/Video-in-the-app.md)
             page.
           - **`recv`/`exec` are not implemented.**

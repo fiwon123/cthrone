@@ -228,6 +228,18 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.14.0` plays an animated picture. A GIF in the conversation moves: Play and
+Stop, a clock, and a seek bar that jumps through it, decoded with the standard
+library on every platform — the first half of the video request, and the player
+an MP4 decoder would feed (#421). Frames are composited the way the sender's
+viewer drew them, a still GIF keeps its picture, and nothing beyond 16 MiB, 1200
+frames or 64 MiB of decoded pixels is decoded at all. What a phone records is
+still H.264 in MP4, and that needs a codec this build does not carry (#389). The
+gate grew too: `make fuzz` now drives **every parser a peer can reach** — the
+discovery beacon anyone on the segment can send (#414), the handshake a peer
+sends before proving anything (#416), and the Bluetooth reassembler's packet
+stream (#418) — beside the envelope and the chunk arithmetic it already covered.
+
 `v0.13.2` keeps the playhead. **Stop** no longer throws away where the sound
 had got to: the row shows the point, and **Play resumes** from there, while a
 clip that played to its end starts over and a tap on the waveform still wins
