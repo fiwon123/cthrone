@@ -20,11 +20,11 @@ func (stopServer) Stop() error { return nil }
 func TestTheChatHeaderSaysWhereWeAre(t *testing.T) {
 	g := newScreenGUI(t, false)
 
-	if got := g.stateText.Text(); got != "● offline" {
+	if got := g.status.Text(); got != "● offline" {
 		t.Errorf("with no session the header says %q, want the offline mark", got)
 	}
 
-	if got := g.stateText.Importance(); got != widget.LowImportance {
+	if got := g.status.Importance(); got != widget.LowImportance {
 		t.Errorf("the offline state has importance %v, want the low one", got)
 	}
 
@@ -34,11 +34,11 @@ func TestTheChatHeaderSaysWhereWeAre(t *testing.T) {
 
 	g.refreshConnectionState()
 
-	if got := g.stateText.Text(); got != "● hosting" {
+	if got := g.status.Text(); got != "● hosting" {
 		t.Errorf("while hosting the header says %q, want hosting", got)
 	}
 
-	if got := g.stateText.Importance(); got != widget.SuccessImportance {
+	if got := g.status.Importance(); got != widget.SuccessImportance {
 		t.Errorf("the hosting state has importance %v, want the success one", got)
 	}
 
@@ -49,7 +49,7 @@ func TestTheChatHeaderSaysWhereWeAre(t *testing.T) {
 	g.mu.Unlock()
 
 	g.refreshConnectionState()
-	if got := g.stateText.Text(); got != "● connected" {
+	if got := g.status.Text(); got != "● connected" {
 		t.Errorf("a connected window says %q, want connected", got)
 	}
 
@@ -58,7 +58,7 @@ func TestTheChatHeaderSaysWhereWeAre(t *testing.T) {
 	g.mu.Unlock()
 
 	g.refreshConnectionState()
-	if got := g.stateText.Text(); !strings.Contains(got, "laptop") {
+	if got := g.status.Text(); !strings.Contains(got, "laptop") {
 		t.Errorf("the header says %q, want the peer's name", got)
 	}
 
@@ -68,7 +68,7 @@ func TestTheChatHeaderSaysWhereWeAre(t *testing.T) {
 	g.mu.Unlock()
 
 	g.refreshConnectionState()
-	if got := g.stateText.Text(); !strings.Contains(got, "connecting") {
+	if got := g.status.Text(); !strings.Contains(got, "connecting") {
 		t.Errorf("while starting the header says %q, want connecting", got)
 	}
 }
@@ -84,24 +84,39 @@ func TestTheChatHeaderDoesNotShowTheAppName(t *testing.T) {
 	}
 }
 
-// The status line under the header exists only while it has something to say: a
-// permanent sentence there was the report (#364).
-func TestTheStatusLineHidesWhenItIsEmpty(t *testing.T) {
+// The header's one line is the status: where the window stands until something
+// newer happens, and the message itself while it lasts (#364, #383).
+func TestTheStatusLineFallsBackToTheConnectionState(t *testing.T) {
 	g := newScreenGUI(t, false)
 
-	if g.status.Visible() {
-		t.Error("the status line is showing before anything has happened")
+	if !g.status.Visible() {
+		t.Fatal("the header's line is hidden while the window has a state to show")
+	}
+
+	if got := g.status.Text(); got != "● offline" {
+		t.Errorf("with nothing to say the line shows %q, want the offline state", got)
 	}
 
 	g.setStatus("Selected 192.168.1.20")
 
-	if !g.status.Visible() {
-		t.Error("a status message did not show the line")
+	if got := g.status.Text(); got != "Selected 192.168.1.20" {
+		t.Errorf("a message did not take the line: %q", got)
+	}
+
+	// A state change does not steal a message that is still news.
+	g.mu.Lock()
+	g.server = stopServer{}
+	g.mu.Unlock()
+
+	g.refreshConnectionState()
+
+	if got := g.status.Text(); got != "Selected 192.168.1.20" {
+		t.Errorf("the state overwrote a message: %q", got)
 	}
 
 	g.setStatus("")
 
-	if g.status.Visible() {
-		t.Error("an empty status left the line showing")
+	if got := g.status.Text(); got != "● hosting" {
+		t.Errorf("a cleared status shows %q, want the state it was hiding", got)
 	}
 }

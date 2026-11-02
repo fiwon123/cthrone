@@ -174,8 +174,13 @@ type gui struct {
 	sendBtn   *widgets.CopyButton
 	stopBtn   *widgets.CopyButton
 	attachBtn *widgets.CopyButton
-	copyHint  *widget.Label
 	messages  []chatMessage
+
+	// statusShowsState is whether the chat header's one line is currently the
+	// connection state, rather than a message about something that just
+	// happened. A message wins until it is cleared; the state then takes the
+	// line back (#383).
+	statusShowsState bool
 
 	// copyPopup is the "Copied" hint a label copy raises, and copyTimer takes
 	// it away again. The chat tab has its own line for the transcript's copy
@@ -242,11 +247,9 @@ type gui struct {
 	decodableFiles map[string]bool
 	texts          map[string]string
 
-	// stateText is the chat header's connection state — a mark and a word on one
-	// line, coloured by importance — and peerName is who a session is with when
-	// the handshake named one (#345, #364).
-	stateText *widgets.Text
-	peerName  string
+	// peerName is who a session is with when the handshake named one. The state
+	// itself is written on the chat header's one line, in g.status (#345, #383).
+	peerName string
 
 	// updateTag and updateAt are the last successful check and when it ran, so a
 	// second press is answered from memory (#322).
@@ -458,17 +461,24 @@ func (g *gui) build() {
 	g.lay = layoutFor(g.mobile, g.canvasWidth())
 
 	// --- chat ---------------------------------------------------------
-	// The header says where this window stands — offline, hosting, connected to
-	// whom — because that is the one thing the transcript cannot say for itself
-	// once the status line has been overwritten. It never carries the app's name:
-	// on a phone that was the whole left side, spent on the one word the user
-	// already knows (#345).
+	// The chat header is one row: the status, and the two actions that belong
+	// to the conversation rather than to a message — Stop and Files. It used to
+	// be three: a state line, a copy hint, and the status under them, which on a
+	// phone wrapped and said the same thing twice (#383).
+	//
+	// The status line is where the window stands when it has nothing newer to
+	// say — offline, hosting, connected to whom — so the state is still there a
+	// second after the window opens, and a real message ("Cannot play …") wins
+	// over it until it is cleared. It never carries the app's name: on a phone
+	// that was the whole left side, spent on the one word the user already knows
+	// (#345).
 	//
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
-	g.copyHint = g.label("")
-	g.stateText = g.text("")
+	g.status = g.text("")
+	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
+	g.statusShowsState = true
 
 	g.refreshConnectionState()
 
@@ -483,10 +493,6 @@ func (g *gui) build() {
 	filesBtn := widgets.NewButtonWithIcon("Files", theme.FolderIcon(), g.showFiles, g.copyLabel)
 	filesBtn.SetText(filesLabel)
 
-	header := container.NewHBox(g.stateText)
-	header.Add(layout.NewSpacer())
-	header.Add(g.copyHint)
-
 	// Stop is a connection control, not a message action: it belongs with the
 	// session's state, not beside Send, where a thumb aiming at Send could end
 	// the connection (#288). It is built here, before the composer, so the
@@ -500,12 +506,10 @@ func (g *gui) build() {
 	g.stopBtn.SetText(stopLabel)
 	g.stopBtn.Disable()
 
+	header := container.NewHBox(g.status)
+	header.Add(layout.NewSpacer())
 	header.Add(g.stopBtn)
 	header.Add(filesBtn)
-
-	g.status = g.text("")
-	g.status.Hide()
-	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -628,7 +632,7 @@ func (g *gui) build() {
 	}
 
 	chat := container.NewBorder(
-		container.NewVBox(container.NewPadded(header), container.NewPadded(g.status), widget.NewSeparator()),
+		container.NewVBox(container.NewPadded(header), widget.NewSeparator()),
 		container.NewPadded(input),
 		nil, nil,
 		g.chatList,
@@ -2041,9 +2045,11 @@ func (g *gui) growComposer(text string) {
 // hosting, or connected to the device the handshake named.
 //
 // It reads the same fields the buttons do, so there is one truth about whether
-// this window is in a session (#345).
+// this window is in a session (#345). The state goes on the header's one line,
+// and only while that line is the state: a message from setStatus owns it until
+// it is cleared, because "Cannot play …" is news and "offline" is not (#383).
 func (g *gui) refreshConnectionState() {
-	if g.stateText == nil {
+	if g.status == nil || !g.statusShowsState {
 		return
 	}
 
@@ -2069,8 +2075,9 @@ func (g *gui) refreshConnectionState() {
 		}
 	}
 
-	g.stateText.SetText(text)
-	g.stateText.SetImportance(importance)
+	g.status.SetText(text)
+	g.status.SetImportance(importance)
+	g.status.Show()
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
@@ -2133,16 +2140,18 @@ func (g *gui) canvasWidth() int {
 
 func (g *gui) setStatus(text string) {
 	fyne.Do(func() {
-		g.status.SetText(text)
-
-		// The line exists only while it has something to say: a permanent
-		// sentence under the header was the report (#364).
+		// An empty status is "nothing new to say", not "hide the line": the
+		// header gives it back to the connection state (#383).
 		if text == "" {
-			g.status.Hide()
+			g.statusShowsState = true
+			g.refreshConnectionState()
 
 			return
 		}
 
+		g.statusShowsState = false
+		g.status.SetText(text)
+		g.status.SetImportance(widget.MediumImportance)
 		g.status.Show()
 	})
 }
@@ -2302,10 +2311,10 @@ func (g *gui) copyToClipboard(text string) {
 
 	g.app.Clipboard().SetContent(text)
 
-	fyne.Do(func() { g.copyHint.SetText("Copied") })
-	time.AfterFunc(copyHintDuration, func() {
-		fyne.Do(func() { g.copyHint.SetText("") })
-	})
+	// One confirmation for the whole window: the header no longer has a line of
+	// its own for it, and the popup was already doing this on every other tab
+	// (#383).
+	g.showCopied()
 }
 
 // copyLabel is the onCopied hook every CopyButton carries.

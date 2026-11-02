@@ -196,7 +196,7 @@ func TestADroppedClientReconnectsOnItsOwn(t *testing.T) {
 	})
 
 	waitForCondition(t, "the header to show the restored session", func() bool {
-		return strings.Contains(g.stateText.Text(), "connected")
+		return strings.Contains(g.status.Text(), "connected")
 	})
 }
 
@@ -225,7 +225,7 @@ func TestStopEndsTheReconnectLoop(t *testing.T) {
 	})
 
 	waitForCondition(t, "the header to say reconnecting", func() bool {
-		return strings.Contains(g.stateText.Text(), "reconnecting")
+		return strings.Contains(g.status.Text(), "reconnecting")
 	})
 
 	waitForCondition(t, "Stop to be offered while retrying", func() bool {
