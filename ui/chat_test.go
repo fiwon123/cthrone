@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestChatMessageLine checks how a message reaches the screen and the "Copy all"
-// clipboard: the same rendering for both, so a copy carries what was read.
+// TestChatMessageLine checks how a message reaches the screen: the row and the
+// clipboard carry the same rendering, so a copy is what was read.
 func TestChatMessageLine(t *testing.T) {
 	tests := []struct {
 		name string
@@ -239,4 +239,17 @@ func TestComposerRowCount(t *testing.T) {
 	if desktop > 5 {
 		t.Errorf("the composer shows %d rows, want a small ceiling", desktop)
 	}
+}
+
+// transcript renders every message in order, one per line.
+//
+// It used to be the app's Copy all action as well; that button is gone (#289),
+// and what is left is the test helper the log-cap and line tests need.
+func transcript(messages []chatMessage) string {
+	lines := make([]string, len(messages))
+	for i, m := range messages {
+		lines[i] = m.line()
+	}
+
+	return strings.Join(lines, "\n")
 }

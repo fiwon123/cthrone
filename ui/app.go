@@ -369,17 +369,12 @@ func (g *gui) build() {
 	// --- chat ---------------------------------------------------------
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
-	// title bar to show it in, the copy confirmation, and the copy-all action.
+	// title bar to show it in, the copy confirmation, and the Files action.
+	//
+	// There is no Copy all here any more: it copied the transcript as one
+	// string, which is not what a user who wants one message means, and a tap on
+	// a row already copies that row (#289).
 	g.copyHint = g.label("")
-
-	copyLabel := "Copy all"
-	if g.lay.Stack {
-		// The icon is enough where width is scarce.
-		copyLabel = ""
-	}
-
-	copyBtn := widgets.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), g.copyAll, g.copyLabel)
-	copyBtn.SetText(copyLabel)
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -400,7 +395,6 @@ func (g *gui) build() {
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
 	header.Add(filesBtn)
-	header.Add(copyBtn)
 
 	g.status = g.text("Ready — open Setup to connect or host.")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
@@ -1658,11 +1652,6 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 	}
 
 	g.copyToClipboard(message.line())
-}
-
-// copyAll copies the whole transcript.
-func (g *gui) copyAll() {
-	g.copyToClipboard(transcript(g.messages))
 }
 
 // copyToClipboard puts text on the clipboard and confirms it on screen.
