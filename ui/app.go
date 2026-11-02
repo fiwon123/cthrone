@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -2240,12 +2241,21 @@ func (g *gui) noteMessageCost(cost time.Duration) string {
 	rows := len(g.messages)
 	g.mu.Unlock()
 
-	return fmt.Sprintf("perf: %d messages, %.2f ms each on average, last %.2f ms, %d rows, %d live",
+	// A cost that climbs with the row count is the refresh path; one that stays
+	// flat while the window stutters is the renderer. Goroutines and heap are
+	// the third answer — something that never stops growing — and the only one
+	// that explains "it starts lagging after a while" by itself (#432).
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+
+	return fmt.Sprintf("perf: %d messages, %.2f ms each on average, last %.2f ms, %d rows, %d live, %d goroutines, %.1f MB heap",
 		g.perfCount,
 		float64(g.perfTotal)/float64(g.perfCount)/float64(time.Millisecond),
 		float64(g.perfLast)/float64(time.Millisecond),
 		rows,
 		g.liveSessions,
+		runtime.NumGoroutine(),
+		float64(memory.HeapAlloc)/(1<<20),
 	)
 }
 
