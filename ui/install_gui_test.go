@@ -362,3 +362,37 @@ func TestRevertNameCarriesWhenThePreviousBinaryIsFrom(t *testing.T) {
 		t.Errorf("the Revert button reads %q, want the time of the previous binary", g.revertBtn.Text())
 	}
 }
+
+// A phone's install action is the release page, so a check with news names the
+// release on that button (#366).
+func TestAPhonesCheckNamesTheReleaseOnTheReleaseButton(t *testing.T) {
+	previous := selfInstallable
+	selfInstallable = func() bool { return false }
+	t.Cleanup(func() { selfInstallable = previous })
+
+	g := newScreenGUI(t, true)
+
+	g.offerInstall("v9.9.9")
+
+	if g.installBtn.Visible() {
+		t.Error("a phone was offered an Install button")
+	}
+
+	if got := g.releaseBtn.Text(); got != "Get v9.9.9" {
+		t.Errorf("the release button reads %q, want it to name the release", got)
+	}
+
+	// A desktop is untouched: Install appears, the release button keeps its name.
+	selfInstallable = func() bool { return true }
+
+	desktop := newScreenGUI(t, false)
+	desktop.offerInstall("v9.9.9")
+
+	if !desktop.installBtn.Visible() {
+		t.Error("a desktop was not offered Install")
+	}
+
+	if got := desktop.releaseBtn.Text(); got != "Release page" {
+		t.Errorf("a desktop's release button reads %q, want the plain name", got)
+	}
+}

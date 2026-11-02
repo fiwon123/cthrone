@@ -5,6 +5,7 @@ package ui
 import (
 	"testing"
 
+	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -47,5 +48,58 @@ func TestTheComposerHasNoPlaceholder(t *testing.T) {
 				t.Errorf("the composer shows the placeholder %q, want none", got)
 			}
 		})
+	}
+}
+
+// On a phone, Enter breaks the line — every time — and the button sends. Fyne
+// routes Return down two paths depending on a hidden flag, so the rule has to be
+// stated rather than inferred (#362).
+func TestOnAPhoneEnterAlwaysBreaksTheLine(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	sess := newSendRecorder()
+	g.mu.Lock()
+	g.sess = sess
+	g.mu.Unlock()
+
+	typeRunes(g.entry, "one")
+
+	for press := 1; press <= 3; press++ {
+		g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+	}
+
+	if got, want := g.entry.Text, "one\n\n\n"; got != want {
+		t.Errorf("after three Enters the field reads %q, want %q", got, want)
+	}
+
+	select {
+	case <-sess.done:
+		t.Fatal("Enter sent the message on a phone, want a line break")
+	default:
+	}
+
+	// The button sends the whole body.
+	g.send(g.entry.Text)
+
+	if got, want := string(sess.wait(t)), "one"; got != want {
+		t.Errorf("the button sent %q, want %q", got, want)
+	}
+}
+
+// The keyboard's action key sends on a phone, whatever the entry otherwise does
+// with Return.
+func TestAPhonesActionKeySends(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	sess := newSendRecorder()
+	g.mu.Lock()
+	g.sess = sess
+	g.mu.Unlock()
+
+	g.entry.SetText("ready to go")
+	g.entry.OnSubmitted("ready to go")
+
+	if got, want := string(sess.wait(t)), "ready to go"; got != want {
+		t.Errorf("the action key sent %q, want %q", got, want)
 	}
 }
