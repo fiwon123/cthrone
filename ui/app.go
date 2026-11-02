@@ -204,6 +204,12 @@ type gui struct {
 	decodableFiles map[string]bool
 	texts          map[string]string
 
+	// stateText and stateDot are the chat header's connection state, and
+	// peerName is who a session is with, when the handshake named one (#345).
+	stateText *widgets.Text
+	stateDot  *canvas.Circle
+	peerName  string
+
 	// updateTag and updateAt are the last successful check and when it ran, so a
 	// second press is answered from memory (#322).
 	updateTag string
@@ -393,14 +399,20 @@ func (g *gui) build() {
 	g.lay = layoutFor(g.mobile, g.canvasWidth())
 
 	// --- chat ---------------------------------------------------------
-	// The desktop window already says "cthrone" in its title bar, so the header
-	// carries only what a title bar cannot: the name on a phone, which has no
-	// title bar to show it in, the copy confirmation, and the Files action.
+	// The header says where this window stands — offline, hosting, connected to
+	// whom — because that is the one thing the transcript cannot say for itself
+	// once the status line has been overwritten. It never carries the app's name:
+	// on a phone that was the whole left side, spent on the one word the user
+	// already knows (#345).
 	//
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
 	g.copyHint = g.label("")
+	g.stateDot = canvas.NewCircle(theme.Color(theme.ColorNameDisabled))
+	g.stateText = g.text("")
+
+	g.refreshConnectionState()
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -413,11 +425,12 @@ func (g *gui) build() {
 	filesBtn := widgets.NewButtonWithIcon("Files", theme.FolderIcon(), g.showFiles, g.copyLabel)
 	filesBtn.SetText(filesLabel)
 
-	header := container.NewHBox()
-	if g.mobile {
-		header.Add(widget.NewLabelWithStyle("cthrone", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-	}
+	state := container.NewHBox(
+		container.NewGridWrap(fyne.NewSize(10, 10), g.stateDot),
+		g.stateText,
+	)
 
+	header := container.NewHBox(state)
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
 
@@ -1531,6 +1544,11 @@ func (g *gui) attach(sess session.Session) {
 	// sent anything, and "connected" is not the same as "encrypted".
 	if sealed, ok := sess.(*e2e.Conn); ok {
 		sealed.OnPeer(func(p e2e.Peer) {
+			g.mu.Lock()
+			g.peerName = p.Name()
+			g.mu.Unlock()
+
+			fyne.Do(g.refreshConnectionState)
 			peer.set(p.Name())
 
 			if p.First && p.Fingerprint != "" {
@@ -1611,6 +1629,39 @@ func (g *gui) growComposer(text string) {
 
 	g.composerRows = rows
 	g.entry.SetMinRowsVisible(rows)
+}
+
+// refreshConnectionState writes the chat header's state: offline, connecting,
+// hosting, or connected to the device the handshake named.
+//
+// It reads the same fields the buttons do, so there is one truth about whether
+// this window is in a session (#345).
+func (g *gui) refreshConnectionState() {
+	if g.stateText == nil || g.stateDot == nil {
+		return
+	}
+
+	g.mu.Lock()
+	sess, server, starting, peer := g.sess, g.server, g.starting, g.peerName
+	g.mu.Unlock()
+
+	text, colour := "offline", theme.ColorNameDisabled
+
+	switch {
+	case starting:
+		text, colour = "connecting…", theme.ColorNameWarning
+	case server != nil:
+		text, colour = "hosting", theme.ColorNameSuccess
+	case sess != nil:
+		text, colour = "connected", theme.ColorNameSuccess
+		if peer != "" {
+			text = "connected to " + peer
+		}
+	}
+
+	g.stateText.SetText(text)
+	g.stateDot.FillColor = theme.Color(colour)
+	g.stateDot.Refresh()
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
