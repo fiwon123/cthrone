@@ -196,7 +196,7 @@ func TestDesktopSetupFormUsesTwoColumns(t *testing.T) {
 // headerParts finds the app icon, the name and the version wherever the header
 // puts them: side by side on a desktop, the version under the name on a phone
 // (#329).
-func headerParts(t *testing.T, root fyne.CanvasObject) (*widget.Icon, *widgets.Text, *widgets.Text) {
+func headerParts(t *testing.T, root fyne.CanvasObject) (*widget.Icon, *widgets.Text) {
 	t.Helper()
 
 	var icon *widget.Icon
@@ -226,11 +226,11 @@ func headerParts(t *testing.T, root fyne.CanvasObject) (*widget.Icon, *widgets.T
 
 	walk(root, 0)
 
-	if icon == nil || len(texts) < 2 {
-		t.Fatalf("the header holds icon=%v and %d text(s), want the logo, the name and the version", icon != nil, len(texts))
+	if icon == nil || len(texts) < 1 {
+		t.Fatalf("the header holds icon=%v and %d text(s), want the logo and the name with its version", icon != nil, len(texts))
 	}
 
-	return icon, texts[0], texts[1]
+	return icon, texts[0]
 }
 
 // The header carries the app's mark, its name, and the version immediately after
@@ -248,11 +248,11 @@ func TestAboutHeaderShowsTheLogoTheNameAndTheVersion(t *testing.T) {
 			header := g.aboutHeader("v0.8.3")
 
 			box, ok := header.(*fyne.Container)
-			if !ok || len(box.Objects) != 3 {
-				t.Fatalf("the header is %T holding %d object(s), want the mark, the name and the version in one row", header, len(box.Objects))
+			if !ok || len(box.Objects) != 2 {
+				t.Fatalf("the header is %T holding %d object(s), want the mark and one line of name and version", header, len(box.Objects))
 			}
 
-			icon, title, version := headerParts(t, header)
+			icon, title := headerParts(t, header)
 
 			if !icon.Visible() {
 				t.Error("the header draws no logo")
@@ -262,12 +262,8 @@ func TestAboutHeaderShowsTheLogoTheNameAndTheVersion(t *testing.T) {
 				t.Error("the logo has no resource, so it paints nothing")
 			}
 
-			if title.Text() != "cthrone" || !title.TextStyle().Bold {
-				t.Errorf("name = %q (bold %v), want the bold app name", title.Text(), title.TextStyle().Bold)
-			}
-
-			if version.Text() != "v0.8.3" {
-				t.Errorf("version = %q, want %q", version.Text(), "v0.8.3")
+			if title.Text() != "cthrone  v0.8.3" || !title.TextStyle().Bold {
+				t.Errorf("the heading reads %q (bold %v), want the name and the version on one line", title.Text(), title.TextStyle().Bold)
 			}
 		})
 	}
