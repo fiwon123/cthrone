@@ -594,10 +594,17 @@ func (g *gui) build() {
 	// of one transport never leaves the other's rows in the way.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.visibleBeacons()) },
-		// A row is text a user copies, so it is the same wrapper the transcript
-		// uses: on a phone a long press selects the address, and the tap keeps
-		// the action the list gave it — filling the address field.
-		func() fyne.CanvasObject { return g.text("") },
+		// A row does something when pressed, so it looks like what it is: a
+		// button (#287). The transcript's long-press text is not used here any
+		// more — a sentence that is selectable reads as text, not as an action,
+		// which is what the report said. The address stays copyable where it is
+		// used: the Setup field it fills and the status line naming it.
+		func() fyne.CanvasObject {
+			row := widget.NewButton("", nil)
+			row.Alignment = widget.ButtonAlignLeading
+
+			return row
+		},
 		g.updateBeaconRow,
 	)
 	g.beaconList.OnSelected = g.selectBeacon
@@ -1350,13 +1357,13 @@ func (g *gui) updateBeaconRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		return
 	}
 
-	label, ok := obj.(*widgets.Text)
+	button, ok := obj.(*widget.Button)
 	if !ok {
 		return
 	}
 
-	label.SetText(deviceLabel(rows[id].Beacon))
-	label.SetOnTapped(func() { g.beaconList.Select(id) })
+	button.SetText(deviceLabel(rows[id].Beacon))
+	button.OnTapped = func() { g.beaconList.Select(id) }
 }
 
 // visibleBeacons is the rows the Devices list shows for the transport in force.
