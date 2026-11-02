@@ -530,7 +530,20 @@ func (g *gui) build() {
 	// No placeholder: the field says nothing until the user types, and the
 	// keyboard's behaviour belongs in the docs, not in the message (#344).
 	g.entry.OnChanged = g.composerChanged
-	g.entry.OnSubmitted = func(string) { g.insertComposerNewline() }
+	g.entry.OnSubmitted = func(text string) {
+		// On a phone the keyboard's action key is the send key, and Fyne routes
+		// Return through OnSubmitted only when its hidden shift flag is set —
+		// which nothing on a phone controls. So the phone's rule is stated here
+		// rather than inferred from the text (#362): an action key sends, a typed
+		// newline breaks the line, and the Send button always sends.
+		if g.mobile {
+			g.send(text)
+
+			return
+		}
+
+		g.insertComposerNewline()
+	}
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
 	// Send is the primary action of the composer: the filled (high) importance
@@ -1641,6 +1654,14 @@ func (g *gui) attach(sess session.Session) {
 // sends too, which is what a phone expects.
 func (g *gui) composerChanged(text string) {
 	g.growComposer(text)
+
+	// A phone breaks the line on Enter and sends with the button or the
+	// keyboard's action key. Inferring "Enter" from an appended newline made the
+	// same key send or break depending on a hidden flag, which is the report
+	// (#362).
+	if g.mobile {
+		return
+	}
 
 	if g.editingComposer {
 		g.lastComposer = text
