@@ -411,7 +411,10 @@ test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
 # testdata/fuzz by the tool itself, and that file is what a later run replays
 # before it starts exploring.
 FUZZTIME ?= 20s
-FUZZ_TARGETS := ./internal/wire:FuzzParse ./internal/wire:FuzzChunks
+# The parsers of input this program did not write. `wire` is the envelope every
+# frame goes through; `discovery`'s beacon is the one message anybody on the
+# segment can send without a credential (#414).
+FUZZ_TARGETS := ./internal/wire:FuzzParse ./internal/wire:FuzzChunks ./internal/discovery:FuzzBeacon
 
 fuzz: ## fuzz the parsers of untrusted input (FUZZTIME=20s by default)
 	@set -e; \

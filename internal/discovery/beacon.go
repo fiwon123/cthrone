@@ -179,16 +179,36 @@ func (l *Listener) Start() {
 			if err != nil {
 				return
 			}
-			var b Beacon
-			if err := json.Unmarshal(buf[:n], &b); err != nil {
+
+			b, ok := parseBeacon(buf[:n], raddr.IP)
+			if !ok {
 				continue
 			}
-			if b.Addr == "" {
-				b.Addr = raddr.IP.String()
-			}
+
 			l.observe(b, l.now())
 		}
 	}()
+}
+
+// parseBeacon reads one datagram into a beacon, filling the address from the
+// sender when the frame carries none, and reports whether it is a beacon at
+// all.
+//
+// It is a function of its own because it is the one parse in this package that
+// anybody on the segment can drive with any bytes: no credential, no handshake,
+// no length beyond the read buffer. The listener runs it for every packet; the
+// fuzzer runs it with the whole rest of that path (#414).
+func parseBeacon(packet []byte, from net.IP) (Beacon, bool) {
+	var b Beacon
+	if err := json.Unmarshal(packet, &b); err != nil {
+		return Beacon{}, false
+	}
+
+	if b.Addr == "" && from != nil {
+		b.Addr = from.String()
+	}
+
+	return b, true
 }
 
 // observe records one hearing of a beacon and reports it. Every hearing is
