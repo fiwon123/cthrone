@@ -79,9 +79,18 @@ concurrency lives.
 
 ### Fuzzing the untrusted input
 
-`make fuzz` (CI runs it for 20 s per target) drives the parsers that read bytes
-from a peer: `wire.Parse`, the door every frame goes through, and the chunk
-arithmetic a transfer depends on.
+`make fuzz` (CI runs it for 20 s per target) drives **every parser a peer can
+drive**:
+
+| Target | The bytes come from |
+|---|---|
+| `wire.Parse`, `wire.Chunks` | every frame, on every transport |
+| `discovery.FuzzBeacon` | anyone on the LAN — no credential, no handshake (#414) |
+| `e2e.FuzzHandshake` | a peer, before it has proved anything (#416) |
+| `bluetooth.FuzzReassemble` | a radio peer's packet stream (#418) |
+
+`peers.json` and `identity.key` are local files this program writes, not peer
+input, and are not fuzzed.
 
 A failing input is written by the tool into `testdata/fuzz/<Target>/` — commit
 it. The next run replays the corpus before it starts exploring, so a fuzzer that

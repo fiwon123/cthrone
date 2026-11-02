@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"net/http"
 	"net/url"
 	"os"
@@ -230,6 +231,21 @@ type gui struct {
 	// Play continues there instead of starting over (#409). A clip that played
 	// to its end has no entry.
 	audioResumeAt map[string]float64
+
+	// video is the window's player for animated pictures (#421). Only one clip
+	// is kept: an animation is large, and a transcript that scrolled through ten
+	// would hold all ten. videoSurface and videoClock are the widgets of the row
+	// currently showing that clip, dropped by whichever row is painted next the
+	// way the audio clock's are.
+	video         *videoPlayer
+	videoPath     string
+	videoClip     *videoClip
+	videoClipPath string
+	videoFrame    image.Image
+	videoSurface  *canvas.Image
+	videoClock    *widgets.Text
+	videoSyncing  bool
+	videoFiles    map[string]bool
 	playableFiles map[string]bool
 
 	// devices
@@ -359,7 +375,7 @@ func run() (err error) {
 		w.SetIcon(ic)
 	}
 
-	g := &gui{app: a, win: w, mobile: mobile}
+	g := &gui{app: a, win: w, mobile: mobile, video: &videoPlayer{}}
 
 	// A window that cannot be built has nothing to show, and a blank window is
 	// a worse answer than a report: the panic propagates to the recover above.
@@ -473,6 +489,12 @@ func currentDeviceIsMobile() (mobile bool) {
 func (g *gui) build() {
 	g.lay = layoutFor(g.mobile, g.canvasWidth())
 
+	// The window's player exists before any row asks for it: a test builds a
+	// gui without Run's struct literal.
+	if g.video == nil {
+		g.video = &videoPlayer{}
+	}
+
 	// --- chat ---------------------------------------------------------
 	// The chat header is one row: the status, and the two actions that belong
 	// to the conversation rather than to a message — Stop and Files. It used to
@@ -571,6 +593,10 @@ func (g *gui) build() {
 			// far into the clip the sound has got.
 			audio := newAudioRow(g)
 
+			// An animated picture plays on its own surface, with a seek bar: the
+			// controller #421 added is what FFmpeg would later feed too.
+			video := newVideoRow(g)
+
 			// The sender has a line of its own, in a colour of its own, so a room
 			// of three is readable at a glance (#346). It is a canvas.Text
 			// because that carries any colour; a themed label takes a colour
@@ -580,7 +606,7 @@ func (g *gui) build() {
 
 			caption := container.NewVBox(sender, row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box, video.box)
 		},
 		g.updateChatRow,
 	)
@@ -2223,6 +2249,11 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		audio, _ = audioRowOf(row.Objects[5])
 	}
 
+	var video videoRow
+	if len(row.Objects) > 6 {
+		video, _ = videoRowOf(row.Objects[6])
+	}
+
 	var label *widgets.Text
 	var icon *widget.Icon
 	var sender *canvas.Text
@@ -2259,6 +2290,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, preview, icon, save, open)
 	g.fillAudioRow(m, audio)
+	g.fillVideoRow(m, video)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {

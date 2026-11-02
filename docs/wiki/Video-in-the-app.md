@@ -1,15 +1,15 @@
 # Video in the app
 
-**Status: not implemented.** A video arrives as a file row: **Open** hands it to
-the device's player on a desktop, **Save as…** gets it out of the app on a
-phone. Playing it *inside* the conversation — with a scrubber and a waveform,
-the way the audio player works — is what the report asked for, and this page is
-the plan for it.
+**Status: partly implemented.** An **animated GIF** plays in its row, with
+Play/Stop, a clock and a seek bar — decoded in pure Go (`image/gif`), on every
+platform, no dependency (#421). What a phone records — **H.264 in MP4** — still
+opens with another app, because it needs a codec this build does not carry.
 
-The decision is recorded on
-[#389](https://github.com/fiwon123/cthrone/issues/389): **cgo FFmpeg**. This
-page says what that costs, where it plugs in, and what would have to be proven
-before it ships.
+The player exists and is tested; the missing piece is the **decoder**. This page
+records the decision for it, on
+[#389](https://github.com/fiwon123/cthrone/issues/389): **cgo FFmpeg**. It says
+what that costs, where it plugs in, and what would have to be proven before it
+ships.
 
 ## Why not pure Go
 
@@ -75,11 +75,11 @@ Position. Video adds a second stream to that, not a second player:
                  └──────────────┘
 ```
 
-- **A decoder seam**, beside `audioEngine`: a `videoDecoder` interface
-  (`Open`, `Duration`, `NextFrame`, `Seek`, `Close`) with one implementation
-  behind `//go:build gui && cgo && ffmpeg` and a stub that says "this build has
-  no video decoder" everywhere else. The window compiles and ships without it;
-  a build that has it offers the player.
+- **A decoder seam**, beside `audioEngine`: `decodeVideo` returns a `videoClip`
+  (frames and delays) for a GIF today, and an FFmpeg implementation would return
+  the same type for MP4. The player (`videoPlayer`) is format-blind: it shows
+  frames and delays, so the binding is the only new code FFmpeg needs. The demo
+  of that shape is #421's animated-GIF player.
 - **Decode off the UI goroutine.** `libavcodec` is not fast enough to run in a
   frame callback; a decode goroutine hands finished `image.Image` frames to the
   window, which shows the newest and drops what it missed.
