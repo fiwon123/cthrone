@@ -228,6 +228,13 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.13.2` keeps the playhead. **Stop** no longer throws away where the sound
+had got to: the row shows the point, and **Play resumes** from there, while a
+clip that played to its end starts over and a tap on the waveform still wins
+(#409). The release page also says what was missing from it: **video does not
+play in the app**, it opens with the device's player, and the plan for changing
+that is on the wiki (#411).
+
 `v0.13.1` is a documentation patch: the video decision is now a plan. The wiki
 page **Video in the app** records why a pure-Go decoder is not an option, what
 cgo FFmpeg would cost on each platform (including the mingw cross-build and the
