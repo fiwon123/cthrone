@@ -18,7 +18,9 @@ func TestLayoutFor(t *testing.T) {
 		{"phone, unmeasured", true, 0, true, 2, 0},
 		{"phone, 360dp", true, 360, true, 2, 0},
 		{"phone, very narrow", true, 280, true, 1, 0},
-		{"phone, landscape", true, 640, false, 0, 320},
+		// A phone stays stacked even sideways: the two-column layout is a
+		// desktop's, and a rotation must not bring it back (#302).
+		{"phone, landscape", true, 640, true, 2, 0},
 	}
 
 	for _, tt := range tests {
