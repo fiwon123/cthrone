@@ -62,8 +62,8 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 		t.Fatalf("row is %T, want *fyne.Container", row)
 	}
 
-	if len(box.Objects) != 5 {
-		t.Fatalf("row has %d objects, want 5", len(box.Objects))
+	if len(box.Objects) < 5 {
+		t.Fatalf("row has %d objects, want at least 5", len(box.Objects))
 	}
 
 	// The caption cell is a border holding the file-type icon and the text.
@@ -113,6 +113,28 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 	}
 
 	return label, pic, preview, save, open
+}
+
+// audioRowObjects pulls the player out of a transcript row: the Play/Stop
+// button and the clock beside it.
+func audioRowObjects(t *testing.T, row fyne.CanvasObject) audioRow {
+	t.Helper()
+
+	box, ok := row.(*fyne.Container)
+	if !ok {
+		t.Fatalf("row is %T, want *fyne.Container", row)
+	}
+
+	if len(box.Objects) < 6 {
+		t.Fatalf("row has %d objects, want a player at index 5", len(box.Objects))
+	}
+
+	audio, ok := audioRowOf(box.Objects[5])
+	if !ok {
+		t.Fatalf("row[5] is not an audio player")
+	}
+
+	return audio
 }
 
 // TestChatRowReportsTransferProgress checks that each transfer draws its own

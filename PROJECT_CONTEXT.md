@@ -33,6 +33,10 @@ through a NATS broker.
   Windows — the Windows path is compiled and never run)
 - **Terminal handling**: golang.org/x/term (raw mode, cursor control)
 - **GUI**: Fyne 2.8.2, behind the `gui` build tag — one GUI for the desktop and for the Android app
+- **Audio**: `github.com/ebitengine/oto/v3` for the sound device (pure Go on
+  Linux, Windows and macOS, cgo against the NDK's oboe on Android) and
+  `github.com/hajimehoshi/go-mp3` for MP3; WAV is decoded by the standard
+  library
 - **Packaging**: `fyne` CLI `v1.26.1` for the APK; `make release` for the CLI archives
 - **Configuration**: no configuration file — settings come from flags and the environment (`--port`, `--token`, `--token-file`, `--peers-file`, `--no-tls`, `--tls`, `--cert-fingerprint`, `--insecure`, and per command `--nats`, `--nats-url`, `--host`, `--name`; `CTHRONE_TOKEN`, `NATS_USER`, `NATS_PASSWORD`). The websocket transport is encrypted by default, `--no-tls` is the opt-out, and `--tls` is accepted as a no-op so a v0.6.0 command line still runs. What the tool writes for itself lives in the platform's user configuration directory — `~/.config/cthrone` on Linux, `~/Library/Application Support/cthrone` on macOS, `%AppData%\cthrone` on Windows — for the CLI and the desktop GUI, and in the app's private storage on Android: this device's key, the pins it trusts (device keys and host certificates), and the TLS material. A shared secret is used only when it is named — `--token`, `CTHRONE_TOKEN` or `--token-file` — and the tool writes no `token` file; one left by v0.6.0 is reported, never read on its own (issue #163)
 - **Dev environment**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container. `docker-compose.yml` carries both the sandbox and a local NATS server for experiments; nothing in the build or the gate needs a container. The APK is the exception: it needs the Android SDK, an NDK and the `fyne` CLI, so it is built in CI
@@ -215,6 +219,12 @@ in flight can be cancelled from either side — the peer is told, so it drops it
 half file at once instead of waiting for a timeout (#237, #238). Discovery now
 reaches a second segment: a host announces itself by unicast to every address
 this device has pinned, which is what a broadcast cannot do (#239).
+
+An in-app player plays a received or sent **WAV or MP3** clip on its own row —
+Play and Stop on one button, a position clock, one clip at a time, the decode
+done beside the UI and refused past 32 MiB, and the sound device opened only on
+the first Play (#306). Other formats keep the row's Open/Save actions; nothing is
+claimed about hearing it on a phone yet (#155).
 
 It also carries the hardening that came out of asking what a peer can make this
 program do: a command's output is bounded and its whole process tree dies at the

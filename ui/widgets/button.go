@@ -131,6 +131,13 @@ func (b *CopyButton) SetText(text string) {
 	b.button.SetText(text)
 }
 
+// SetIcon changes the icon beside the label. It exists for the same reason
+// SetText does: a transcript row reuses one button for every row, and Play and
+// Stop are one control in two states (#306).
+func (b *CopyButton) SetIcon(icon fyne.Resource) {
+	b.button.SetIcon(icon)
+}
+
 // SetCopyText changes what a long press copies, for a button whose label
 // changes with its state — "More options" and "Fewer options" are one button.
 func (b *CopyButton) SetCopyText(text string) {

@@ -31,6 +31,9 @@ through a NATS broker.
   tinygo.org/x/bluetooth (`--bluetooth`: BlueZ over D-Bus on Linux, WinRT on
   Windows — the Windows path is compiled and never run)
 - **Terminal handling**: golang.org/x/term
+- **Audio**: `github.com/ebitengine/oto/v3` for the sound device and
+  `github.com/hajimehoshi/go-mp3` for MP3, WAV from the standard library — the
+  in-app player is `gui`-only and opens the device on the first Play
 - **Development**: a local Go toolchain and `make`, or the dev sandbox — a pinned Go 1.26.10 container that runs the same on Linux, macOS, WSL2 and Windows. The NATS broker lives in `docker-compose.yml` next to the sandbox; nothing in the build or the test gate needs a container.
 
 ### Core Architecture
