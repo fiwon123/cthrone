@@ -224,6 +224,23 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.11.4` is a patch on that. A host's own message and file now reach the whole
+room instead of the last device that joined — a host relays its clients but spoke
+through the one session it happened to hold (#320). The transcript stops decoding
+the same picture and re-reading the same text file on every repaint, which is what
+made the app slower the longer a conversation ran (#321). The update check reads
+the release page's redirect instead of the rate-limited API, names a 403 as a rate
+limit, and reuses an answer for ten minutes (#322). The composer starts at one
+line, grows to five and then scrolls, with a paperclip and a primary Send
+(#324); the About tab carries the logo beside the name with the version at the
+right (#329); and the release page is a product page with an icon per platform,
+the changelog folded away (#328).
+
+It does not claim **Enter sends** (#323: still Shift+Enter, as Fyne's multiline
+entry defines it), **reconnect after a drop** (#326), the two phone-only reports
+(#325: Send copying a row with the keyboard up, and #327: a PDF or audio between
+two phones), or audio in the app (#306).
+
 `v0.11.3` is a patch on that, written from a second field report on a phone. A
 picture sent from a phone now shows itself: the row keeps a thumbnail, because a
 picker hands over a `content://` URI with no path to read later, and the type is
