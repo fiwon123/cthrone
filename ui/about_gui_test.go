@@ -156,3 +156,63 @@ func waitForAboutNote(t *testing.T, g *gui, contains string) string {
 
 	return ""
 }
+
+// withCountingCheckURL points the check at a server that counts requests and
+// answers a tag, so a test can see how many an answer cost.
+func withCountingCheckURL(t *testing.T) *int {
+	t.Helper()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"tag_name":"v0.12.0"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previous := checkReleaseURL
+	checkReleaseURL = server.URL
+	t.Cleanup(func() { checkReleaseURL = previous })
+
+	return &requests
+}
+
+// Pressing the check again must not spend another request: the limit is shared
+// by every user behind one address, and the answer cannot have changed in a
+// minute (#322).
+func TestASecondCheckReusesTheAnswer(t *testing.T) {
+	requests := withCountingCheckURL(t)
+
+	g := newScreenGUI(t, false)
+
+	// A known build, so the answer is "a newer release is available" rather than
+	// "this build does not know its version".
+	previousVersion := Version
+	Version = "v0.11.0"
+	t.Cleanup(func() { Version = previousVersion })
+
+	g.checkUpdates()
+	waitForAboutNote(t, g, "available")
+
+	g.checkUpdates()
+	waitForAboutNote(t, g, "available")
+
+	if *requests != 1 {
+		t.Errorf("two presses cost %d request(s), want 1", *requests)
+	}
+}
+
+// A rate limit is answered as one: the release is there, the address is the
+// problem, and the user is told to wait rather than that the check failed.
+func TestAboutCheckNamesARateLimit(t *testing.T) {
+	withCheckURL(t, http.StatusForbidden, `{"message":"API rate limit exceeded"}`)
+
+	g := newScreenGUI(t, false)
+
+	g.checkUpdates()
+
+	note := waitForAboutNote(t, g, "rate limiting")
+
+	if !strings.Contains(note, "try again") {
+		t.Errorf("the About note = %q, want it to say to try again later", note)
+	}
+}

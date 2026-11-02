@@ -199,6 +199,11 @@ type gui struct {
 	decodableFiles map[string]bool
 	texts          map[string]string
 
+	// updateTag and updateAt are the last successful check and when it ran, so a
+	// second press is answered from memory (#322).
+	updateTag string
+	updateAt  time.Time
+
 	// starting and stopping guard the handover of the transport. While either
 	// is set, Host and Connect are disabled: a start that is still binding and a
 	// stop that is still closing the listener both own the port, and a second
@@ -2040,6 +2045,12 @@ func (g *gui) openPage(address string) {
 	}
 }
 
+// updateCacheWindow is how long one check's answer is reused. The GitHub API
+// allows 60 requests an hour per address, so pressing the button repeatedly used
+// to spend a shared budget and then read 403 (#322). The release page's redirect
+// is not rate limited, and this keeps even that to one request per window.
+const updateCacheWindow = 10 * time.Minute
+
 // checkUpdates asks GitHub for the newest release, off the UI goroutine.
 //
 // The answer is always written back through fyne.Do, including the failures: a
@@ -2048,6 +2059,21 @@ func (g *gui) openPage(address string) {
 var checkReleaseURL = updatepkg.LatestReleaseURL
 
 func (g *gui) checkUpdates() {
+	// A check made a moment ago is the answer: pressing again is not a new
+	// question, and every request costs against a limit shared by the address
+	// (#322).
+	g.mu.Lock()
+	cached, when := g.updateTag, g.updateAt
+	g.mu.Unlock()
+
+	if cached != "" && time.Since(when) < updateCacheWindow {
+		current := aboutVersion(Version, g.app.Metadata().Version)
+		g.setAboutNote(aboutUpdateText(current, cached))
+		g.offerNewer(current, cached)
+
+		return
+	}
+
 	if g.updateBtn != nil {
 		g.updateBtn.Disable()
 	}
@@ -2070,6 +2096,10 @@ func (g *gui) checkUpdates() {
 
 				return
 			}
+
+			g.mu.Lock()
+			g.updateTag, g.updateAt = tag, time.Now()
+			g.mu.Unlock()
 
 			current := aboutVersion(Version, g.app.Metadata().Version)
 			g.setAboutNote(aboutUpdateText(current, tag))
