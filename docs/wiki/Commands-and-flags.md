@@ -15,6 +15,10 @@
 | `cthrone update --install [--to <tag>]` | replace this binary with the one from the newest published release, or the one named by `--to`; the download is verified against the release's `checksums.txt` first, and the binary it replaces is kept as `<name>.previous` |
 | `cthrone update --revert` | put the previous binary back, without a network call |
 
+The **`cthrone_gui`** binary in the GUI archive is the window itself: double-click
+it to open the app. It ignores arguments — `cthrone_gui ui` also opens it, so an
+older instruction still works — because a window has no subcommands.
+
 ## Flags
 
 | Flag | What it does |

@@ -71,6 +71,10 @@ ANDROID_ICON := $(CURDIR)/assets/logo-512.png
 # for the target GOOS/GOARCH. go-winres writes rsrc_windows_amd64.syso, so the
 # Linux, macOS and Android builds never see it. The tool is pinned and run with
 # `go run`, so it stays a build-time tool and never enters go.mod.
+# The window binary's entry point. It is a package of its own — not the command
+# tree — so a double-click can never depend on argument parsing (#382).
+GUI_MAIN_DIR := gui
+
 WINRES_VERSION := v0.3.3
 WINRES_SRC := winres/winres.json
 WINRES_SYSO := rsrc_windows_amd64.syso
@@ -195,7 +199,7 @@ gui-linux: $(BUILD_DIR) ## build the Linux Fyne GUI archive (needs GTK/X11/GL he
 	  echo "  Debian/Ubuntu: sudo apt-get install gcc libgl1-mesa-dev xorg-dev libgtk-3-dev libxkbcommon-dev" >&2; \
 	  exit 1; }
 	@mkdir -p $(GUI_LINUX_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)_gui ./$(GUI_MAIN_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_LINUX_DIR)/$(APP_NAME)
 	cp $(GUI_LINUX_DIR)/$(APP_NAME) $(GUI_LINUX_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE $(GUI_LINUX_DIR)/
@@ -243,8 +247,12 @@ gui-windows: $(BUILD_DIR) require-mingw ## cross-build the Windows Fyne GUI arch
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_WINDOWS_DIR)/$(APP_NAME).exe
 	cp $(GUI_WINDOWS_DIR)/$(APP_NAME).exe $(GUI_WINDOWS_DIR)/$(APP_NAME_SHORT).exe
 	@$(MAKE) --no-print-directory winres-icon || { rm -f $(WINRES_SYSO); exit 1; }
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe || { rm -f $(WINRES_SYSO); exit 1; }
-	@rm -f $(WINRES_SYSO)
+	# The resource is a file of the package it is linked into, and the window is
+	# now its own package: move it beside the entry point for the one build that
+	# carries the icon, then take it away again.
+	@mv $(WINRES_SYSO) $(GUI_MAIN_DIR)/$(WINRES_SYSO)
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION) -H=windowsgui" -o $(GUI_WINDOWS_DIR)/$(APP_NAME)_gui.exe ./$(GUI_MAIN_DIR) || { rm -f $(GUI_MAIN_DIR)/$(WINRES_SYSO); exit 1; }
+	@rm -f $(GUI_MAIN_DIR)/$(WINRES_SYSO)
 	cp README.md LICENSE $(GUI_WINDOWS_DIR)/
 	cp $(SCRIPTS_DIR)/$(SCRIPT_NAME).bat $(GUI_WINDOWS_DIR)/
 	cd $(GUI_WINDOWS_DIR) && zip -j $(abspath $(GUI_WINDOWS_ZIP)) $(APP_NAME)_gui.exe $(APP_NAME).exe $(APP_NAME_SHORT).exe README.md LICENSE $(SCRIPT_NAME).bat
@@ -255,7 +263,7 @@ gui-darwin: $(BUILD_DIR) ## build the macOS Fyne GUI archive (must run on macOS)
 	  echo "  This target is built by the release workflow on a macos-latest runner." >&2; \
 	  exit 1; }
 	@mkdir -p $(GUI_DARWIN_DIR)
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -tags gui -ldflags "-X $(INJECT_VERSION)=$(VERSION) -X $(INJECT_GUI_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)_gui ./$(GUI_MAIN_DIR)
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-X $(INJECT_VERSION)=$(VERSION)" -o $(GUI_DARWIN_DIR)/$(APP_NAME)
 	cp $(GUI_DARWIN_DIR)/$(APP_NAME) $(GUI_DARWIN_DIR)/$(APP_NAME_SHORT)
 	cp README.md LICENSE $(GUI_DARWIN_DIR)/
