@@ -1,5 +1,11 @@
 # Verifying on real hardware
 
+## ⚡ In a hurry
+
+Pick the claim you can test, follow its steps, and paste the result on its
+issue — even "it worked" is the answer. Everything you need is a release build
+and two devices.
+
 Some claims in the release notes are **unproven**, because the machine that
 wrote the code had none of the hardware: no phone, no Windows box, no sound
 device, and no toolkit to draw a window with. Each one has an issue, and each

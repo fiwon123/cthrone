@@ -1,5 +1,15 @@
 # NATS
 
+## ⚡ In a hurry
+
+```bash
+docker compose up -d nats                    # a broker on 127.0.0.1:4222
+cthrone host --nats                          # one device
+cthrone connect --nats --nats-url nats://192.168.1.5:4222   # the other
+```
+
+Both devices need the broker, not each other.
+
 Both devices talk to a broker, so they do not need to see each other directly.
 This is the transport that crosses subnets when a broker is reachable.
 

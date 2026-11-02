@@ -1,5 +1,12 @@
 # Troubleshooting
 
+## 🔎 Find yours
+
+Use your browser's find: the sections below are named for the symptom.
+**`command not found`** · **no device found** · **it refuses to pair** ·
+**the certificate changed** · **a file will not open on the phone** ·
+**no sound** · **holding backspace** · **Bluetooth** · **slow start on Windows**.
+
 ## `cthrone: command not found`
 
 The archive ships `cthrone` and the short alias `ct`. Run `./add_to_path.sh`

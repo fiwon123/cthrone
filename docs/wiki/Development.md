@@ -1,5 +1,14 @@
 # Development
 
+## ⚡ In a hurry
+
+```bash
+git clone https://github.com/fiwon123/cthrone && cd cthrone
+make check
+```
+
+No Docker needed: a host Go toolchain is enough. The sandbox is an option.
+
 ## Prerequisites
 
 Either of these works:

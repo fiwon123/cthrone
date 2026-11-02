@@ -1,5 +1,16 @@
 # Finding devices across networks
 
+## ⚡ In a hurry
+
+```bash
+cthrone scan                  # the /24 the default route uses
+cthrone scan --subnet 10.0.0.0/24
+cthrone scan --all-subnets    # the /24 of every interface
+```
+
+A scan does not cross a router unless the router routes, and a beacon never
+crosses one.
+
 A scan is a UDP broadcast, and a router does not forward one. Two Wi-Fis on the
 same modem are two segments, so neither sees the other's beacons — and a scan
 that walks a `/24` only reaches the segment it walks.
