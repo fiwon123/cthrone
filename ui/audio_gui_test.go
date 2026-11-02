@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,11 +159,13 @@ func paintRow(t *testing.T, g *gui, id int) audioRow {
 	return audioRowObjects(t, row)
 }
 
-// A clip this build can decode offers its player on the row: the button says
-// Play, and the clock has nothing to say until the file has been decoded once.
+// A clip this build can decode offers its player on the row, and the row
+// prepares the clip as soon as it is painted: the waveform is a control, so it
+// has to be there before Play (#435).
 func TestTheAudioRowOffersPlay(t *testing.T) {
 	g := newAudioTestGUI(t)
-	g.messages = []chatMessage{{from: "laptop", file: audioNote(t, "memo.wav", testWAV(t, 8000, 1, 16, 800))}}
+	note := audioNote(t, "memo.wav", testWAV(t, 8000, 1, 16, 800))
+	g.messages = []chatMessage{{from: "laptop", file: note}}
 
 	audio := paintRow(t, g, 0)
 
@@ -174,8 +177,16 @@ func TestTheAudioRowOffersPlay(t *testing.T) {
 		t.Errorf("the button says %q, want Play", got)
 	}
 
-	if got := audio.clock.Text(); got != "" {
-		t.Errorf("the clock says %q before the clip was decoded, want nothing", got)
+	waitForCondition(t, "the clip to be prepared", func() bool { return len(g.audioPeaksFor(note.path)) > 0 })
+
+	audio = paintRow(t, g, 0)
+
+	if !audio.wave.Visible() {
+		t.Error("the waveform is not shown before Play")
+	}
+
+	if audio.clock.Text() == "" {
+		t.Error("the clock says nothing although the clip's length is known")
 	}
 }
 
@@ -691,5 +702,98 @@ func TestATapOutranksTheRememberedPlayhead(t *testing.T) {
 
 	if got := engine.lastSeek(); got < 200*time.Millisecond || got > 300*time.Millisecond {
 		t.Errorf("started at %v, want the quarter the tap chose, not the remembered half", got)
+	}
+}
+
+// countDecodes replaces the decoder with one that counts, so a test can prove a
+// clip is decoded once for its waveform and not again for its play (#435).
+func countDecodes(t *testing.T) *int32 {
+	t.Helper()
+
+	var count int32
+
+	previous := decodeClip
+	decodeClip = func(path string) (*audioClip, error) {
+		atomic.AddInt32(&count, 1)
+
+		return previous(path)
+	}
+
+	t.Cleanup(func() { decodeClip = previous })
+
+	return &count
+}
+
+// Painting an audio row prepares its clip: the waveform is the control, so it
+// is there before Play, and the clip is decoded once.
+func TestTheWaveformIsPreparedOncePerClip(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	decodes := countDecodes(t)
+
+	g := newAudioTestGUI(t)
+	note := audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))
+	g.messages = []chatMessage{{file: note}}
+
+	paintRow(t, g, 0)
+	paintRow(t, g, 0)
+
+	waitForCondition(t, "the clip to be prepared", func() bool { return len(g.audioPeaksFor(note.path)) > 0 })
+
+	// Two paints, one decode: the second paint found the answer cached.
+	if got := atomic.LoadInt32(decodes); got != 1 {
+		t.Errorf("%d decodes for two paints, want 1", got)
+	}
+}
+
+// Playing a prepared clip reuses the decode: the file is not read a second time
+// to hear what was just drawn.
+func TestPlayReusesThePreparedClip(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	decodes := countDecodes(t)
+
+	g := newAudioTestGUI(t)
+	note := audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))
+	g.messages = []chatMessage{{file: note}}
+
+	paintRow(t, g, 0)
+
+	waitForCondition(t, "the clip to be prepared", func() bool { return len(g.audioPeaksFor(note.path)) > 0 })
+
+	paintRow(t, g, 0).play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 1
+	})
+
+	if got := atomic.LoadInt32(decodes); got != 1 {
+		t.Errorf("%d decodes, want 1: the prepared clip was decoded again", got)
+	}
+}
+
+// While a resumed clip is still opening, the row shows the point it will start
+// at rather than flashing back to zero (#435).
+func TestAResumedClipShowsItsPointWhileStarting(t *testing.T) {
+	g := newAudioTestGUI(t)
+	path := "/tmp/memo.wav"
+
+	g.mu.Lock()
+	g.audioDurations = map[string]time.Duration{path: 2 * time.Second}
+	g.audioResumeAt = map[string]float64{path: 0.5}
+	g.mu.Unlock()
+
+	duration, position := g.audioShownProgress(path)
+
+	if duration != 2*time.Second {
+		t.Errorf("duration = %v, want the prepared length", duration)
+	}
+
+	if position != time.Second {
+		t.Errorf("position = %v, want half of the clip", position)
 	}
 }

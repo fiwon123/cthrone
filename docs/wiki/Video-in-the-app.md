@@ -1,5 +1,11 @@
 # Video in the app
 
+## ⚡ In a hurry
+
+- 🎞️ **Animated GIF** — plays in its row: Play/Stop, a clock, a seek bar.
+- ❌ **MP4 / H.264 / WebM** — no codec in this build; they open with the device's
+  player. The plan is [#389](https://github.com/fiwon123/cthrone/issues/389).
+
 **Status: partly implemented.** An **animated GIF** plays in its row, with
 Play/Stop, a clock and a seek bar — decoded in pure Go (`image/gif`), on every
 platform, no dependency (#421). What a phone records — **H.264 in MP4** — still

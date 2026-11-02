@@ -1,41 +1,65 @@
 # cthrone
 
-Two devices that need to exchange a message — a phone and a laptop, a sensor and
-a workstation — normally need an account, a hosted server, or a GUI. cthrone
-needs none of those: start it on one device, connect from the other, and type.
+> 💬 **Chat from one device to another** — terminal, desktop window, or phone.
+> No account, no server, no cloud. One device hosts, the others connect, and
+> every session is sealed end to end.
 
-- **Nothing to install in the middle.** One binary is the server and the client.
-- **Encrypted and authenticated by default.** No anonymous mode, no plaintext.
-- **A room, not a pair.** Every device that joins a host sees the others, with
-  the sender named.
-- **Terminal and app.** The same code builds a CLI and a Fyne GUI for the
-  desktop and for Android.
+## ⚡ Start in thirty seconds
 
-## The three transports
+```bash
+# on the device that serves
+cthrone host
 
-| Transport | What it needs | Where it works |
-|---|---|---|
-| **websocket** (default) | nothing but the two binaries | the same network |
-| **NATS** | a broker both can reach | across networks, if a broker exists |
-| **Bluetooth** | a radio, no network at all | Linux, and Windows (compiled, never run — [#224](https://github.com/fiwon123/cthrone/issues/224)) |
+# on the other one, with the address the host printed
+cthrone connect 192.168.1.5
+```
 
-## Start here
+Both screens show a **six-digit code** the first time. Compare them, accept on
+the host, and type. That is the whole setup.
 
-- [Host and connect](Host-and-connect) — the first two commands.
-- [Pairing and peers](Pairing-and-peers) — the six-digit code, and how to undo a
-  pairing.
-- [Send a file](Send-a-file) — what the other side receives.
-- [Troubleshooting](Troubleshooting) — the failures people actually hit.
+🖥️ Prefer a window? Run `cthrone_gui`, or `cthrone ui` from the CLI build.
+📱 On a phone, install the APK and use the Setup tab.
 
-## What is not proven
+## 🚦 Where it runs
 
-This project says what it verified. Three claims currently rest on hardware
-nobody has run:
+| | Terminal | Window | Phone |
+|---|:---:|:---:|:---:|
+| **websocket** (default) | ✅ | ✅ | ✅ |
+| **NATS** (needs a broker) | ✅ | ✅ | ✅ |
+| **Bluetooth** (no network) | ✅ Linux | ✅ Linux | ❌ not yet ([#206](https://github.com/fiwon123/cthrone/issues/206)) |
 
-- the **Windows** Bluetooth transport ([#224](https://github.com/fiwon123/cthrone/issues/224));
-- the **Android app** on a device, and its radio ([#155](https://github.com/fiwon123/cthrone/issues/155), [#206](https://github.com/fiwon123/cthrone/issues/206));
-- a **rendered GUI frame** under the native driver.
+## 🧭 The five pages that matter
 
-If you can run any of those, [CONTRIBUTING](https://github.com/fiwon123/cthrone/blob/dev/CONTRIBUTING.md)
-explains what would help most — and [Verifying on real hardware](Verifying-on-real-hardware)
-gives the exact steps, what to record, and which issue the result goes on.
+| Page | What it answers |
+|---|---|
+| 🏠 [Host and connect](Host-and-connect) | the first two commands |
+| 🔑 [Pairing and peers](Pairing-and-peers) | the six-digit code, and how to undo it |
+| 📎 [Send a file](Send-a-file) | what the other side receives |
+| 🎵 [Video in the app](Video-in-the-app) | what plays, and what needs a codec |
+| 🚑 [Troubleshooting](Troubleshooting) | the failures people actually hit |
+
+## ⚠️ What is proven, and what is not
+
+This project says what it verified. These claims rest on hardware nobody has
+run yet:
+
+- ❌ the **Bluetooth radio on Windows** ([#224](https://github.com/fiwon123/cthrone/issues/224));
+- ❌ the **phone app** on a device, and its radio ([#155](https://github.com/fiwon123/cthrone/issues/155), [#206](https://github.com/fiwon123/cthrone/issues/206));
+- ❌ **video** (MP4/H.264) — the player exists, the codec does not ([#389](https://github.com/fiwon123/cthrone/issues/389));
+- ✅ audio (WAV/MP3) with a waveform, a seek bar and a GIF player — tested, but not **heard** on a phone;
+- ✅ everything else on the page — tested by the suite that runs on every change.
+
+If you can run one of the ❌ rows, **[Verifying on real hardware](Verifying-on-real-hardware)**
+has the steps and the issue to report on.
+
+## 📚 Everything else
+
+- 🧰 [Commands and flags](Commands-and-flags) · 🛰️ [NATS](NATS) · 📶 [Bluetooth](Bluetooth)
+- 🌐 [Finding devices across networks](Finding-devices-across-networks)
+- 🔒 [Security model](Security-model) · 🛠️ [Development](Development)
+
+---
+
+📦 [Releases](https://github.com/fiwon123/cthrone/releases) ·
+🐛 [Issues](https://github.com/fiwon123/cthrone/issues) ·
+🤝 [Contributing](https://github.com/fiwon123/cthrone/blob/dev/CONTRIBUTING.md)

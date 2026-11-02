@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -183,12 +184,6 @@ type gui struct {
 	// there next time instead of walking the toolkit's place list (#386).
 	lastPick string
 
-	// statusShowsState is whether the chat header's one line is currently the
-	// connection state, rather than a message about something that just
-	// happened. A message wins until it is cleared; the state then takes the
-	// line back (#383).
-	statusShowsState bool
-
 	// copyPopup is the "Copied" hint a label copy raises, and copyTimer takes
 	// it away again. The chat tab has its own line for the transcript's copy
 	// buttons; a button on Setup, Devices, or About has no such line, so the
@@ -227,10 +222,33 @@ type gui struct {
 	audioDurations map[string]time.Duration
 	audioPeaks     map[string][]float32
 
+	// audioPrepared remembers the clips whose length and waveform are already
+	// known, and audioPreparing bounds the background decode to one at a time.
+	// audioClip is the last decoded clip, kept so the Play that follows reading
+	// its waveform does not decode the file a second time (#435).
+	audioPrepared  map[string]bool
+	audioPreparing bool
+	audioClip      *audioClip
+	audioClipPath  string
+
 	// audioResumeAt is where the sound stopped in each clip, as a fraction, so
 	// Play continues there instead of starting over (#409). A clip that played
 	// to its end has no entry.
 	audioResumeAt map[string]float64
+
+	// perf is the message path's cost, counted while CTHRONE_PERF is set:
+	// a report of "it lags" needs numbers from the device that lags, and this
+	// is the cheapest way to get them (#432).
+	perfEnabled bool
+	perfCount   int
+	perfTotal   time.Duration
+	perfLast    time.Duration
+
+	// lastBottom is the transcript's scroll offset when the view was last at
+	// the end, and jumpBtn is the way back down when the reader is not there.
+	// A new message follows only if the reader was at the bottom (#434).
+	lastBottom float32
+	jumpBtn    *widgets.CopyButton
 
 	// video is the window's player for animated pictures (#421). Only one clip
 	// is kept: an animation is large, and a transcript that scrolled through ten
@@ -270,8 +288,11 @@ type gui struct {
 	liveSessions int
 
 	// What the transcript has already decoded or read, by path, so a repaint
-	// does not do the I/O again (#321). They are only touched while painting,
-	// which happens on the UI goroutine.
+	// does not do the I/O again (#321). Painting is on the UI goroutine, but a
+	// background prepare refreshes the transcript when it finishes, and the
+	// test driver runs that inline on the prepare's goroutine — so the caches
+	// take cacheMu rather than trusting the thread (#435).
+	cacheMu        sync.Mutex
 	pictures       map[string]fyne.Resource
 	decodableFiles map[string]bool
 	texts          map[string]string
@@ -375,7 +396,7 @@ func run() (err error) {
 		w.SetIcon(ic)
 	}
 
-	g := &gui{app: a, win: w, mobile: mobile, video: &videoPlayer{}}
+	g := &gui{app: a, win: w, mobile: mobile, video: &videoPlayer{}, perfEnabled: os.Getenv("CTHRONE_PERF") != ""}
 
 	// A window that cannot be built has nothing to show, and a blank window is
 	// a worse answer than a report: the panic propagates to the recover above.
@@ -511,11 +532,12 @@ func (g *gui) build() {
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
+	// The line carries what happened, and nothing else: no connection state
+	// standing in it, no discovery chatter (#433). It is hidden while it has
+	// nothing to say, which is most of the time.
 	g.status = g.text("")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
-	g.statusShowsState = true
-
-	g.refreshConnectionState()
+	g.status.Hide()
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -541,8 +563,14 @@ func (g *gui) build() {
 	g.stopBtn.SetText(stopLabel)
 	g.stopBtn.Disable()
 
+	// The way back to the end of the transcript: hidden while the reader is
+	// there, shown when a message arrives and the reader is not (#434).
+	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
+	g.jumpBtn.Hide()
+
 	header := container.NewHBox(g.status)
 	header.Add(layout.NewSpacer())
+	header.Add(g.jumpBtn)
 	header.Add(g.stopBtn)
 	header.Add(filesBtn)
 
@@ -1518,6 +1546,7 @@ func (g *gui) send(text string) {
 
 	g.entry.SetText("")
 	g.addMessage(chatMessage{text: text})
+	g.scrollToLatest()
 
 	go func() {
 		if err := sender.Send(payload); err != nil {
@@ -1754,7 +1783,6 @@ func (g *gui) attach(sess session.Session) {
 			g.peerName = p.Name()
 			g.mu.Unlock()
 
-			fyne.Do(g.refreshConnectionState)
 			peer.set(p.Name())
 
 			if p.First && p.Fingerprint != "" {
@@ -1852,7 +1880,6 @@ func (g *gui) reconnectAfterDrop(sess session.Session, reason string) {
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
-	fyne.Do(g.refreshConnectionState)
 
 	go g.retryLink(ctx, link, reason)
 }
@@ -1896,7 +1923,6 @@ func (g *gui) retryLink(ctx context.Context, link *dialLink, reason string) {
 		g.attach(sess)
 		g.setStatus(connectedStatus(link, true))
 		g.addMessage(chatMessage{from: "system", text: "reconnected"})
-		fyne.Do(g.refreshConnectionState)
 		fyne.Do(g.updateButtons)
 
 		return
@@ -1939,7 +1965,6 @@ func (g *gui) endReconnect(ctx context.Context, status string) {
 
 	g.setStatus(status)
 	fyne.Do(g.updateButtons)
-	fyne.Do(g.refreshConnectionState)
 }
 
 // reconnectDelay is how long to wait before attempt n, counting from 1: the
@@ -2080,45 +2105,6 @@ func (g *gui) growComposer(text string) {
 	g.entry.SetMinRowsVisible(rows)
 }
 
-// refreshConnectionState writes the chat header's state: offline, connecting,
-// hosting, or connected to the device the handshake named.
-//
-// It reads the same fields the buttons do, so there is one truth about whether
-// this window is in a session (#345). The state goes on the header's one line,
-// and only while that line is the state: a message from setStatus owns it until
-// it is cleared, because "Cannot play …" is news and "offline" is not (#383).
-func (g *gui) refreshConnectionState() {
-	if g.status == nil || !g.statusShowsState {
-		return
-	}
-
-	g.mu.Lock()
-	sess, server, starting, reconnecting, peer := g.sess, g.server, g.starting, g.reconnecting, g.peerName
-	g.mu.Unlock()
-
-	// One line, one baseline: the mark is a character in the same text as the
-	// word, so they cannot drift apart (#364). The importance is the colour.
-	text, importance := "● offline", widget.LowImportance
-
-	switch {
-	case starting:
-		text, importance = "● connecting…", widget.WarningImportance
-	case reconnecting:
-		text, importance = "● reconnecting…", widget.WarningImportance
-	case server != nil:
-		text, importance = "● hosting", widget.SuccessImportance
-	case sess != nil:
-		text, importance = "● connected", widget.SuccessImportance
-		if peer != "" {
-			text = "● connected to " + peer
-		}
-	}
-
-	g.status.SetText(text)
-	g.status.SetImportance(importance)
-	g.status.Show()
-}
-
 // updateButtons enables what the current state can actually do. Send needs a
 // session; Stop also makes sense for a host with nobody connected yet. Host and
 // Connect change what this device is, and there can be only one of them — so
@@ -2179,16 +2165,15 @@ func (g *gui) canvasWidth() int {
 
 func (g *gui) setStatus(text string) {
 	fyne.Do(func() {
-		// An empty status is "nothing new to say", not "hide the line": the
-		// header gives it back to the connection state (#383).
+		// The line exists only while it has something to say: a sentence that
+		// stays, or a state standing in it, was the report (#364, #433).
 		if text == "" {
-			g.statusShowsState = true
-			g.refreshConnectionState()
+			g.status.SetText("")
+			g.status.Hide()
 
 			return
 		}
 
-		g.statusShowsState = false
 		g.status.SetText(text)
 		g.status.SetImportance(widget.MediumImportance)
 		g.status.Show()
@@ -2202,6 +2187,16 @@ func (g *gui) setStatus(text string) {
 // the slice.
 func (g *gui) addMessage(m chatMessage) {
 	fyne.Do(func() {
+		var started time.Time
+
+		if g.perfEnabled {
+			started = time.Now()
+		}
+
+		// Whether to follow is decided before the message is added: it is the
+		// reader's position that decides, not the row's (#434).
+		follow := g.atBottom()
+
 		// The lock is what a reader on another goroutine reads under — the
 		// tests, and any helper that inspects the transcript. Painting happens
 		// on this goroutine anyway, so the cost is a mutex nobody contends for.
@@ -2210,8 +2205,93 @@ func (g *gui) addMessage(m chatMessage) {
 		g.mu.Unlock()
 
 		g.chatList.Refresh()
-		g.chatList.ScrollToBottom()
+
+		if follow {
+			g.scrollToLatest()
+		} else {
+			g.jumpBtn.Show()
+		}
+
+		if g.perfEnabled {
+			if line := g.noteMessageCost(time.Since(started)); line != "" {
+				logEvent(line)
+			}
+		}
 	})
+}
+
+// perfEvery is how many messages one perf line covers.
+const perfEvery = 25
+
+// noteMessageCost records one message's cost and returns the line to log when a
+// block of them has been measured, or "" (#432).
+//
+// It is called on the UI goroutine, from addMessage, and only while
+// CTHRONE_PERF is set.
+func (g *gui) noteMessageCost(cost time.Duration) string {
+	g.perfCount++
+	g.perfTotal += cost
+	g.perfLast = cost
+
+	if g.perfCount%perfEvery != 0 {
+		return ""
+	}
+
+	g.mu.Lock()
+	rows := len(g.messages)
+	g.mu.Unlock()
+
+	// A cost that climbs with the row count is the refresh path; one that stays
+	// flat while the window stutters is the renderer. Goroutines and heap are
+	// the third answer — something that never stops growing — and the only one
+	// that explains "it starts lagging after a while" by itself (#432).
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+
+	return fmt.Sprintf("perf: %d messages, %.2f ms each on average, last %.2f ms, %d rows, %d live, %d goroutines, %.1f MB heap",
+		g.perfCount,
+		float64(g.perfTotal)/float64(g.perfCount)/float64(time.Millisecond),
+		float64(g.perfLast)/float64(time.Millisecond),
+		rows,
+		g.liveSessions,
+		runtime.NumGoroutine(),
+		float64(memory.HeapAlloc)/(1<<20),
+	)
+}
+
+// chatOffset is where the transcript is scrolled to. It is a variable so a test
+// can put the reader somewhere without a rendered list (#434).
+var chatOffset = func(list *widget.List) float32 { return list.GetScrollOffset() }
+
+// atBottom reports whether the transcript is at its end, which is where a new
+// message is followed from.
+func (g *gui) atBottom() bool {
+	if g.chatList == nil {
+		return true
+	}
+
+	// Before the list has ever been scrolled there is no end to compare with:
+	// a fresh transcript follows, which is what a window opening to a room
+	// wants.
+	if g.lastBottom == 0 {
+		return true
+	}
+
+	return chatOffset(g.chatList) >= g.lastBottom-2
+}
+
+// scrollToLatest takes the transcript to its end and remembers where that is.
+func (g *gui) scrollToLatest() {
+	if g.chatList == nil {
+		return
+	}
+
+	g.chatList.ScrollToBottom()
+	g.lastBottom = chatOffset(g.chatList)
+
+	if g.jumpBtn != nil {
+		g.jumpBtn.Hide()
+	}
 }
 
 // updateChatRow paints one row of the transcript.
@@ -2489,7 +2569,8 @@ func (g *gui) startDiscovery() {
 
 			fyne.Do(func() {
 				g.addBeacon(beacon)
-				g.setStatus("Discovered " + beacon.Name)
+				// The Devices list already shows it; the chat's line is for
+				// what happened in the conversation (#433).
 			})
 		})
 		g.listener.Start()

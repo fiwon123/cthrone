@@ -1,5 +1,14 @@
 # Security model
 
+## ⚡ In a hurry
+
+| | |
+|---|---|
+| ✅ **Every session is sealed** — X25519, HKDF per direction, AES-256-GCM, replay refused | no plaintext mode |
+| ✅ **Every peer proves a key** — this device's ed25519 key, or a shared secret | a stranger cannot join |
+| ✅ **wss:// by default** — the host's certificate pinned on first contact | `--no-tls` opts out |
+| ⚠️ **The shape stays visible** — who talks when, and to which subject or address | encryption is not anonymity |
+
 The short version. The long one, with the issues that decided it (#11, #109,
 #125, #124, #202), is in the README's Security section.
 

@@ -1,5 +1,15 @@
 # Bluetooth
 
+## ⚡ In a hurry
+
+```bash
+cthrone host --bluetooth              # advertise the service
+cthrone scan --bluetooth              # what advertises it nearby
+cthrone connect --bluetooth laptop    # dial by name or address
+```
+
+No address, no port, no network. One device at a time on a host.
+
 The transport for when the network itself is the problem: no Wi-Fi, no router,
 no broker.
 

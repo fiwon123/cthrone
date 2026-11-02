@@ -512,3 +512,35 @@ func TestAbortFrame(t *testing.T) {
 		}
 	}
 }
+
+// A sentence a host relays carries its sender in the header, so a window can
+// name the device that typed it (#431). A sentence nobody relayed still travels
+// unwrapped, which is what keeps a peer that predates the envelope readable.
+func TestEncodeWrapsATextFrameThatCarriesASender(t *testing.T) {
+	named, err := Encode(Header{Kind: KindText, Sender: "alice (10.0.0.9)"}, []byte("hello"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	if !IsFrame(named) {
+		t.Fatalf("a named sentence was not wrapped: %q", named)
+	}
+
+	frame, err := Parse(named)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if frame.Header.Sender != "alice (10.0.0.9)" || string(frame.Payload) != "hello" {
+		t.Errorf("frame = %+v %q, want the sender and the sentence", frame.Header, frame.Payload)
+	}
+
+	plain, err := Encode(Header{Kind: KindText}, []byte("hello"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	if IsFrame(plain) || string(plain) != "hello" {
+		t.Errorf("an unnamed sentence = %q, want it unwrapped", plain)
+	}
+}

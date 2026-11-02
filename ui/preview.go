@@ -28,7 +28,11 @@ var (
 // therefore grew slower with each message, which is what "slow after a while"
 // was (#321).
 func (g *gui) previewPicture(path string) fyne.Resource {
-	if res, ok := g.pictures[path]; ok {
+	g.cacheMu.Lock()
+	res, ok := g.pictures[path]
+	g.cacheMu.Unlock()
+
+	if ok {
 		return res
 	}
 
@@ -36,6 +40,9 @@ func (g *gui) previewPicture(path string) fyne.Resource {
 	if err != nil {
 		return nil
 	}
+
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
 
 	if g.pictures == nil {
 		g.pictures = make(map[string]fyne.Resource)
@@ -52,11 +59,18 @@ func (g *gui) previewPicture(path string) fyne.Resource {
 
 // decodable is whether the picture at path can be decoded, asked once per path.
 func (g *gui) decodable(path string) bool {
-	if ok, known := g.decodableFiles[path]; known {
+	g.cacheMu.Lock()
+	ok, known := g.decodableFiles[path]
+	g.cacheMu.Unlock()
+
+	if known {
 		return ok
 	}
 
-	ok := canDecodeFile(path)
+	ok = canDecodeFile(path)
+
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
 
 	if g.decodableFiles == nil {
 		g.decodableFiles = make(map[string]bool)
@@ -73,11 +87,18 @@ func (g *gui) decodable(path string) bool {
 
 // previewText is the bounded text of a text file, read once.
 func (g *gui) previewText(path string) string {
-	if body, ok := g.texts[path]; ok {
+	g.cacheMu.Lock()
+	body, ok := g.texts[path]
+	g.cacheMu.Unlock()
+
+	if ok {
 		return body
 	}
 
-	body := readText(path)
+	body = readText(path)
+
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
 
 	if g.texts == nil {
 		g.texts = make(map[string]string)

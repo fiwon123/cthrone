@@ -228,6 +228,24 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.15.0` is the second report from a user, and the fixes it asked for. A
+message a host relays is **attributed to the device that typed it**: the sender
+travels in the frame header now, and a peer that may predate the field is given
+the prefix it has always read (#431). The chat line carries **only what
+happened** — no connection state standing in it, no "Discovered" chatter — and
+hides when it has nothing to say (#433). The transcript **follows a new message
+only when you were at the bottom**, and offers a button back down when you were
+not (#434). The **waveform is prepared when the row is painted**, so a point can
+be chosen before Play, and the clip is decoded once for both (#435). The wiki is
+rebuilt around a quick start per page and signposts rather than paragraphs
+(#436), and the roadmap is a GitHub project with one item per issue (#437).
+With `CTHRONE_PERF` set, the window reports its message path's cost, its
+goroutines and its heap to the failure log, because the lag report could not be
+reproduced on a machine with no renderer (#432 — still open until the numbers
+say what the cost is). Android hosting in the background (#438) and the radio on
+a phone (#206) need a service, an SDK and a device; neither is in this
+environment.
+
 `v0.14.1` puts the package count right. `gui/` — the window binary's own entry
 point, added in v0.12.2 — has its test, and the coverage claim in the working
 instructions still said 32 packages and did not list it. It says 33 and names
@@ -448,6 +466,11 @@ and the **Windows radio**, the **phone build** and the **APK** are still unrun
   the unclickable Setup tab (#189) — are asserted headless as painted-versus-
   hit-test pixel checks. A native rendered frame and the APK on a device are
   still unverified (#155).
+- **Roadmap**: every open issue is one item on the
+  [project board](https://github.com/users/fiwon123/projects/7), with its
+  milestone and its status (Todo, In Progress, Done). The issues are the source
+  of truth — the board is a view of them, kept by hand as work moves — and the
+  board's own description says so.
 - **Open**: see Backlog.
 
 ## Backlog

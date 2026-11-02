@@ -1,5 +1,15 @@
 # Host and connect
 
+## ⚡ In a hurry
+
+```bash
+cthrone host                 # on the device that serves (port 8080)
+cthrone connect 192.168.1.5  # on the other one
+```
+
+The host prints its address. Compare the six-digit code on both screens, accept
+on the host, and type.
+
 The default transport needs nothing but the two binaries: one device hosts, the
 other connects.
 
