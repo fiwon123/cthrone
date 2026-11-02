@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"mime"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -104,6 +104,20 @@ func sourcePath(reader fyne.URIReadCloser) string {
 	return uri.Path()
 }
 
+// stageForSend copies a picked file into the app's staging folder, the one the
+// receive side already uses.
+//
+// It used to stage into the download folder, which is where the user's own files
+// live and has nothing to do with a temporary copy (#303).
+func (g *gui) stageForSend(r io.Reader) (string, int64, error) {
+	dir, err := g.ensureStagingDir()
+	if err != nil {
+		return "", 0, err
+	}
+
+	return stage(r, dir)
+}
+
 // queuePick stages the picked file and hands it to the sender.
 //
 // The copy is made off the UI goroutine: a 200 MB video takes a moment to
@@ -117,41 +131,59 @@ func (g *gui) queuePick(reader fyne.URIReadCloser) {
 
 	g.setStatus("Preparing " + name + "…")
 
+	// The source path is read before the goroutine consumes the picker, and it
+	// is empty when the picker gave a content:// URI — a phone — which is what
+	// the row's thumbnail is for.
+	source := sourcePath(reader)
+
 	go func() {
 		defer reader.Close()
 
-		dir, err := g.ensureDownloadDir()
+		path, size, err := g.stageForSend(reader)
 		if err != nil {
+			// A row that says the pick failed is the difference between "my
+			// picture did not send" with something to look at and nothing at
+			// all (#303).
+			fyne.Do(func() {
+				g.addMessage(chatMessage{file: &fileNote{name: name, state: transferFailed}})
+			})
 			g.setStatus("Attach failed: " + err.Error())
 
 			return
 		}
 
-		path, size, err := stage(reader, dir)
-		if err != nil {
-			g.setStatus("Attach failed: " + err.Error())
-
-			return
-		}
+		// A picker may name the file with a document id and no extension — the
+		// content:// case — so the type is read from the bytes when the name
+		// cannot say it, and the name gets a suffix the receiver can act on
+		// (#303).
+		mime := typeOf(path, name)
+		name = withExtension(name, mime)
 
 		// The row draws the same preview the peer will draw (#237). The file it
 		// reads from is the user's own, not the staged copy: the copy is removed
 		// as soon as the send returns, and a row pointing at it would lose its
 		// picture the moment the transfer finished.
-		id := newTransferID()
-
+		//
+		// A picker that gave no path leaves nothing to read later, so the
+		// picture is reduced now, while the staged copy exists (#303).
+		inline := showsInline(mime, size)
 		note := &fileNote{
-			id:     id,
+			id:     newTransferID(),
 			name:   name,
 			size:   size,
 			state:  transferSending,
-			path:   sourcePath(reader),
-			inline: showsInline(mimeOf(name), size),
+			path:   source,
+			inline: inline,
 		}
+
+		if inline && source == "" {
+			note.thumb = thumbnailPNG(path, inlineImageHeight)
+		}
+
 		item := outgoing{
-			id:   id,
+			id:   note.id,
 			name: name,
-			mime: mimeOf(name),
+			mime: mime,
 			path: path,
 			size: size,
 			note: note,
@@ -772,10 +804,19 @@ func (g *gui) finishReceive() {
 // A row with no path on disk is a transfer that is still in flight, or one that
 // failed: neither has anything to save or to show, so both parts stay hidden
 // and the label carries the state.
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, save *widgets.CopyButton, open *widgets.CopyButton) {
-	if m.file == nil || m.file.path == "" {
+// showPicture draws res at the transcript's picture height.
+func showPicture(pic *canvas.Image, res fyne.Resource) {
+	pic.Resource = res
+	pic.SetMinSize(fyne.NewSize(0, inlineImageHeight))
+	pic.Refresh()
+	pic.Show()
+}
+
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, icon *widget.Icon, save *widgets.CopyButton, open *widgets.CopyButton) {
+	if m.file == nil {
 		pic.Hide()
 		preview.Hide()
+		icon.Hide()
 		save.Hide()
 		open.Hide()
 
@@ -784,16 +825,20 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 
 	path := m.file.path
 
-	if m.file.inline && decodableImage(path) {
+	switch {
+	case path != "" && m.file.inline && decodableImage(path):
 		if res, err := fyne.LoadResourceFromPath(path); err == nil {
-			pic.Resource = res
-			pic.SetMinSize(fyne.NewSize(0, inlineImageHeight))
-			pic.Refresh()
-			pic.Show()
+			showPicture(pic, res)
 		} else {
 			pic.Hide()
 		}
-	} else {
+
+	// A picture this device sent from a picker that gave no path: the row draws
+	// the thumbnail taken while the staged copy existed (#303).
+	case m.file.thumb != nil:
+		showPicture(pic, fyne.NewStaticResource(m.file.name+".png", m.file.thumb))
+
+	default:
 		pic.Hide()
 	}
 
@@ -802,7 +847,7 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	// conversation under it.
 	drawn := false
 
-	if showsText(mimeOf(m.file.name), m.file.size) {
+	if path != "" && showsText(mimeOf(m.file.name), m.file.size) {
 		if body := textPreview(path); body != "" {
 			preview.SetText(body)
 			preview.Show()
@@ -814,12 +859,25 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 		preview.Hide()
 	}
 
+	// A row that draws nothing says what kind of file it is: the icon is the
+	// only thing distinguishing a PDF from a song (#304).
+	if pic.Visible() || drawn {
+		icon.Hide()
+	} else {
+		icon.SetResource(fileIconFor(m.file.name))
+		icon.Show()
+	}
+
 	// A file this program cannot draw is offered to the device instead: a PDF to
 	// its reader, an audio clip to its player. The button appears only where it
-	// can do something — the file is on this disk, and the row is not already
-	// showing its content.
+	// can do something — the file is on this disk, the row is not already showing
+	// its content, and the platform lets a file leave the app at all (#305).
+	//
+	// A row with no local path cannot be opened or saved from here, whatever
+	// the state says: there is nothing on this disk to hand to anything. A send
+	// from a phone is exactly that row (#303).
 	switch {
-	case drawn || m.file.inline:
+	case path == "" || drawn || m.file.inline || !canOpenFiles():
 		open.Hide()
 	case m.file.state == transferSaved || m.file.state == transferSent:
 		open.SetOnTapped(func() { g.openFile(path) })
@@ -844,11 +902,23 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 		}
 
 	case transferSaved:
+		if path == "" {
+			save.Hide()
+
+			break
+		}
+
 		save.SetText("Save as…")
 		save.SetOnTapped(func() { g.saveAs(path) })
 		save.Show()
 
 	case transferPending:
+		if path == "" {
+			save.Hide()
+
+			break
+		}
+
 		name := filepath.Base(path)
 		note := m.file
 		save.SetText("Save as…")
@@ -1017,17 +1087,6 @@ func (g *gui) fileSettings() fileSettings {
 	}
 
 	return settings
-}
-
-// mimeOf names a picked file's type from its extension. The receiver uses it to
-// decide between an inline picture and a file row, so an unknown type is a file
-// row rather than a guess.
-func mimeOf(name string) string {
-	if kind := mime.TypeByExtension(filepath.Ext(name)); kind != "" {
-		return kind
-	}
-
-	return "application/octet-stream"
 }
 
 // dialogSize is a sensible size for a picker or a picture: most of the window,

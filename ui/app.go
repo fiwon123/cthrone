@@ -448,7 +448,13 @@ func (g *gui) build() {
 			open := widgets.NewButtonWithIcon("Open", theme.DocumentIcon(), nil, g.copyLabel)
 			open.Hide()
 
-			return container.NewVBox(row, pic, preview, save, open)
+			// The icon says what kind of file a row is, for the rows that draw
+			// nothing of their own: a PDF and a song were indistinguishable
+			// (#304).
+			icon := widget.NewIcon(theme.FileIcon())
+			icon.Hide()
+
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, row), pic, preview, save, open)
 		},
 		g.updateChatRow,
 	)
@@ -465,6 +471,7 @@ func (g *gui) build() {
 	// instead of pushing the transcript off the screen.
 	g.entry = widget.NewMultiLineEntry()
 	g.entry.Wrapping = fyne.TextWrapWord
+	withClear(g.entry)
 	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
 	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
@@ -509,14 +516,17 @@ func (g *gui) build() {
 	g.portEntry.SetText(strconv.Itoa(defaultPort))
 
 	g.bindEntry = widget.NewEntry()
+	withClear(g.bindEntry)
 	g.bindEntry.SetPlaceHolder("every interface")
 
 	// The name is filled in after the window is up (fillIdentity): reading it
 	// is I/O, and the window must not wait on the disk to appear.
 	g.nameEntry = widget.NewEntry()
+	withClear(g.nameEntry)
 	g.nameEntry.SetPlaceHolder("device name")
 
 	g.hostEntry = widget.NewEntry()
+	withClear(g.hostEntry)
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
@@ -524,12 +534,15 @@ func (g *gui) build() {
 	g.tokenEntry.OnChanged = func(string) { g.refreshCredential() }
 
 	g.fingerprintEntry = widget.NewEntry()
+	withClear(g.fingerprintEntry)
 	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
 
 	g.subjectEntry = widget.NewEntry()
+	withClear(g.subjectEntry)
 	g.subjectEntry.SetText(natscore.DefaultSubject)
 
 	g.natsURLEntry = widget.NewEntry()
+	withClear(g.natsURLEntry)
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
 	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() }, !g.mobile)
@@ -1625,20 +1638,36 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		return
 	}
 
-	label, _ := row.Objects[0].(*widgets.Text)
+	caption, _ := row.Objects[0].(*fyne.Container)
 	pic, _ := row.Objects[1].(*canvas.Image)
 	preview, _ := row.Objects[2].(*widgets.Text)
 	save, _ := row.Objects[3].(*widgets.CopyButton)
 	open, _ := row.Objects[4].(*widgets.CopyButton)
 
-	if label == nil || pic == nil || preview == nil || save == nil || open == nil {
+	var label *widgets.Text
+	var icon *widget.Icon
+
+	// The caption cell holds the icon and the text; their order is the layout's,
+	// so they are found by type rather than by index.
+	if caption != nil {
+		for _, object := range caption.Objects {
+			switch part := object.(type) {
+			case *widgets.Text:
+				label = part
+			case *widget.Icon:
+				icon = part
+			}
+		}
+	}
+
+	if label == nil || icon == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
 	m := g.messages[id]
 	label.SetText(m.line())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
-	g.fillFileRow(m, pic, preview, save, open)
+	g.fillFileRow(m, pic, preview, icon, save, open)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {

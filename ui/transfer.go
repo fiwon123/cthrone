@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,8 +150,7 @@ func sendFile(ctx context.Context, s chunkSender, id, name, mime string, size in
 // copying once; streaming the copy is also what keeps a 200 MB video out of
 // memory.
 //
-// The caller removes the returned path. The copy lives beside the finished
-// files so it is on the same filesystem as everything else the app writes.
+// The caller removes the returned path.
 func stage(r io.Reader, dir string) (string, int64, error) {
 	file, err := os.CreateTemp(dir, ".cthrone-send-*")
 	if err != nil {
@@ -243,6 +245,101 @@ func showsInline(mime string, size int64) bool {
 	return inlineTypes[kind]
 }
 
+// sniffMime names a file's type from its first bytes, for the case the name
+// cannot: a phone's picker hands over a content:// URI whose last segment is a
+// document id, not "photo.jpg" (#303).
+func sniffMime(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	head := make([]byte, 512)
+
+	n, err := io.ReadFull(file, head)
+	if n <= 0 || (err != nil && !errors.Is(err, io.ErrUnexpectedEOF)) {
+		return ""
+	}
+
+	kind := http.DetectContentType(head[:n])
+	if i := strings.IndexByte(kind, ';'); i >= 0 {
+		kind = strings.TrimSpace(kind[:i])
+	}
+
+	return kind
+}
+
+// extensionFor is the suffix a type is usually written with, for the files a
+// picker names without one.
+var extensionFor = map[string]string{
+	"image/jpeg":      ".jpg",
+	"image/png":       ".png",
+	"image/gif":       ".gif",
+	"image/webp":      ".webp",
+	"application/pdf": ".pdf",
+	"audio/mpeg":      ".mp3",
+	"audio/ogg":       ".ogg",
+	"audio/wav":       ".wav",
+	"video/mp4":       ".mp4",
+	"text/plain":      ".txt",
+}
+
+// withExtension gives a nameless type a name the receiver can act on: the
+// receiver decides "draw this" from the name, so a picture that arrived as a
+// document id would be drawn as a plain file (#303).
+func withExtension(name, mime string) string {
+	if name == "" || filepath.Ext(name) != "" {
+		return name
+	}
+
+	if ext := extensionFor[strings.ToLower(strings.TrimSpace(mime))]; ext != "" {
+		return name + ext
+	}
+
+	return name
+}
+
+// octetStream is what mimeOf answers when the extension says nothing.
+const octetStream = "application/octet-stream"
+
+// mimeOf names a picked file's type from its extension. The receiver uses it to
+// decide between an inline picture and a file row, so an unknown type is a file
+// row rather than a guess.
+func mimeOf(name string) string {
+	if kind := mime.TypeByExtension(filepath.Ext(name)); kind != "" {
+		return kind
+	}
+
+	return octetStream
+}
+
+// typeOf names a file's type from its name when the name can say it, and from
+// its first bytes when it cannot — a phone's picker names a document id, not a
+// filename (#303).
+func typeOf(path, name string) string {
+	kind := mimeOf(name)
+	if filepath.Ext(name) != "" && kind != octetStream {
+		return withoutParameters(kind)
+	}
+
+	if sniffed := sniffMime(path); sniffed != "" {
+		return sniffed
+	}
+
+	return kind
+}
+
+// withoutParameters drops a MIME type's parameters, so "text/plain; charset=utf-8"
+// and "text/plain" are the same type to every rule below.
+func withoutParameters(kind string) string {
+	if i := strings.IndexByte(kind, ';'); i >= 0 {
+		kind = strings.TrimSpace(kind[:i])
+	}
+
+	return kind
+}
+
 // resolveDownloadDir is where a received file lands.
 //
 // It is deliberately not the configuration directory: that one holds the shared
@@ -306,6 +403,12 @@ type fileNote struct {
 	path string
 	// inline asks the row to draw the picture itself.
 	inline bool
+
+	// thumb is a reduced PNG of a picture this device sent, when the picker gave
+	// no path the row could read afterwards — a phone's content:// pick. It is
+	// what the row draws instead of loading the original, and it survives the
+	// staged copy being deleted when the send returns (#303).
+	thumb []byte
 }
 
 // line renders a transfer row.

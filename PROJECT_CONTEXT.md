@@ -224,6 +224,22 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.11.3` is a patch on that, written from a second field report on a phone. A
+picture sent from a phone now shows itself: the row keeps a thumbnail, because a
+picker hands over a `content://` URI with no path to read later, and the type is
+read from the bytes because the picker names the file with a document id and no
+extension (#303). A file row says what kind of file it is — audio, video, image
+or text, the generic document for a PDF — instead of being a filename alone
+(#304). A phone no longer offers **Open**, which could never work there, and the
+row says how to get the file out instead (#305). Every field carries a **×** that
+empties it in one press, because holding backspace does not repeat (#290). And
+the app stays upright: `make gui-android` renders a manifest that locks the
+activity to portrait, with the release's version substituted (#302).
+
+It does not claim **audio playing inside the app** (#306) and does not claim the
+backspace repeat is fixed — that is Fyne's Android bridge, still tracked upstream
+— and nothing in it was run on a phone (#155).
+
 `v0.11.2` is a patch on that, written from the first field report on a phone. A
 received file is no longer called failed when it arrived intact and only the save
 could not happen — the row keeps the staged file and offers *Save as…* — and a
@@ -253,12 +269,12 @@ one platform fact (#218), the update check with install and revert (#212, #214),
 long-press selection (#213, #231) and the Bluetooth transport building for
 Windows (#215).
 
-What this release does not claim: **audio does not play inside the app** and PDFs
-are not drawn — both open with the device's own viewer, because the audio package
-needs CGO the headless GUI gate cannot carry and there is no pure-Go PDF
-renderer; **`recv`/`exec` are not implemented** (#275); **backspace does not
-repeat on a phone** (#290); and the **Windows radio**, the **phone build** and the
-**APK** are still unrun (#224, #206, #155).
+What this release does not claim: **audio does not play inside the app** (#306)
+and PDFs are not drawn — both open with another app, because this toolkit ships
+no audio player or decoder and there is no pure-Go PDF renderer; **`recv`/`exec`
+are not implemented** (#275); **backspace does not repeat on a phone** (#290);
+and the **Windows radio**, the **phone build** and the **APK** are still unrun
+(#224, #206, #155).
 
 - **Encrypted and authenticated by default**: every session is sealed on every
   transport — a Bluetooth link carries ciphertext too, whatever the radio's own

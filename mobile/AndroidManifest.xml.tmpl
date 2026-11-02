@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	The APK's manifest. `fyne package` uses this file when it is beside the
+	package being built, instead of the one it would generate, and it reads two
+	things from it: the activity name must be org.golang.app.GoNativeActivity,
+	and android.app.lib_name must be the name of the Go shared object.
+
+	The one deliberate difference from the generated manifest is
+	android:screenOrientation="portrait": the chat is laid out for a phone held
+	upright, and rotating it brings back a layout the device has no room for
+	(#302). Everything else is the generated manifest with the release's version
+	substituted by `make gui-android` (@VERSION@ and @BUILD@), because a manifest
+	provided here is used verbatim — the packager does not template it.
+-->
+<manifest
+	xmlns:android="http://schemas.android.com/apk/res/android"
+	package="com.cthrone.app"
+	android:versionCode="@BUILD@"
+	android:versionName="@VERSION@">
+
+	<application android:label="cthrone" android:debuggable="true">
+	<activity android:name="org.golang.app.GoNativeActivity"
+		android:label="cthrone"
+		android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"
+		android:screenOrientation="portrait"
+		android:exported="true"
+		android:theme="@android:style/Theme"
+		android:windowSoftInputMode="adjustResize">
+		<meta-data android:name="android.app.lib_name" android:value="cthrone" />
+		<intent-filter>
+			<action android:name="android.intent.action.MAIN" />
+			<category android:name="android.intent.category.LAUNCHER" />
+		</intent-filter>
+	</activity>
+	</application>
+
+	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+	<uses-permission android:name="android.permission.INTERNET" />
+</manifest>
