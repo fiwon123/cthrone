@@ -2,7 +2,11 @@
 
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"fyne.io/fyne/v2/test"
+)
 
 // The header's one icon answers "where does this window stand?" without a
 // sentence (#453).
@@ -71,5 +75,44 @@ func TestTheStateIconFollowsStopAndLoss(t *testing.T) {
 
 	if g.stateGlyph.Text != "⚪" {
 		t.Errorf("after Stop the window shows %q, want offline", g.stateGlyph.Text)
+	}
+}
+
+// The status line is under the transcript, not in the header, and a tap on it
+// copies what it says — a message a user wants to quote, or report (#457).
+func TestTheStatusLineIsBelowAndCopiesOnATap(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.win.Content().Refresh()
+
+	const message = "No host answered on this network"
+	g.setStatus(message)
+
+	if !g.status.Visible() {
+		t.Fatal("the status line is hidden although it has something to say")
+	}
+
+	test.Tap(g.status)
+
+	if got := g.app.Clipboard().Content(); got != message {
+		t.Errorf("the clipboard holds %q, want the status line", got)
+	}
+}
+
+// The header carries the state icon and the actions, and no text (#457).
+func TestTheHeaderCarriesNoText(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.win.Content().Refresh()
+
+	header := parentsOf(g.win.Content())[g.stateGlyph]
+	if header == nil {
+		t.Fatal("the state icon is not painted")
+	}
+
+	if parentsOf(g.win.Content())[g.stopBtn] != header {
+		t.Error("Stop is not in the same row as the state icon")
+	}
+
+	if parentsOf(g.win.Content())[g.status] == header {
+		t.Error("the status line is in the header")
 	}
 }

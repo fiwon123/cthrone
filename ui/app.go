@@ -547,6 +547,11 @@ func (g *gui) build() {
 
 	g.status = g.text("")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
+	g.status.SetOnTapped(func() {
+		if text := g.status.Text(); text != "" {
+			g.copyToClipboard(text)
+		}
+	})
 	g.status.Hide()
 
 	// The Files action lives beside the transcript rather than in Setup: it is
@@ -578,7 +583,7 @@ func (g *gui) build() {
 	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
 	g.jumpBtn.Hide()
 
-	header := container.NewHBox(g.stateGlyph, g.status)
+	header := container.NewHBox(g.stateGlyph)
 	header.Add(layout.NewSpacer())
 	header.Add(g.jumpBtn)
 	header.Add(g.stopBtn)
@@ -708,9 +713,12 @@ func (g *gui) build() {
 		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.sendBtn), g.entry)
 	}
 
+	// The status sits under the transcript, above the composer: it is a bar for
+	// what just happened, not a second header line. The header answers "where
+	// do I stand" with the state icon, and nothing else (#457).
 	chat := container.NewBorder(
 		container.NewVBox(container.NewPadded(header), widget.NewSeparator()),
-		container.NewPadded(input),
+		container.NewVBox(container.NewPadded(g.status), container.NewPadded(input)),
 		nil, nil,
 		g.chatList,
 	)
@@ -1288,7 +1296,6 @@ func (g *gui) host() {
 // fingerprint for exactly that reason — it is the only screen the user has.
 func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 	handle, err := openBluetoothServer(data, opts, func(sess session.Session) {
-		g.setStatus("A device joined over Bluetooth — chatting")
 		g.attach(sess)
 	}, g.confirmFirstContact)
 	if err != nil {
@@ -1323,7 +1330,6 @@ func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 // device's address, and prints what the other device needs to find it.
 func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts pairing.Options, own, hosting string, typedToken bool) {
 	handle, err := websocketcore.OpenServer(data, opts, tlsConf, func(sess session.Session) {
-		g.setStatus("A device joined — chatting")
 		g.attach(sess)
 	}, g.confirmFirstContact)
 	if err != nil {
@@ -1613,7 +1619,7 @@ func (g *gui) scan() {
 			g.refreshDeviceList()
 
 			if len(found) == 0 {
-				g.setStatus("No host answered on this network")
+				g.addMessage(chatMessage{from: "system", text: "No host answered on this network"})
 
 				return
 			}
@@ -1651,7 +1657,7 @@ func (g *gui) scanBluetooth(mode transportMode) {
 			}
 
 			if found == 0 {
-				g.setStatus("No cthrone device answered over Bluetooth")
+				g.addMessage(chatMessage{from: "system", text: "No cthrone device answered over Bluetooth"})
 
 				return
 			}
@@ -1814,7 +1820,6 @@ func (g *gui) attach(sess session.Session) {
 				// compared, so it goes on screen and in the transcript; a
 				// later contact only says who it is. Both values are shown,
 				// because the other screen has them under the opposite labels.
-				g.setStatus("Paired with " + p.Name())
 				g.addMessage(chatMessage{
 					from: "system",
 					text: "paired with " + p.Name() + " — first contact; its fingerprint is " + p.Fingerprint +
@@ -1824,7 +1829,6 @@ func (g *gui) attach(sess session.Session) {
 				return
 			}
 
-			g.setStatus("Encrypted with " + p.Name())
 			g.addMessage(chatMessage{from: "system", text: "encrypted with " + p.Name()})
 		})
 		sealed.OnError(func(err error) {

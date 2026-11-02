@@ -61,10 +61,14 @@ func TestStopIsInTheHeaderAndNotBesideSend(t *testing.T) {
 				t.Fatal("the Stop button is not in the painted tree")
 			}
 
-			// The status line is in the header, which is what makes it a handle
-			// on the header without a new field (#383).
-			if header != parents[g.status] {
-				t.Errorf("Stop is in %T, not in the header with the status line", header)
+			// The state icon is the header's own object, which is what makes it
+			// a handle on the header without a new field (#453, #457).
+			if header != parents[g.stateGlyph] {
+				t.Errorf("Stop is in %T, not in the header with the state icon", header)
+			}
+
+			if parents[g.status] == header {
+				t.Error("the status line is still in the header; it belongs under the transcript")
 			}
 
 			if parents[g.stopBtn] == parents[g.sendBtn] {
