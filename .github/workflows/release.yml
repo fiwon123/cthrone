@@ -463,114 +463,59 @@ jobs:
           # Quoted heredoc: backticks and `$(...)` in the Markdown stay literal.
           # @PLACEHOLDER@ tokens are substituted below.
           cat > header.md <<'EOF'
-          ## cthrone @VERSION@
+          ## 💬 cthrone @VERSION@
 
-          Terminal chat that carries messages from one device to another — over a
-          websocket by default, or a NATS broker with `--nats` — plus a Fyne
-          desktop GUI and an Android app built from the same code.
+          Chat from one device to another — a terminal, a desktop window, or a
+          phone. One device **hosts**, the others connect; there is no account and
+          no server, and every session is sealed end to end.
 
-          Built from commit `@COMMIT@` ([workflow run](@RUN@)).
+          Built from `@COMMIT@` · [workflow run](@RUN@)
 
-          ### Download
+          ## 📦 Download
 
-          | Platform | Asset | Notes |
-          |---|---|---|
-          | Linux amd64 | `cthrone_@VERSION@_linux.tar.gz` | CLI. `tar -xzf <archive> && cd <folder> && ./add_to_path.sh` |
-          | Linux amd64, GUI | `cthrone_@VERSION@_linux_gui_amd64.tar.gz` | Fyne GUI. Needs the GTK3/GL/X11 runtime libraries — see below |
-          | Windows amd64 | `cthrone_@VERSION@_windows.zip` | CLI. `Expand-Archive <archive>` then `.\add_to_path.bat` |
-          | Windows amd64, GUI | `cthrone_@VERSION@_windows_gui_amd64.zip` | Fyne GUI |
-          | macOS arm64 | `cthrone_@VERSION@_darwin_arm64.tar.gz` | CLI, Apple silicon |
-          | macOS amd64 | `cthrone_@VERSION@_darwin_amd64.tar.gz` | CLI, Intel |
-          | macOS arm64, GUI | `cthrone_@VERSION@_darwin_gui_arm64.tar.gz` | Fyne GUI |
-          | Android arm64, app | `cthrone_@VERSION@_android_gui_arm64.apk` | Fyne app, debug-signed. Tap to install; no store, no account |
-          | Android arm64 | `cthrone_@VERSION@_android.zip` / `.tar.gz` | **CLI, not an app.** Runs in Termux; unpack into the Termux home (not `/sdcard`, which is `noexec`), then `chmod +x cthrone ct` |
+          | | Platform | Asset |
+          |:--:|---|---|
+          | 🐧 | **Linux** | `cthrone_@VERSION@_linux.tar.gz` |
+          | 🐧 | Linux, with the window | `cthrone_@VERSION@_linux_gui_amd64.tar.gz` |
+          | 🪟 | **Windows** | `cthrone_@VERSION@_windows.zip` |
+          | 🪟 | Windows, with the window | `cthrone_@VERSION@_windows_gui_amd64.zip` |
+          | 🍎 | **macOS**, Apple silicon | `cthrone_@VERSION@_darwin_arm64.tar.gz` |
+          | 🍎 | macOS, with the window | `cthrone_@VERSION@_darwin_gui_arm64.tar.gz` |
+          | 🍎 | macOS, Intel | `cthrone_@VERSION@_darwin_amd64.tar.gz` |
+          | 🤖 | **Android app** | `cthrone_@VERSION@_android_gui_arm64.apk` |
+          | 🤖 | Android CLI (Termux) | `cthrone_@VERSION@_android.zip` |
 
-          Every archive carries both `cthrone` and the short alias `ct`, so
-          `ct host` works as soon as the folder is on your `PATH`. The GUI
-          archives are the same tool with `cthrone ui` built in.
+          Every CLI archive carries `cthrone` and the short alias `ct`: unpack it and
+          run `add_to_path.sh` (or `.bat`) once. The window archives are the same
+          tool with the GUI built in; on Linux they need the GTK3, OpenGL and X11
+          runtime libraries. The APK is **debug-signed** — tap it and allow the
+          install once.
 
-          ### Verify the download
+          ## ✅ Verify
 
-          ```bash
-          sha256sum -c checksums.txt        # Linux
-          shasum -a 256 -c checksums.txt    # macOS
+          ```sh
+          sha256sum -c checksums.txt        # macOS: shasum -a 256 -c checksums.txt
           ```
 
-          `Get-FileHash <file> -Algorithm SHA256` on Windows.
+          ## 🔒 Security
 
-          ### Linux GUI runtime libraries
+          Every session is **sealed and authenticated end to end** — X25519, HKDF
+          per direction, AES-256-GCM — and the peer's device key is pinned on first
+          contact. The websocket is `wss://` by default and the host's certificate
+          is pinned too; `--no-tls` is the opt-out, kept for a peer that predates
+          the current protocol.
 
-          The Linux GUI binary is linked dynamically. On a Debian/Ubuntu host:
+          ## ⚠️ What this build does not do
 
-          ```bash
-          sudo apt-get install libgtk-3-0 libgl1 libx11-6 libxcursor1 \
-            libxrandr2 libxinerama1 libxi6 libxxf86vm1
-          ```
+          - **Audio does not play inside the app**, and **PDFs are not drawn** —
+            both open with another app. On a phone, press **Save as…** and open
+            the file from the file manager.
+          - **`recv`/`exec` are not implemented.**
+          - The **Windows Bluetooth transport**, the **phone build** and the
+            **APK on a device** have not been run yet.
 
-          A CLI-only user does not need any of them.
-
-          ### The Android app
-
-          `cthrone_@VERSION@_android_gui_arm64.apk` is the same tool with the Fyne
-          GUI, for a 64-bit ARM phone or tablet. It is **debug-signed**, so Android
-          asks you to allow installs from the app you downloaded it with the first
-          time.
-
-          ```bash
-          adb install cthrone_@VERSION@_android_gui_arm64.apk
-          # or copy the file to the device and tap it
-          ```
-
-          The app has four tabs:
-
-          - **Chat** — the conversation, a send field and a stop button.
-          - **Setup** — the port, the credential (device key by default, or a
-            shared secret), the transport (`NATS` or websocket) and the TLS
-            options, with **Host** and **Connect**. Encryption is on unless the
-            box is cleared, and the host's certificate is pinned on first
-            contact.
-          - **Devices** — **Scan network** walks the `/24` the default route uses
-            for a host on the chat port; tap a result to fill in its address. A
-            device that hosts is never listed in its own list — its address is
-            shown read-only under **Setup** instead, as *This device —
-            &lt;address&gt;:&lt;port&gt;*.
-          - **About** — the version this build reports, with a **Copy** button;
-            the repository link; which credential the next session will speak;
-            and **Check for updates**, which runs only when pressed. Nothing
-            polls on start-up, so a window still opens on a phone with no
-            signal.
-
-          A phone that hosts shows its own fingerprint in a dialog — the other
-          device connects and the two screens are compared, with nothing to
-          type. The app keeps its device key, its pins, its shared secret (when
-          one is configured) and its TLS material in its own private data
-          directory; nothing is shared with another app.
-
-          ### Security
-
-          Every session is **encrypted and authenticated end to end** — a
-          device that cannot prove its identity cannot join, and a broker
-          carries ciphertext. Two devices pair on first contact by **device
-          key**, with no value to copy; a shared secret remains the alternative
-          for v0.6.0 peers.
-
-          - the **websocket** transport is encrypted as well (`wss://`) unless
-            `--no-tls` is given, and the host's certificate is pinned on first
-            contact — a different certificate at the same address is refused,
-            and `cthrone peers forget <address>` is the way back;
-          - the **NATS** transport sends the broker's credentials from
-            `NATS_USER`/`NATS_PASSWORD`, and a `tls://` broker URL asks for an
-            encrypted connection;
-          - prefer `--token-file` or the environment over `--token`: a flag value
-            is visible in the process list.
-
-          **Compatibility break:** a v0.6.0 peer speaks plaintext `ws://` and
-          will not connect to a @VERSION@ host. Start the @VERSION@ side with
-          `--no-tls` — on both devices — while the older one is in use; the
-          payload stays sealed end to end. `--tls` is still accepted, so an
-          older command line runs unchanged.
-
-          ### Changes
+          <details>
+          <summary>🧾 Every change</summary>
 
           EOF
 
@@ -607,7 +552,9 @@ jobs:
               "$VERSION" "$GITHUB_SERVER_URL/$REPO" "$COMMIT" > changes.md
           fi
 
-          { cat header.md; cat changes.md; } > release-notes.md
+          # The changelog is folded under the summary the header opened, so the
+          # page reads as a product page first and a commit list second.
+          { cat header.md; cat changes.md; printf '\n</details>\n'; } > release-notes.md
           wc -l release-notes.md
 
       - name: Create or update the draft release
