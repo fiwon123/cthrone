@@ -8,6 +8,9 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // hitTest answers the question a tap really asks: which object would the driver
@@ -171,4 +174,74 @@ func treeContains(root, want fyne.CanvasObject) bool {
 	}
 
 	return false
+}
+
+// paintedText finds the text object the toolkit is showing with this content,
+// skipping anything invisible: a row in a hidden tab is not one a user can see
+// or press (#280).
+func paintedText(root fyne.CanvasObject, want string, depth int) *widgets.Text {
+	if root == nil || depth > 16 || !root.Visible() {
+		return nil
+	}
+
+	found := paintedIn(root, depth, func(obj fyne.CanvasObject) fyne.CanvasObject {
+		if text, ok := obj.(*widgets.Text); ok && text.Text() == want {
+			return text
+		}
+
+		return nil
+	})
+
+	text, _ := found.(*widgets.Text)
+
+	return text
+}
+
+// paintedButton finds the button the toolkit is showing with this label.
+func paintedButton(root fyne.CanvasObject, want string, depth int) *widget.Button {
+	if root == nil || depth > 16 || !root.Visible() {
+		return nil
+	}
+
+	found := paintedIn(root, depth, func(obj fyne.CanvasObject) fyne.CanvasObject {
+		if button, ok := obj.(*widget.Button); ok && button.Text == want {
+			return button
+		}
+
+		return nil
+	})
+
+	button, _ := found.(*widget.Button)
+
+	return button
+}
+
+// paintedIn walks the children of root and returns the first object the finder
+// matches.
+func paintedIn(root fyne.CanvasObject, depth int, find func(fyne.CanvasObject) fyne.CanvasObject) fyne.CanvasObject {
+	if root == nil || depth > 16 || !root.Visible() {
+		return nil
+	}
+
+	if match := find(root); match != nil {
+		return match
+	}
+
+	if box, ok := root.(*fyne.Container); ok {
+		for _, child := range box.Objects {
+			if found := paintedIn(child, depth+1, find); found != nil {
+				return found
+			}
+		}
+	}
+
+	if drawn, ok := root.(fyne.Widget); ok {
+		for _, child := range test.WidgetRenderer(drawn).Objects() {
+			if found := paintedIn(child, depth+1, find); found != nil {
+				return found
+			}
+		}
+	}
+
+	return nil
 }

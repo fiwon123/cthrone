@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -93,17 +92,6 @@ func senderLabel(from, addr string) string {
 	}
 
 	return from + " (" + addr + ")"
-}
-
-// transcript renders every message in order, one per line — what "Copy all"
-// puts on the clipboard.
-func transcript(messages []chatMessage) string {
-	lines := make([]string, len(messages))
-	for i, m := range messages {
-		lines[i] = m.line()
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 // peerName is the display name a close notice reports: the peer the sealed

@@ -29,6 +29,11 @@ const (
 	// zeroMetadataVersion is the version Fyne reports when nothing set one. It
 	// is not this program's version, so it is treated as absent.
 	zeroMetadataVersion = "0.0.1"
+
+	// appInstallsFromTheReleasePage is what the About tab says where the app is
+	// a package rather than a file the program owns: it cannot replace itself,
+	// and the release page is the way (#285).
+	appInstallsFromTheReleasePage = "This platform installs the app from a package: press Release page, download it, and open it. The check above still tells you whether there is one."
 )
 
 // aboutUpdateText is the update check's answer as the About tab shows it: the

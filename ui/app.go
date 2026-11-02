@@ -369,17 +369,12 @@ func (g *gui) build() {
 	// --- chat ---------------------------------------------------------
 	// The desktop window already says "cthrone" in its title bar, so the header
 	// carries only what a title bar cannot: the name on a phone, which has no
-	// title bar to show it in, the copy confirmation, and the copy-all action.
+	// title bar to show it in, the copy confirmation, and the Files action.
+	//
+	// There is no Copy all here any more: it copied the transcript as one
+	// string, which is not what a user who wants one message means, and a tap on
+	// a row already copies that row (#289).
 	g.copyHint = g.label("")
-
-	copyLabel := "Copy all"
-	if g.lay.Stack {
-		// The icon is enough where width is scarce.
-		copyLabel = ""
-	}
-
-	copyBtn := widgets.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), g.copyAll, g.copyLabel)
-	copyBtn.SetText(copyLabel)
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -399,8 +394,22 @@ func (g *gui) build() {
 
 	header.Add(layout.NewSpacer())
 	header.Add(g.copyHint)
+
+	// Stop is a connection control, not a message action: it belongs with the
+	// session's state, not beside Send, where a thumb aiming at Send could end
+	// the connection (#288). It is built here, before the composer, so the
+	// header can hold it.
+	stopLabel := "Stop"
+	if g.lay.Stack {
+		stopLabel = ""
+	}
+
+	g.stopBtn = widgets.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop, g.copyLabel)
+	g.stopBtn.SetText(stopLabel)
+	g.stopBtn.Disable()
+
+	header.Add(g.stopBtn)
 	header.Add(filesBtn)
-	header.Add(copyBtn)
 
 	g.status = g.text("Ready — open Setup to connect or host.")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
@@ -463,9 +472,6 @@ func (g *gui) build() {
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
 	g.sendBtn.Disable()
 
-	g.stopBtn = widgets.NewButtonWithIcon("Stop", theme.MediaStopIcon(), g.stop, g.copyLabel)
-	g.stopBtn.Disable()
-
 	attachLabel := "Attach"
 	if g.lay.Stack {
 		// The paperclip says it on a phone, where the row has no width to spare.
@@ -486,9 +492,9 @@ func (g *gui) build() {
 	if g.lay.Stack {
 		// Touch: a full-width field, and the two actions below it, stacked
 		// one per line when even two do not fit.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.stopBtn, g.attachBtn, g.sendBtn))
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.attachBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.stopBtn, g.attachBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.sendBtn), g.entry)
 	}
 
 	chat := container.NewBorder(
@@ -568,8 +574,6 @@ func (g *gui) build() {
 
 	setup := container.NewVScroll(container.NewPadded(container.NewVBox(
 		g.heading("Quick Setup"),
-		g.tlsCheck,
-		g.insecureCheck,
 		g.formHolder,
 		g.credential,
 		g.forgetSecret,
@@ -590,10 +594,17 @@ func (g *gui) build() {
 	// of one transport never leaves the other's rows in the way.
 	g.beaconList = widget.NewList(
 		func() int { return len(g.visibleBeacons()) },
-		// A row is text a user copies, so it is the same wrapper the transcript
-		// uses: on a phone a long press selects the address, and the tap keeps
-		// the action the list gave it — filling the address field.
-		func() fyne.CanvasObject { return g.text("") },
+		// A row does something when pressed, so it looks like what it is: a
+		// button (#287). The transcript's long-press text is not used here any
+		// more — a sentence that is selectable reads as text, not as an action,
+		// which is what the report said. The address stays copyable where it is
+		// used: the Setup field it fills and the status line naming it.
+		func() fyne.CanvasObject {
+			row := widget.NewButton("", nil)
+			row.Alignment = widget.ButtonAlignLeading
+
+			return row
+		},
 		g.updateBeaconRow,
 	)
 	g.beaconList.OnSelected = g.selectBeacon
@@ -714,6 +725,17 @@ func (g *gui) rebuildSetupForm() {
 	}
 
 	rows = append(rows, widgets.Row{Caption: "Transport", Field: g.transport})
+
+	// The security switches sit where they act: after the transport they belong
+	// to, before the options that change what it dials. They are rows of the
+	// form rather than lines above it, so a user who changes the device name and
+	// the address — which is what nearly every run does — reaches them first
+	// (#291).
+	rows = append(rows,
+		widgets.Row{Caption: "", Field: g.tlsCheck},
+		widgets.Row{Caption: "", Field: g.insecureCheck},
+	)
+
 	if view.Options {
 		rows = append(rows, widgets.Row{Caption: "Options", Field: g.moreBtn})
 	}
@@ -1335,13 +1357,13 @@ func (g *gui) updateBeaconRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		return
 	}
 
-	label, ok := obj.(*widgets.Text)
+	button, ok := obj.(*widget.Button)
 	if !ok {
 		return
 	}
 
-	label.SetText(deviceLabel(rows[id].Beacon))
-	label.SetOnTapped(func() { g.beaconList.Select(id) })
+	button.SetText(deviceLabel(rows[id].Beacon))
+	button.OnTapped = func() { g.beaconList.Select(id) }
 }
 
 // visibleBeacons is the rows the Devices list shows for the transport in force.
@@ -1410,7 +1432,20 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 func (g *gui) attach(sess session.Session) {
 	// A session owns its assembler: a half-received file belongs to the
 	// connection that was carrying it, and the next connection starts clean.
-	g.prepareReceive()
+	//
+	// A device joining a room is not a new connection for the one already in it.
+	// A host calls attach for every peer, and resetting the assembler on each
+	// join closed the part file a running transfer was writing — the next chunk
+	// then failed with "starts at chunk N, not 0" (#286). So the reset happens
+	// only when there was no live session, which is a real start: a reconnect
+	// clears g.sess on close first.
+	g.mu.Lock()
+	first := g.sess == nil
+	g.mu.Unlock()
+
+	if first {
+		g.prepareReceive()
+	}
 
 	g.mu.Lock()
 	g.sess = sess
@@ -1636,11 +1671,6 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 	}
 
 	g.copyToClipboard(message.line())
-}
-
-// copyAll copies the whole transcript.
-func (g *gui) copyAll() {
-	g.copyToClipboard(transcript(g.messages))
 }
 
 // copyToClipboard puts text on the clipboard and confirms it on screen.
@@ -1882,7 +1912,12 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 
 	g.wikiBtn = widgets.NewButtonWithIcon("Wiki", theme.HelpIcon(), g.openWiki, g.copyLabel)
 
-	note := g.label("Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest.")
+	noteText := "Nothing is downloaded and nothing is installed: the check only reports the version, and the release page does the rest."
+	if !selfInstallable() {
+		noteText = appInstallsFromTheReleasePage
+	}
+
+	note := g.label(noteText)
 
 	body := container.NewVBox(
 		header,

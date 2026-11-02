@@ -522,3 +522,47 @@ func assertFile(t *testing.T, path, want string) {
 		t.Errorf("%s = %q, want %q", filepath.Base(path), got, want)
 	}
 }
+
+// A window build on a phone cannot replace its own package, and it must say so
+// rather than download the APK and fail on it as if the archive were corrupt
+// (#285).
+func TestRunRefusesToReplaceAWindowBuildOnAPhone(t *testing.T) {
+	for _, goos := range []string{"android", "ios"} {
+		t.Run(goos, func(t *testing.T) {
+			// The API base is unreachable on purpose: the refusal must come
+			// before anything is fetched.
+			_, err := Run(context.Background(), http.DefaultClient, "http://127.0.0.1:1", Request{
+				Tag:      "v9.9.9",
+				GUIBuild: true,
+				GOOS:     goos,
+				GOARCH:   "arm64",
+				Target:   filepath.Join(t.TempDir(), "cthrone"),
+			})
+
+			if !errors.Is(err, ErrSelfReplace) {
+				t.Fatalf("Run on %s = %v, want ErrSelfReplace", goos, err)
+			}
+
+			if !strings.Contains(err.Error(), "release page") {
+				t.Errorf("the refusal does not say where the app comes from: %v", err)
+			}
+		})
+	}
+}
+
+// A command-line build on Android is a file in a directory the user owns —
+// Termux — so it may still replace itself. The refusal is about the package,
+// not the operating system.
+func TestRunDoesNotRefuseACommandLineBuildOnAPhone(t *testing.T) {
+	_, err := Run(context.Background(), http.DefaultClient, "http://127.0.0.1:1", Request{
+		Tag:      "v9.9.9",
+		GUIBuild: false,
+		GOOS:     "android",
+		GOARCH:   "arm64",
+		Target:   filepath.Join(t.TempDir(), "cthrone"),
+	})
+
+	if errors.Is(err, ErrSelfReplace) {
+		t.Fatalf("Run refused a command-line build on Android: %v", err)
+	}
+}
