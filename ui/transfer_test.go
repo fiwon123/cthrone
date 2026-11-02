@@ -572,3 +572,39 @@ func TestShowsText(t *testing.T) {
 		})
 	}
 }
+
+// A phone's picker names a document id, not a filename, so the type is read from
+// the bytes; and the name gets a suffix the receiver can act on, because the
+// receiver decides "draw this" from the name (#303).
+func TestAPhonesPickGetsATypeAndANameTheReceiverCanActOn(t *testing.T) {
+	dir := t.TempDir()
+
+	picture := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(picture, []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := typeOf(picture, "42"); got != "image/jpeg" {
+		t.Errorf("typeOf(nameless jpeg) = %q, want image/jpeg", got)
+	}
+
+	if got := typeOf(picture, "photo.jpg"); got != "image/jpeg" {
+		t.Errorf("typeOf(named jpeg) = %q, want image/jpeg", got)
+	}
+
+	if got := typeOf(picture, "notes.txt"); got != "text/plain" {
+		t.Errorf("typeOf(named text) = %q, want text/plain", got)
+	}
+
+	if got := withExtension("42", "image/jpeg"); got != "42.jpg" {
+		t.Errorf("withExtension(42, image/jpeg) = %q, want 42.jpg", got)
+	}
+
+	if got := withExtension("photo.jpg", "image/jpeg"); got != "photo.jpg" {
+		t.Errorf("withExtension left a named file alone as %q", got)
+	}
+
+	if got := withExtension("42", "application/octet-stream"); got != "42" {
+		t.Errorf("withExtension invented a suffix for an unknown type: %q", got)
+	}
+}
