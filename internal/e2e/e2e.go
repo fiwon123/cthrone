@@ -579,6 +579,14 @@ func (c *Conn) Fingerprint() string {
 	return discovery.Fingerprint(pub)
 }
 
+// SpeaksNamedSender reports whether this session understands a relayed text
+// frame that names its sender in the header (#431).
+//
+// The device-key handshake's peers do. A shared-secret peer may be a build that
+// predates the idea, so it is given the in-band prefix it has always read — the
+// same reason its handshake version is still accepted at all.
+func (c *Conn) SpeaksNamedSender() bool { return c.version == VersionIdentity }
+
 // Refusal returns the error that ended a single-correspondent session at this
 // package's own hand, or nil if the session closed for another reason (a drop,
 // the user stopping it, or a bus peer being dropped). A reconnect loop uses it

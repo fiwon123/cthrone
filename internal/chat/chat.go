@@ -209,7 +209,14 @@ func announceSealed(s session.Session, out io.Writer, input *line, own *sync.Onc
 
 // senderLabel is how a message is attributed. The rule lives on the message
 // itself, because a relay names the sender the same way the terminal prints it.
+// senderLabel is who to print in front of a sentence. A host relays a peer's
+// message with the sender in the frame's header, so the name is the one that
+// typed it — not the host that passed it on (#431).
 func senderLabel(m session.Message) string {
+	if frame, err := wire.Parse(m.Payload); err == nil && frame.Header.Sender != "" {
+		return frame.Header.Sender
+	}
+
 	return m.Label()
 }
 
