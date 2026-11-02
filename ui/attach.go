@@ -870,13 +870,14 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 
 	// A file this program cannot draw is offered to the device instead: a PDF to
 	// its reader, an audio clip to its player. The button appears only where it
-	// can do something — the file is on this disk, and the row is not already
-	// showing its content.
+	// can do something — the file is on this disk, the row is not already showing
+	// its content, and the platform lets a file leave the app at all (#305).
+	//
 	// A row with no local path cannot be opened or saved from here, whatever
 	// the state says: there is nothing on this disk to hand to anything. A send
 	// from a phone is exactly that row (#303).
 	switch {
-	case path == "" || drawn || m.file.inline:
+	case path == "" || drawn || m.file.inline || !canOpenFiles():
 		open.Hide()
 	case m.file.state == transferSaved || m.file.state == transferSent:
 		open.SetOnTapped(func() { g.openFile(path) })

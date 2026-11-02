@@ -135,3 +135,68 @@ func TestATextRowShowsNoIcon(t *testing.T) {
 		t.Error("a row drawing its text also drew a type icon")
 	}
 }
+
+// A phone cannot hand a private file to another app, so the row must not offer a
+// button that can only fail: Save as… is the way out, and it uses the system's
+// own file dialog (#305).
+func TestAPhoneOffersNoOpenButton(t *testing.T) {
+	previous := canOpenFiles
+	canOpenFiles = func() bool { return false }
+	t.Cleanup(func() { canOpenFiles = previous })
+
+	g := newScreenGUI(t, true)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.4 not really"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	note := &fileNote{id: "id-1", name: "report.pdf", size: 16, state: transferSaved, path: path}
+
+	pic := canvas.NewImageFromResource(nil)
+	preview := g.text("")
+	icon := widget.NewIcon(theme.FileIcon())
+	save := widgets.NewButton("Save as…", nil, nil)
+	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
+
+	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open)
+
+	if open.Visible() {
+		t.Error("a phone offered an Open button that cannot work")
+	}
+
+	if !save.Visible() {
+		t.Error("a phone hid Save as…, which is the only way to get the file out")
+	}
+}
+
+// A desktop keeps Open: the file is on its disk and the system opener can take
+// it.
+func TestADesktopKeepsTheOpenButton(t *testing.T) {
+	previous := canOpenFiles
+	canOpenFiles = func() bool { return true }
+	t.Cleanup(func() { canOpenFiles = previous })
+
+	g := newScreenGUI(t, false)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-1.4 not really"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	note := &fileNote{id: "id-1", name: "report.pdf", size: 16, state: transferSaved, path: path}
+
+	pic := canvas.NewImageFromResource(nil)
+	preview := g.text("")
+	icon := widget.NewIcon(theme.FileIcon())
+	save := widgets.NewButton("Save as…", nil, nil)
+	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
+
+	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open)
+
+	if !open.Visible() {
+		t.Error("a desktop hid the Open button, which works there")
+	}
+}
