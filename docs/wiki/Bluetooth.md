@@ -32,3 +32,28 @@ cthrone scan --bluetooth                 # list what advertises the service
 
 The security model does not change on a radio: the same device-key handshake, the
 same first-contact code, the same pin in `peers.json`.
+
+## Android: the scope decision
+
+`tinygo.org/x/bluetooth` has no Android backend — its stacks are BlueZ,
+CoreBluetooth, WinRT and embedded chips — so the binding has to be written
+against Android's Java Bluetooth APIs, here. Decided before the code, as
+[#216](https://github.com/fiwon123/cthrone/issues/216) asks:
+
+**Central first.** The case the transport exists for on a phone is a phone with
+no network joining a machine that hosts — that is the central role: scan,
+connect, discover characteristics, subscribe, write. It is the half `Dial`
+already needs, and it stays away from the GATT server and advertiser surface
+(`BluetoothLeAdvertiser`, several centrals, lifecycle) that a host adds. A host
+on a phone is a one-device room on a small screen, which is worth less than the
+phone that can join someone else's.
+
+The host role is a follow-up, not a different design: the same `Listener` seam,
+over the same framing and keepalive. Nothing in the wire protocol, the security
+model or the keepalive changes.
+
+One consequence. `bluetoothcore.Supported()` answers a single boolean today, so
+the window either offers the transport or does not. A central-only phone build
+must **connect but not host**, so the platform fact becomes a per-role
+capability — can connect, can host — rather than one flag. #206 is where that
+shape lands.

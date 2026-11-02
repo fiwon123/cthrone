@@ -41,7 +41,9 @@ release notes are **unproven**, because the machine to prove them is not here:
 
 Running the app and reporting exactly what happened — including "it worked" —
 turns an unproven claim into a proven one. That is more valuable than a patch
-today.
+today. The wiki's **[Verifying on real hardware](https://github.com/fiwon123/cthrone/wiki/Verifying-on-real-hardware)**
+page has the steps for each claim, what to record, and the issue the result goes
+on.
 
 Documentation is the other gap: a wrong sentence in the README or the wiki is a
 bug, and a shorter, clearer one is a contribution.
