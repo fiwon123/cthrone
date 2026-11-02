@@ -30,3 +30,22 @@ func TestComposerActionsReadLikeAChatApp(t *testing.T) {
 		})
 	}
 }
+
+// The message field says nothing until the user types: the hint it carried was
+// the field's first line spent on instructions (#344).
+func TestTheComposerHasNoPlaceholder(t *testing.T) {
+	for _, mobile := range []bool{false, true} {
+		name := "desktop"
+		if mobile {
+			name = "phone"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			g := newScreenGUI(t, mobile)
+
+			if got := g.entry.PlaceHolder; got != "" {
+				t.Errorf("the composer shows the placeholder %q, want none", got)
+			}
+		})
+	}
+}
