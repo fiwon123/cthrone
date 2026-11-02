@@ -305,6 +305,7 @@ gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and 
 	mkdir -p $(GUI_BUILD) && \
 	sed -e "s/@VERSION@/$$version/g" -e "s/@BUILD@/$$build/g" \
 	  mobile/AndroidManifest.xml.tmpl > mobile/AndroidManifest.xml && \
+	printf '//go:build versionfile\n\npackage main\n\nvar buildVersion = "v%s"\n' "$$version" > mobile/version_build.go && \
 	( cd mobile && $(FYNE) package \
 	  -target android/arm64 \
 	  -name $(APP_NAME) \
@@ -312,8 +313,8 @@ gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and 
 	  -icon $(ANDROID_ICON) \
 	  -app-version "$$version" \
 	  -app-build "$$build" \
-	  -tags gui ) ; status=$$?; \
-	rm -f mobile/AndroidManifest.xml; \
+	  -tags "gui versionfile" ) ; status=$$?; \
+	rm -f mobile/AndroidManifest.xml mobile/version_build.go; \
 	if [ $$status -ne 0 ]; then exit $$status; fi; \
 	[ -f mobile/$(APP_NAME).apk ] && mv mobile/$(APP_NAME).apk $(abspath $(GUI_ANDROID_APK))
 

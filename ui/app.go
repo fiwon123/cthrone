@@ -2053,14 +2053,15 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 // not, so a phone drops the version under the name instead of squeezing it. The
 // icon is the one the window and the APK carry, not a second copy.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
-	logo := widget.NewIcon(appIcon())
-	name := container.NewHBox(logo, g.textHeading("cthrone"))
-
-	if g.lay.Stack {
-		return container.NewVBox(name, g.text(version))
-	}
-
-	return container.NewBorder(nil, nil, nil, g.text(version), name)
+	// One group: the mark, the name, and the version immediately after it. The
+	// version used to sit at the right edge of the header, which on a wide window
+	// reads as "on the right side of the screen" rather than as part of the name
+	// (#343).
+	return container.NewHBox(
+		widget.NewIcon(appIcon()),
+		g.textHeading("cthrone"),
+		g.text(version),
+	)
 }
 
 // openRepository opens the project's page in the browser.
