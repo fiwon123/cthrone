@@ -1991,16 +1991,21 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	return container.NewVScroll(container.NewPadded(body))
 }
 
-// aboutHeader is the app's name above the version it is running.
+// aboutHeader is the app's mark, its name and the version it is running.
 //
-// It is a block rather than one line so a phone and a desktop draw the same
-// header: side by side, a narrow window has to either wrap the name or push the
-// version out of the pane.
+// The logo sits at the left of the name, and the version at the right of the
+// same line where the width allows it — a desktop has room, and a phone does
+// not, so a phone drops the version under the name instead of squeezing it. The
+// icon is the one the window and the APK carry, not a second copy.
 func (g *gui) aboutHeader(version string) fyne.CanvasObject {
-	return container.NewVBox(
-		g.textHeading("cthrone"),
-		g.text(version),
-	)
+	logo := widget.NewIcon(appIcon())
+	name := container.NewHBox(logo, g.textHeading("cthrone"))
+
+	if g.lay.Stack {
+		return container.NewVBox(name, g.text(version))
+	}
+
+	return container.NewBorder(nil, nil, nil, g.text(version), name)
 }
 
 // openRepository opens the project's page in the browser.
