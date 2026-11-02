@@ -58,3 +58,25 @@ Known, and being worked on
 ([#240](https://github.com/fiwon123/cthrone/issues/240)): the window is built
 before it is shown, so anything slow in the build is time the user spends looking
 at nothing.
+
+## Holding backspace on a phone deletes one character
+
+Not this app's bug, and not fixable from here: it is in the toolkit's Android
+keyboard bridge (Fyne v2.8.2), so every text field in the app behaves the same
+way.
+
+The mechanism, as far as the source shows: Fyne does not mirror the field into a
+real Android input widget. It keeps a hidden one-character field — literally a
+single space, rewritten whenever it empties — and turns a deletion of that space
+into one `KeyBackspace` for the app
+(`internal/driver/mobile/app/GoNativeActivity.java`, the `TextWatcher`;
+`keyboard.go`, `keyboardDelete`). Holding the key means the keyboard must keep
+deleting from a buffer the app keeps putting back, and the repeat stops.
+
+Tracked upstream: [fyne-io/fyne#6648](https://github.com/fyne-io/fyne/issues/6648)
+— see [#290](https://github.com/fiwon123/cthrone/issues/290) for the report.
+
+What works today: pressing gives one character each time; select all (press and
+hold the field, **Select all**) and delete, or cut, to clear a long message.
+A desktop is unaffected.
+
