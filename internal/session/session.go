@@ -424,8 +424,40 @@ func (h *Hub) deliver(m Message) {
 }
 
 // relay forwards a message to every other session in the room, named.
+//
+// The name travels in the frame's header for a peer that understands it, and in
+// front of the sentence for one that does not: a shared-secret peer may predate
+// the idea, and a room is not worth breaking its reading of the room (#431).
 func (h *Hub) relay(fromID string, m Message) {
-	h.Broadcast(fromID, RelayedPayload(m))
+	named := RelayedPayload(m)
+	inBand := inBandPayload(m)
+
+	h.mu.RLock()
+	targets := make([]Session, 0, len(h.sessions))
+
+	for id, s := range h.sessions {
+		if id != fromID {
+			targets = append(targets, s)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, s := range targets {
+		if speaker, ok := s.(namedSender); ok && speaker.SpeaksNamedSender() {
+			_ = s.Send(named)
+
+			continue
+		}
+
+		_ = s.Send(inBand)
+	}
+}
+
+// namedSender is what a session implements when its peer reads the sender from
+// a relayed frame's header. It is optional: a session that does not implement
+// it, or answers false, gets the prefix.
+type namedSender interface {
+	SpeaksNamedSender() bool
 }
 
 // Broadcast sends payload to every session except fromID, and reports how many
@@ -471,27 +503,53 @@ func (h *Hub) Count() int {
 	return len(h.sessions)
 }
 
-// RelayedPayload is what a relay forwards for a message: the payload, named.
+// RelayedPayload is what a relay forwards for a message to a peer that reads
+// the sender from the header: the payload, named there.
 //
-// Text is prefixed with the sender's label, because the wire carries no
-// per-message metadata for an unwrapped line — the frame format only wraps
-// files, and wrapping text would make an older peer refuse it. A file frame is
-// re-encoded with the sender in its header instead, which is additive: an older
-// peer ignores the field and still assembles the file.
+// Text is wrapped in a frame to carry the name, which is the one case the
+// envelope exists for besides a sentence that begins with its magic. A peer
+// that speaks the device-key handshake reads it; one that may predate the idea
+// gets inBandPayload instead (#431).
 func RelayedPayload(m Message) []byte {
 	label := m.Label()
 
 	if wire.IsFrame(m.Payload) {
-		frame, err := wire.Parse(m.Payload)
-		if err == nil {
-			// A text frame is a sentence the sender had to wrap because it
-			// began with the magic. Unwrapping it here keeps the rule for
-			// text — the label goes in front of the sentence — and an older
-			// peer reads it as ordinary text.
-			if frame.Header.Kind == wire.KindText {
-				return []byte(label + ": " + string(frame.Payload))
+		// The magic but not a frame is a sentence that begins with it: it is
+		// wrapped as text below, with the name, like any other.
+		if frame, err := wire.Parse(m.Payload); err == nil {
+			frame.Header.Sender = label
+
+			if encoded, err := wire.Encode(frame.Header, frame.Payload); err == nil {
+				return encoded
 			}
 
+			// A frame that cannot be re-encoded is forwarded as it is: the
+			// receiver still gets the bytes, and losing the attribution is
+			// better than losing the chunk.
+			return m.Payload
+		}
+	}
+
+	encoded, err := wire.Encode(wire.Header{Kind: wire.KindText, Sender: label}, m.Payload)
+	if err != nil {
+		return inBandPayload(m)
+	}
+
+	return encoded
+}
+
+// inBandPayload is the relay a peer without the header field understands: the
+// label in front of the sentence, which is what a host has always sent.
+func inBandPayload(m Message) []byte {
+	label := m.Label()
+
+	if wire.IsFrame(m.Payload) {
+		frame, err := wire.Parse(m.Payload)
+		if err == nil && frame.Header.Kind == wire.KindText {
+			return []byte(label + ": " + string(frame.Payload))
+		}
+
+		if err == nil && frame.Header.Kind != wire.KindFile && frame.Header.Kind != wire.KindFileEnd {
 			frame.Header.Sender = label
 
 			if encoded, err := wire.Encode(frame.Header, frame.Payload); err == nil {
@@ -499,9 +557,6 @@ func RelayedPayload(m Message) []byte {
 			}
 		}
 
-		// A frame that cannot be re-encoded is forwarded as it is: the receiver
-		// still gets the bytes, and losing the attribution is better than
-		// losing the chunk.
 		return m.Payload
 	}
 

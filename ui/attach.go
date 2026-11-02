@@ -696,6 +696,12 @@ func (g *gui) receiveFrame(from string, payload []byte) {
 		return
 	}
 
+	// A host relays a message with the sender in the header, so the row names
+	// the device that typed it rather than the host that passed it on (#431).
+	if frame.Header.Sender != "" {
+		from = frame.Header.Sender
+	}
+
 	if frame.Header.Kind == wire.KindText {
 		g.addMessage(chatMessage{from: from, text: string(frame.Payload)})
 

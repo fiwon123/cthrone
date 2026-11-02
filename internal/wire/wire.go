@@ -171,7 +171,10 @@ func IsFrame(data []byte) bool {
 // wrapped in a KindText frame, so it arrives as the sentence it is instead of
 // as the damaged frame it looks like. Parse unwraps it.
 func Encode(h Header, payload []byte) ([]byte, error) {
-	if h.Kind == KindText && !IsFrame(payload) {
+	// A plain sentence travels unwrapped, so a peer that predates the envelope
+	// reads it as text (#201). A sentence a host relays is the exception: it
+	// has to carry the sender, and there is nowhere else to put it (#431).
+	if h.Kind == KindText && h.Sender == "" && !IsFrame(payload) {
 		return payload, nil
 	}
 

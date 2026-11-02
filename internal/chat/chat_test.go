@@ -617,3 +617,20 @@ func TestRunHostDoesNotReportAPeerLeaving(t *testing.T) {
 		t.Fatal("run did not return after the session closed")
 	}
 }
+
+// A relayed message is printed under the name that typed it, not under the
+// host's (#431).
+func TestSenderLabelPrefersTheRelayedSender(t *testing.T) {
+	frame, err := wire.Encode(wire.Header{Kind: wire.KindText, Sender: "alice (10.0.0.9)"}, []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := senderLabel(session.Message{From: "host", Addr: "10.0.0.1", Payload: frame}); got != "alice (10.0.0.9)" {
+		t.Errorf("senderLabel() = %q, want the relayed sender", got)
+	}
+
+	if got := senderLabel(session.Message{From: "host", Addr: "10.0.0.1", Payload: []byte("hello")}); got != "host (10.0.0.1)" {
+		t.Errorf("senderLabel() = %q, want the transport's peer", got)
+	}
+}

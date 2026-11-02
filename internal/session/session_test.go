@@ -13,6 +13,16 @@ type fakeSession struct {
 	sent [][]byte
 }
 
+// namedFake is a session whose peer reads the sender from a relayed frame's
+// header.
+type namedFake struct{ *fakeSession }
+
+func newNamedFake(id, remote string) *namedFake {
+	return &namedFake{newFake(id, remote)}
+}
+
+func (n *namedFake) SpeaksNamedSender() bool { return true }
+
 func newFake(id, remote string) *fakeSession {
 	return &fakeSession{Base: NewBase(id, remote)}
 }
@@ -243,28 +253,55 @@ func TestRelayedPayloadNamesTheSenderOfAFile(t *testing.T) {
 	}
 }
 
-// TestRelayedPayloadUnwrapsATextFrame covers the sentence a sender had to wrap
-// because it begins with the magic: the label rule is the same for it as for
-// any other line, and an older peer that knows nothing of the wrapper reads a
-// sentence rather than a frame.
-func TestRelayedPayloadUnwrapsATextFrame(t *testing.T) {
-	frame, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte("CTH1 says hello"))
+// A relayed sentence carries its sender in the header, so a window can attribute
+// it to the device that typed it rather than to the host that passed it on
+// (#431).
+func TestRelayedPayloadNamesTheSender(t *testing.T) {
+	tests := []struct {
+		name    string
+		msg     Message
+		payload string
+	}{
+		{"plain text", Message{From: "alice", Addr: "192.168.0.5", Payload: []byte("hello")}, "hello"},
+		{"a sentence that begins with the magic", Message{From: "alice", Payload: []byte("CTH1 says hello")}, "CTH1 says hello"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			relayed := RelayedPayload(tt.msg)
+
+			if !wire.IsFrame(relayed) {
+				t.Fatalf("the relayed text is not a frame: %q", relayed)
+			}
+
+			frame, err := wire.Parse(relayed)
+			if err != nil {
+				t.Fatalf("the relayed text does not parse: %v", err)
+			}
+
+			if frame.Header.Kind != wire.KindText {
+				t.Errorf("kind = %q, want %q", frame.Header.Kind, wire.KindText)
+			}
+
+			if got := frame.Header.Sender; got != tt.msg.Label() {
+				t.Errorf("sender = %q, want %q", got, tt.msg.Label())
+			}
+
+			if got := string(frame.Payload); got != tt.payload {
+				t.Errorf("payload = %q, want %q", got, tt.payload)
+			}
+		})
+	}
+}
+
+// A peer that does not understand the header is given the label in front of the
+// sentence, which is what a host has always sent.
+func TestInBandPayloadPrefixesText(t *testing.T) {
+	framed, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte("CTH1 says hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	relayed := RelayedPayload(Message{From: "alice", Addr: "192.168.0.5", Payload: frame})
-
-	if got := string(relayed); got != "alice (192.168.0.5): CTH1 says hello" {
-		t.Errorf("RelayedPayload = %q, want the labelled line", got)
-	}
-
-	if wire.IsFrame(relayed) {
-		t.Errorf("the relayed line is still a frame: %q", relayed)
-	}
-}
-
-func TestRelayedPayloadPrefixesText(t *testing.T) {
 	tests := []struct {
 		name string
 		msg  Message
@@ -273,14 +310,47 @@ func TestRelayedPayloadPrefixesText(t *testing.T) {
 		{"name and address", Message{From: "alice", Addr: "192.168.0.5", Payload: []byte("hello")}, "alice (192.168.0.5): hello"},
 		{"name only", Message{From: "alice", Payload: []byte("hello")}, "alice: hello"},
 		{"unnamed peer", Message{Payload: []byte("hello")}, "peer: hello"},
+		{"a sentence the sender had to wrap", Message{From: "alice", Payload: framed}, "alice: CTH1 says hello"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := string(RelayedPayload(tt.msg)); got != tt.want {
-				t.Errorf("RelayedPayload = %q, want %q", got, tt.want)
+			if got := string(inBandPayload(tt.msg)); got != tt.want {
+				t.Errorf("inBandPayload = %q, want %q", got, tt.want)
+			}
+
+			if wire.IsFrame(inBandPayload(tt.msg)) {
+				t.Error("the in-band form is a frame")
 			}
 		})
+	}
+}
+
+// A relayed message reaches a peer that reads the header as a named frame, and
+// one that does not as the labelled sentence: both are attributed, and neither
+// is handed bytes it cannot read (#431).
+func TestRelayPicksTheFormThePeerReads(t *testing.T) {
+	h := NewHub()
+
+	modern := newNamedFake("modern", "10.0.0.1")
+	legacy := newFake("legacy", "10.0.0.2")
+
+	h.Register(modern)
+	h.Register(legacy)
+
+	h.relay("from", Message{From: "alice", Addr: "10.0.0.9", Payload: []byte("hello")})
+
+	if len(modern.sent) != 1 || !wire.IsFrame(modern.sent[0]) {
+		t.Fatalf("the modern peer got %q, want a named frame", modern.sent)
+	}
+
+	frame, err := wire.Parse(modern.sent[0])
+	if err != nil || frame.Header.Sender != "alice (10.0.0.9)" {
+		t.Errorf("the modern peer's frame names %q, want alice: %v", frame.Header.Sender, err)
+	}
+
+	if len(legacy.sent) != 1 || string(legacy.sent[0]) != "alice (10.0.0.9): hello" {
+		t.Errorf("the legacy peer got %q, want the labelled line", legacy.sent)
 	}
 }
 
