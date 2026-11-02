@@ -2,6 +2,7 @@ package websockethandler
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -12,6 +13,12 @@ import (
 	"github.com/fiwon123/cthrone/internal/session"
 	"github.com/gorilla/websocket"
 )
+
+// ErrRefused is a host that answered the dial with a refusal rather than
+// letting it through: it wants a shared secret this client did not offer, or a
+// plaintext client reached a host that serves TLS. A caller that reconnects
+// uses it to tell "the host is not back yet" from "the host said no" (#326).
+var ErrRefused = errors.New("the host refused the connection")
 
 // dial connects to the host. It waits a moment first: the host is often
 // started right before the client connects to it. It is a variable so a
@@ -70,9 +77,9 @@ func openConnectionDial(address string, port int, token string, useTLS bool, tls
 		if resp != nil {
 			switch resp.StatusCode {
 			case http.StatusUnauthorized:
-				return nil, url, fmt.Errorf("the host refused the connection: it needs the shared secret")
+				return nil, url, fmt.Errorf("%w: it needs the shared secret", ErrRefused)
 			case http.StatusBadRequest:
-				return nil, url, fmt.Errorf("the host refused the connection: it is serving TLS (the default), and plaintext cannot reach it — start the host with --no-tls, or use a client that speaks TLS")
+				return nil, url, fmt.Errorf("%w: it is serving TLS (the default), and plaintext cannot reach it — start the host with --no-tls, or use a client that speaks TLS", ErrRefused)
 			}
 		}
 

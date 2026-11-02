@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -303,6 +304,76 @@ func TestWrongSecretIsRefused(t *testing.T) {
 
 	if got := p.wa.received(); len(got) != 0 {
 		t.Fatalf("a peer with the wrong secret got %q through", got)
+	}
+}
+
+// A refusal is remembered as an error identity, not only as a sentence in the
+// close reason: a client that lost its link decides by it whether dialling
+// again is worth it, and a peer that refused once would refuse again (#326).
+func TestARefusalIsRemembered(t *testing.T) {
+	other := []byte("a-different-shared-secret-02")
+
+	p := newPair(t, secret, other, Single)
+
+	if !p.a.IsClosed() {
+		t.Fatal("a peer without the secret was not refused")
+	}
+
+	if got := p.a.Refusal(); !errors.Is(got, ErrMAC) {
+		t.Fatalf("alice's refusal is %v, want a MAC failure", got)
+	}
+}
+
+// A bus drops the peer that is out of line and keeps the room, so that is not a
+// refusal of the session: a client on a subject has nothing to redial (#326).
+func TestABusDropIsNotASessionRefusal(t *testing.T) {
+	other := []byte("a-different-shared-secret-02")
+
+	p := newPair(t, secret, other, Bus)
+
+	if p.a.IsClosed() {
+		t.Fatal("a bus closed its session over one peer that could not authenticate")
+	}
+
+	if got := p.a.Refusal(); got != nil {
+		t.Fatalf("a bus session recorded a refusal (%v) for one dropped peer", got)
+	}
+}
+
+// A session the user closes is not a refusal either: the caller knows it asked
+// for the close, and a reconnection must not be stopped by it.
+func TestAClosedSessionIsNotARefusal(t *testing.T) {
+	p := newPair(t, secret, secret, Single)
+
+	p.a.Close("closed from the app")
+
+	if got := p.a.Refusal(); got != nil {
+		t.Fatalf("a session closed by the caller recorded a refusal: %v", got)
+	}
+}
+
+// The set a reconnect decision reads: a protocol failure is an answer and stops
+// the loop; a transport error is a drop and does not (#326).
+func TestIsRefusalTellsAnAnswerFromADrop(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"mac", fmt.Errorf("%w: wrong secret", ErrMAC), true},
+		{"confirm", fmt.Errorf("%w: nobody answered", ErrConfirm), true},
+		{"pin", fmt.Errorf("%w: %w", ErrPin, errors.New("disk full")), true},
+		{"transport", errors.New("write tcp: broken pipe"), false},
+		{"wrapped transport", fmt.Errorf("sending confirm: %w", errors.New("i/o timeout")), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsRefusal(tt.err); got != tt.want {
+				t.Errorf("IsRefusal(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 

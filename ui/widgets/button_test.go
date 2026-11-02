@@ -121,6 +121,19 @@ func TestCopyButtonSetTextLeavesTheCopyLabelAlone(t *testing.T) {
 	}
 }
 
+// SetIcon exists for a button whose meaning changes with its state: the
+// transcript's player is Play and Stop with one widget (#306).
+func TestCopyButtonSetIconChangesTheIcon(t *testing.T) {
+	newCopyButtonApp(t)
+
+	button := NewButtonWithIcon("Play", theme.MediaPlayIcon(), nil, nil)
+	button.SetIcon(theme.MediaStopIcon())
+
+	if button.button.Icon != theme.MediaStopIcon() {
+		t.Errorf("icon = %v, want the Stop icon", button.button.Icon)
+	}
+}
+
 func TestCopyButtonSetCopyTextFollowsAChangingLabel(t *testing.T) {
 	newCopyButtonApp(t)
 

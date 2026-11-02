@@ -15,6 +15,12 @@ import (
 	"github.com/fiwon123/cthrone/internal/session"
 )
 
+// ErrRefused is a host that answered the dial with a refusal. It is the
+// handler's error re-exported so a caller that retries does not have to reach
+// into the handler to tell "the host is not there yet" from "the host said no"
+// (#326).
+var ErrRefused = websockethandler.ErrRefused
+
 // connect is the function that connects to the host. It is a variable so a
 // test can replace it: the connection needs a host to talk to, and a test
 // that cannot reach one cannot check what the command does with the error.

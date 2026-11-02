@@ -50,9 +50,14 @@ import (
 // They are variables so a test can drive Connect and Host without an adapter:
 // there is no radio in a test, and what is being checked is the window's side of
 // the call — which target it names, what it shows, and how it stops.
+//
+// The two network dials are variables for the same reason: a test drives a
+// dropped client and its reconnection without a host to talk to (#326).
 var (
 	openBluetoothSession = bluetoothcore.OpenSession
 	openBluetoothServer  = bluetoothcore.OpenServer
+	openWebsocketSession = websocketcore.Dial
+	openNATSSession      = natscore.OpenSession
 )
 
 // copyHintDuration is how long the transcript's "Copied" confirmation stays on
@@ -61,6 +66,19 @@ const copyHintDuration = 2 * time.Second
 
 // copyHintMargin keeps the "Copied" popup off the bottom edge of the window.
 const copyHintMargin = 48
+
+// reconnectBase is how long a dropped client waits before asking for its host
+// again. Each attempt doubles the wait up to reconnectMax, so a host that comes
+// back is met within a minute and one that does not is asked once a minute
+// rather than all the time (#326).
+//
+// It is a variable so the tests can run the schedule in milliseconds: a test
+// that waited a real second per attempt would be slow, not more convincing.
+var reconnectBase = time.Second
+
+// reconnectMax caps the wait. A client that has been away a while settles
+// here instead of backing off to hours.
+const reconnectMax = time.Minute
 
 // bluetoothScanTimeout is how long a radio scan listens. It matches the value
 // the terminal scan uses: a device that was slow to advertise is exactly the one
@@ -176,6 +194,26 @@ type gui struct {
 	incoming  map[string]*incomingTransfer
 	assembler *wire.Assembler
 
+	// audio is the window's one sound device, made on the first Play: a window
+	// that never plays anything never touches the sound card (#306). audioPath
+	// is the clip it is sounding, audioGen tells a decode or a clock ticker that
+	// a newer action has superseded it, and audioClock is the row widget that
+	// ticker writes to — dropped by whichever row is painted next, because the
+	// list reuses that widget for another message.
+	//
+	// audioDurations remembers a length once a clip has been decoded, so a
+	// repaint can show it without decoding the file again; the decode runs
+	// beside the UI, so the map is guarded by mu. playableFiles is the same
+	// answer per path, and is only touched while painting, like the picture and
+	// text caches.
+	audio          audioEngine
+	audioPath      string
+	audioGen       int
+	audioDuration  time.Duration
+	audioClock     *widgets.Text
+	audioDurations map[string]time.Duration
+	playableFiles  map[string]bool
+
 	// devices
 	beacons    []device
 	beaconList *widget.List
@@ -236,6 +274,21 @@ type gui struct {
 	// so an attempt that opens a host after the user already stopped is closed
 	// instead of being installed as the live one.
 	startSeq int
+
+	// link is the client connection this window dialled, kept so a session
+	// that ends on its own can be asked for again with the same host,
+	// transport and credential (#326). It is nil while this window hosts and
+	// while it has never connected: a host is what others reconnect to, not
+	// something that reconnects.
+	link *dialLink
+
+	// reconnecting says a dropped client is being retried, which the header
+	// shows. retryCtx is the generation that owns the retry, so a Stop, a new
+	// Host/Connect or a second drop makes an older attempt a no-op instead of
+	// a second loop.
+	reconnecting bool
+	retryCtx     context.Context
+	retryCancel  context.CancelFunc
 }
 
 // Run starts the Fyne GUI.
@@ -494,6 +547,13 @@ func (g *gui) build() {
 			icon := widget.NewIcon(theme.FileIcon())
 			icon.Hide()
 
+			// A clip this build can decode plays in the row itself: seven
+			// seconds of speech does not deserve a second window, and on a
+			// phone handing the file to another app was the only option left
+			// (#305, #306). The clock beside the button is the length, or how
+			// far into the clip the sound has got.
+			audio := newAudioRow(g)
+
 			// The sender has a line of its own, in a colour of its own, so a room
 			// of three is readable at a glance (#346). It is a canvas.Text
 			// because that carries any colour; a themed label takes a colour
@@ -503,7 +563,7 @@ func (g *gui) build() {
 
 			caption := container.NewVBox(sender, row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box)
 		},
 		g.updateChatRow,
 	)
@@ -861,18 +921,33 @@ func (g *gui) rebuildSetupForm() {
 // already running or a host or a session already holds it. Both buttons are
 // disabled while it is reserved, so a second press cannot bind the same port
 // twice — the failure a user reads as "hosting is broken".
+//
+// A retry a dropped client left running is cancelled here: the user is asking
+// for a different connection, and two loops dialling would race to become the
+// live one (#326).
 func (g *gui) beginStart() (int, bool) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	if g.starting || g.stopping || g.sess != nil || g.server != nil {
+		g.mu.Unlock()
 		return 0, false
 	}
 
+	cancel := g.retryCancel
+	g.reconnecting = false
+	g.retryCtx, g.retryCancel = nil, nil
+
 	g.startSeq++
 	g.starting = true
+	seq := g.startSeq
 
-	return g.startSeq, true
+	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	return seq, true
 }
 
 // finishStart ends attempt seq and, when it is still the current one, runs
@@ -897,6 +972,55 @@ func (g *gui) finishStart(seq int, install func()) bool {
 	return true
 }
 
+// dialLink is everything a Connect asks of a transport, captured when the user
+// starts it. A reconnection dials with the choices the session began with, not
+// with whatever the form holds by the time it tries again.
+type dialLink struct {
+	mode    transportMode
+	host    string
+	data    *appdata.Data
+	tls     auth.TLS
+	opts    pairing.Options
+	broker  string
+	subject string
+}
+
+// dialClient opens the client session a link describes. Connect and a
+// reconnection call the same function, so the two cannot drift apart.
+func dialClient(l *dialLink) (session.Session, error) {
+	switch l.mode {
+	case transportNATS:
+		return openNATSSession([]string{l.subject}, l.data, l.opts, l.broker, l.tls)
+
+	case transportBluetooth:
+		return openBluetoothSession(targetArg(l.host), l.data, l.opts)
+
+	default:
+		return openWebsocketSession([]string{l.host}, l.data, l.opts, l.tls)
+	}
+}
+
+// connectedStatus is what the window says when a link is up, in the words of
+// the transport it is on. The first connection and a restored one differ only
+// in the verb, so a user can tell that the window came back by itself.
+func connectedStatus(l *dialLink, again bool) string {
+	verb := "Connected"
+	if again {
+		verb = "Reconnected"
+	}
+
+	switch l.mode {
+	case transportNATS:
+		return verb + " through NATS on " + l.broker
+
+	case transportBluetooth:
+		return verb + " over Bluetooth — chatting"
+
+	default:
+		return verb + " to " + l.host + " — chatting"
+	}
+}
+
 // connect joins a host (websocket), a broker (NATS), or a Bluetooth device.
 func (g *gui) connect() {
 	host := strings.TrimSpace(g.hostEntry.Text)
@@ -916,34 +1040,33 @@ func (g *gui) connect() {
 		return
 	}
 
-	data := g.data()
-	tlsConf := g.tls()
-	opts := g.pairingOptions()
-	broker := g.natsURLEntry.Text
-	subject := g.subject()
+	// The form is read once, here: a reconnection replays this link rather
+	// than whatever the entries hold a minute later (#326).
+	link := &dialLink{
+		mode:    mode,
+		host:    host,
+		data:    g.data(),
+		tls:     g.tls(),
+		opts:    g.pairingOptions(),
+		broker:  g.natsURLEntry.Text,
+		subject: g.subject(),
+	}
 
 	g.setStatus("Connecting…")
 	g.tabs.SelectIndex(0)
 	g.updateButtons()
 
 	go func() {
-		var (
-			sess session.Session
-			err  error
-		)
+		sess, err := dialClient(link)
 
-		switch mode {
-		case transportNATS:
-			sess, err = natscore.OpenSession([]string{subject}, data, opts, broker, tlsConf)
-
-		case transportBluetooth:
-			sess, err = openBluetoothSession(targetArg(host), data, opts)
-
-		default:
-			sess, err = websocketcore.Dial([]string{host}, data, opts, tlsConf)
-		}
-
-		if !g.finishStart(seq, func() { g.sess = sess }) {
+		if !g.finishStart(seq, func() {
+			// Only a dial that worked becomes the window's link: a failed
+			// attempt leaves nothing to reconnect to (#326).
+			if err == nil {
+				g.sess = sess
+				g.link = link
+			}
+		}) {
 			// Stop arrived while the dial was in flight: a session nobody asked
 			// for is closed rather than attached, and its failure is not the
 			// user's to read — they stopped before it arrived.
@@ -962,15 +1085,7 @@ func (g *gui) connect() {
 			return
 		}
 
-		switch mode {
-		case transportNATS:
-			g.setStatus("Connected through NATS on " + broker)
-		case transportBluetooth:
-			g.setStatus("Connected over Bluetooth — chatting")
-		default:
-			g.setStatus("Connected to " + host + " — chatting")
-		}
-
+		g.setStatus(connectedStatus(link, false))
 		g.noteFirstContact(sess)
 		g.attach(sess)
 	}()
@@ -1244,10 +1359,19 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint, own
 // a half-written file, and leaving it running would leave one behind.
 func (g *gui) stop() {
 	g.cancelTransfers()
+	g.stopAudio()
+
+	if g.chatList != nil {
+		g.chatList.Refresh()
+	}
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
+	cancel := g.retryCancel
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.link = nil
+	g.reconnecting = false
+	g.retryCtx, g.retryCancel = nil, nil
 	g.liveSessions = 0
 
 	// A Start that is still in flight is cancelled: its server closes itself
@@ -1256,6 +1380,10 @@ func (g *gui) stop() {
 	g.startSeq++
 	g.stopping = true
 	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 
 	g.finishReceive()
 	g.hideThisDevice()
@@ -1291,12 +1419,24 @@ func (g *gui) stop() {
 func (g *gui) shutdown() {
 	g.stopCopyHint()
 
+	// The device goes back to the machine before the process does, and no
+	// widget is touched: there is no event loop left to return to.
+	g.stopAudio()
+
 	g.mu.Lock()
 	sess, server := g.sess, g.server
+	cancel := g.retryCancel
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.link = nil
+	g.reconnecting = false
+	g.retryCtx, g.retryCancel = nil, nil
 	g.liveSessions = 0
 	g.startSeq++
 	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 
 	if sess != nil {
 		sess.Close("the app is closing")
@@ -1633,7 +1773,177 @@ func (g *gui) attach(sess session.Session) {
 
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
+
+		// A close that arrives while this session is still the live one is a
+		// link that went away without the user asking: Stop and the window
+		// closing clear the session before they close it. A client asks for
+		// that link again; a host has nothing to dial, and a refusal is an
+		// answer rather than a drop, so neither starts a loop (#326).
+		if closed {
+			g.reconnectAfterDrop(sess, reason)
+		}
 	})
+}
+
+// reconnectAfterDrop starts the retry loop when a session that just closed was
+// a client the window should ask for again.
+func (g *gui) reconnectAfterDrop(sess session.Session, reason string) {
+	// A refusal is an answer, not a drop: dialling again would ask the same
+	// question of a peer that has already said no (#326). The session records
+	// it as an error identity, so this does not read the close reason.
+	if refused, ok := sess.(interface{ Refusal() error }); ok && refused.Refusal() != nil {
+		return
+	}
+
+	g.mu.Lock()
+	link := g.link
+	if link == nil || g.reconnecting || g.stopping {
+		g.mu.Unlock()
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	g.reconnecting = true
+	g.retryCtx = ctx
+	g.retryCancel = cancel
+	g.mu.Unlock()
+
+	fyne.Do(g.updateButtons)
+	fyne.Do(g.refreshConnectionState)
+
+	go g.retryLink(ctx, link, reason)
+}
+
+// retryLink asks for the same link again until it is back, the user stops, or
+// a refusal answers the question.
+func (g *gui) retryLink(ctx context.Context, link *dialLink, reason string) {
+	for attempt := 1; ; attempt++ {
+		wait := reconnectDelay(attempt)
+		g.setStatus(fmt.Sprintf("Disconnected: %s — reconnecting in %s (attempt %d)", reason, reconnectWait(wait), attempt))
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			return
+		case <-timer.C:
+		}
+
+		sess, err := dialClient(link)
+
+		if err != nil {
+			if refusedDial(err) {
+				g.endReconnect(ctx, "Disconnected: "+err.Error())
+
+				return
+			}
+
+			continue
+		}
+
+		if !g.takeReconnect(ctx, sess) {
+			sess.Close("cancelled")
+
+			return
+		}
+
+		g.noteFirstContact(sess)
+		g.attach(sess)
+		g.setStatus(connectedStatus(link, true))
+		g.addMessage(chatMessage{from: "system", text: "reconnected"})
+		fyne.Do(g.refreshConnectionState)
+		fyne.Do(g.updateButtons)
+
+		return
+	}
+}
+
+// takeReconnect installs a session a retry dialled, unless a Stop, a new start,
+// or a later attempt already took over. It sets g.sess under the same lock so a
+// Connect pressed in between is refused rather than racing this one.
+func (g *gui) takeReconnect(ctx context.Context, sess session.Session) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if !g.reconnecting || g.retryCtx != ctx {
+		return false
+	}
+
+	g.reconnecting = false
+	g.retryCtx, g.retryCancel = nil, nil
+	g.sess = sess
+
+	return true
+}
+
+// endReconnect stops the loop this ctx owns and leaves the window offline with
+// the sentence in status: how a refusal answers the question the loop was
+// asking.
+func (g *gui) endReconnect(ctx context.Context, status string) {
+	g.mu.Lock()
+	owns := g.retryCtx == ctx
+	if owns {
+		g.reconnecting = false
+		g.retryCtx, g.retryCancel = nil, nil
+	}
+	g.mu.Unlock()
+
+	if !owns {
+		return
+	}
+
+	g.setStatus(status)
+	fyne.Do(g.updateButtons)
+	fyne.Do(g.refreshConnectionState)
+}
+
+// reconnectDelay is how long to wait before attempt n, counting from 1: the
+// base, doubling, capped at reconnectMax.
+func reconnectDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+
+	delay := reconnectBase
+	for i := 1; i < attempt && delay < reconnectMax; i++ {
+		delay *= 2
+	}
+
+	if delay > reconnectMax {
+		return reconnectMax
+	}
+
+	return delay
+}
+
+// reconnectWait is the delay as the status line says it: whole seconds, so
+// "in 4s" rather than "in 4.0000001s".
+func reconnectWait(d time.Duration) string {
+	if d >= time.Minute {
+		return "60s"
+	}
+
+	secs := (d + time.Second - 1) / time.Second
+	if secs < 1 {
+		secs = 1
+	}
+
+	return fmt.Sprintf("%ds", secs)
+}
+
+// refusedDial reports whether a failed dial was the peer saying no rather than
+// the host not being there yet. A retry that meets a refusal stops: the same
+// question would get the same answer (#326).
+//
+// The end-to-end layer names the failures of its own that are answers; the
+// transport and the pin stores add the ones they own.
+func refusedDial(err error) bool {
+	return e2e.IsRefusal(err) ||
+		errors.Is(err, websocketcore.ErrRefused) ||
+		errors.Is(err, discovery.ErrIdentityChanged) ||
+		errors.Is(err, discovery.ErrCertificateChanged)
 }
 
 // composerChanged runs on every change of the message field.
@@ -1738,7 +2048,7 @@ func (g *gui) refreshConnectionState() {
 	}
 
 	g.mu.Lock()
-	sess, server, starting, peer := g.sess, g.server, g.starting, g.peerName
+	sess, server, starting, reconnecting, peer := g.sess, g.server, g.starting, g.reconnecting, g.peerName
 	g.mu.Unlock()
 
 	// One line, one baseline: the mark is a character in the same text as the
@@ -1748,6 +2058,8 @@ func (g *gui) refreshConnectionState() {
 	switch {
 	case starting:
 		text, importance = "● connecting…", widget.WarningImportance
+	case reconnecting:
+		text, importance = "● reconnecting…", widget.WarningImportance
 	case server != nil:
 		text, importance = "● hosting", widget.SuccessImportance
 	case sess != nil:
@@ -1769,6 +2081,7 @@ func (g *gui) updateButtons() {
 	g.mu.Lock()
 	hasSession := g.sess != nil
 	hasServer := g.server != nil
+	reconnecting := g.reconnecting
 	busy := g.starting || g.stopping
 	g.mu.Unlock()
 
@@ -1780,7 +2093,9 @@ func (g *gui) updateButtons() {
 		g.attachBtn.Disable()
 	}
 
-	if hasSession || hasServer {
+	// Stop is how a user ends a retry loop as well as a session: without it
+	// the only way out of "reconnecting in 60s" would be to close the window.
+	if hasSession || hasServer || reconnecting {
 		g.stopBtn.Enable()
 	} else {
 		g.stopBtn.Disable()
@@ -1879,6 +2194,13 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	save, _ := row.Objects[3].(*widgets.CopyButton)
 	open, _ := row.Objects[4].(*widgets.CopyButton)
 
+	// The player is the sixth object, and optional: a row built before it was
+	// added still paints as the file row it was.
+	var audio audioRow
+	if len(row.Objects) > 5 {
+		audio, _ = audioRowOf(row.Objects[5])
+	}
+
 	var label *widgets.Text
 	var icon *widget.Icon
 	var sender *canvas.Text
@@ -1914,6 +2236,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, preview, icon, save, open)
+	g.fillAudioRow(m, audio)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {

@@ -68,6 +68,18 @@ pick a folder the file manager can see, then open the file from there.
 
 A desktop opens these with the system's own app, as before.
 
+## Play does nothing, or the row says the clip cannot be played
+
+The in-app player handles **WAV** and **MP3** only; a row in another format
+(Ogg, AAC/M4A, FLAC) has no Play button, and **Open**/**Save as…** are the way to
+hear it. A clip past about three minutes is refused rather than loaded, and the
+status line says so.
+
+If a WAV or MP3 has a Play button and still makes no sound, the device could not
+be opened: the app asks the operating system for one on the first **Play**, and
+the status line carries the reason. On Linux that means a working PulseAudio or
+ALSA setup; the app keeps working, silently, without one.
+
 ## Holding backspace on a phone deletes one character
 
 Not this app's bug, and not fixable from here: it is in the toolkit's Android
