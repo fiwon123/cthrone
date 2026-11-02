@@ -228,6 +228,11 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.14.1` puts the package count right. `gui/` — the window binary's own entry
+point, added in v0.12.2 — has its test, and the coverage claim in the working
+instructions still said 32 packages and did not list it. It says 33 and names
+the package (#426). No code changed.
+
 `v0.14.0` plays an animated picture. A GIF in the conversation moves: Play and
 Stop, a clock, and a seek bar that jumps through it, decoded with the standard
 library on every platform — the first half of the video request, and the player
