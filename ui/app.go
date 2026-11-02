@@ -192,6 +192,11 @@ type gui struct {
 	hub    *session.Hub
 	server liveServer
 
+	// liveSessions is how many sessions this window holds. A host holds one per
+	// device in its room, and the receiver is prepared for the first and closed
+	// with the last (#342).
+	liveSessions int
+
 	// What the transcript has already decoded or read, by path, so a repaint
 	// does not do the I/O again (#321). They are only touched while painting,
 	// which happens on the UI goroutine.
@@ -1207,6 +1212,7 @@ func (g *gui) stop() {
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.liveSessions = 0
 
 	// A Start that is still in flight is cancelled: its server closes itself
 	// when it opens instead of becoming the live one. Until this stop has
@@ -1252,6 +1258,7 @@ func (g *gui) shutdown() {
 	g.mu.Lock()
 	sess, server := g.sess, g.server
 	g.sess, g.server, g.hub = nil, nil, nil
+	g.liveSessions = 0
 	g.startSeq++
 	g.mu.Unlock()
 
@@ -1467,21 +1474,43 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 // --- session plumbing -------------------------------------------------
 
 // attach makes sess the live session and renders what it carries.
-func (g *gui) attach(sess session.Session) {
-	// A session owns its assembler: a half-received file belongs to the
-	// connection that was carrying it, and the next connection starts clean.
-	//
-	// A device joining a room is not a new connection for the one already in it.
-	// A host calls attach for every peer, and resetting the assembler on each
-	// join closed the part file a running transfer was writing — the next chunk
-	// then failed with "starts at chunk N, not 0" (#286). So the reset happens
-	// only when there was no live session, which is a real start: a reconnect
-	// clears g.sess on close first.
+// sessionJoined counts one more live session and reports whether it is the
+// first, which is when the receiver has to be prepared.
+func (g *gui) sessionJoined() bool {
 	g.mu.Lock()
-	first := g.sess == nil
-	g.mu.Unlock()
+	defer g.mu.Unlock()
 
-	if first {
+	g.liveSessions++
+
+	return g.liveSessions == 1
+}
+
+// sessionLeft counts one out and reports whether the room is now empty, which is
+// when the receiver goes away.
+func (g *gui) sessionLeft() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.liveSessions > 0 {
+		g.liveSessions--
+	}
+
+	return g.liveSessions == 0
+}
+
+func (g *gui) attach(sess session.Session) {
+	// The receiver belongs to the room, not to a session: a half-received file
+	// belongs to the connection that was carrying it, and the next connection
+	// starts clean — but a *device* joining a room is not a new connection for
+	// the one already in it.
+	//
+	// Preparing on every join closed the part file a running transfer was
+	// writing (#286); preparing only when g.sess was nil was worse in the other
+	// direction, because g.sess is just the newest session — when *it* left, the
+	// receiver went with it while the rest of the room was still there, and a
+	// file from a remaining device was refused with "no session was receiving"
+	// (#342). So the count of live sessions decides.
+	if g.sessionJoined() {
 		g.prepareReceive()
 	}
 
@@ -1548,8 +1577,11 @@ func (g *gui) attach(sess session.Session) {
 		}
 		g.mu.Unlock()
 
-		if closed {
+		if g.sessionLeft() {
 			g.finishReceive()
+		}
+
+		if closed {
 
 			// A session the user ended is not a peer who left: Stop clears the
 			// live session before it closes it, so only a close that arrives
