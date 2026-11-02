@@ -1,5 +1,11 @@
 # Pairing and peers
 
+## ⚡ In a hurry
+
+The default needs **nothing to copy**: each device proves its own key, and the
+two screens show the same six-digit code at first contact. `cthrone peers` lists
+what this device trusts; `cthrone peers forget <name>` is the way back.
+
 Every session is authenticated by exactly one credential: **this device's
 ed25519 key**, unless you name a shared secret.
 

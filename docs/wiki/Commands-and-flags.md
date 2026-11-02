@@ -1,5 +1,10 @@
 # Commands and flags
 
+## ⚡ In a hurry
+
+`cthrone --help` lists every command; `cthrone <verb> --help` lists its flags.
+The flags below are persistent — they work on every command.
+
 ## Commands
 
 | Command | What it does |

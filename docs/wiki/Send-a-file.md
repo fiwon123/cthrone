@@ -1,5 +1,12 @@
 # Send a file
 
+## ⚡ In a hurry
+
+In the window, press 📎 **Attach** and pick a file. The row reports the transfer
+and then offers **Save as…**; a picture, a text file or an animated GIF is drawn
+in the row, and a WAV/MP3 plays there with a waveform. The terminal has no file
+command — text only.
+
 Files travel the same sealed session as text, in 256 KiB chunks, and are
 reassembled on the other side.
 
