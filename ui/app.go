@@ -1410,7 +1410,20 @@ func (g *gui) selectBeacon(id widget.ListItemID) {
 func (g *gui) attach(sess session.Session) {
 	// A session owns its assembler: a half-received file belongs to the
 	// connection that was carrying it, and the next connection starts clean.
-	g.prepareReceive()
+	//
+	// A device joining a room is not a new connection for the one already in it.
+	// A host calls attach for every peer, and resetting the assembler on each
+	// join closed the part file a running transfer was writing — the next chunk
+	// then failed with "starts at chunk N, not 0" (#286). So the reset happens
+	// only when there was no live session, which is a real start: a reconnect
+	// clears g.sess on close first.
+	g.mu.Lock()
+	first := g.sess == nil
+	g.mu.Unlock()
+
+	if first {
+		g.prepareReceive()
+	}
 
 	g.mu.Lock()
 	g.sess = sess

@@ -136,3 +136,39 @@ func TestGuardPassesASuccessfulStep(t *testing.T) {
 		t.Error("guard did not run the step")
 	}
 }
+
+// A phone has no user configuration directory: Go's os.UserConfigDir needs
+// $HOME, which a GUI app on Android is not given. The log falls back to the
+// temporary directory, which the toolkit points at the app's own storage, so a
+// report from a phone still carries something (#286).
+func TestFailureLogFallsBackWithoutAConfigDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
+
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("APPDATA", "")
+	default:
+		// A relative XDG_CONFIG_HOME is an error from os.UserConfigDir, which
+		// is the state a phone is in: the variable is simply not there.
+		t.Setenv("XDG_CONFIG_HOME", "relative/path")
+	}
+
+	path := logFailure(errors.New("a phone reported this"))
+
+	want := filepath.Join(os.TempDir(), "cthrone", FailureLogName)
+	if path != want {
+		t.Fatalf("logFailure wrote to %q, want the temporary fallback %q", path, want)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	if !strings.Contains(string(data), "a phone reported this") {
+		t.Errorf("the fallback log does not carry the failure: %q", data)
+	}
+}

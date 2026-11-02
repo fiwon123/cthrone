@@ -86,15 +86,27 @@ func logEvent(message string) string {
 
 // failureLogPath is where logFailure writes: the same configuration directory
 // the CLI keeps its key and its pins in, so one machine has one place to look.
+//
+// A phone has no user configuration directory — Go's os.UserConfigDir needs
+// $HOME, which a GUI app on Android is not given — so the log falls back to the
+// temporary directory, which the toolkit points at the app's own storage there.
+// Without that fallback a phone wrote its diagnostics to a stderr no GUI
+// process has, and a report from the platform most of them come from carried
+// nothing (#286).
+//
 // A directory that cannot be created yields "", never an error to report — the
 // caller is already handling a failure.
 func failureLogPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
-		return ""
+		return writableLogPath(filepath.Join(os.TempDir(), "cthrone"))
 	}
 
-	dir = filepath.Join(dir, "cthrone")
+	return writableLogPath(filepath.Join(dir, "cthrone"))
+}
+
+// writableLogPath is the log's path inside dir, or "" when dir cannot be made.
+func writableLogPath(dir string) string {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return ""
 	}
