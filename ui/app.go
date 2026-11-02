@@ -244,6 +244,12 @@ type gui struct {
 	perfTotal   time.Duration
 	perfLast    time.Duration
 
+	// stateGlyph is the header's one-icon connection state, and lost is whether
+	// the last session went away without the user asking: it is what tells a
+	// drop (🔴) from a stop (⚪) (#453).
+	stateGlyph *canvas.Text
+	lost       bool
+
 	// lastBottom is the transcript's scroll offset when the view was last at
 	// the end, and jumpBtn is the way back down when the reader is not there.
 	// A new message follows only if the reader was at the bottom (#434).
@@ -532,9 +538,13 @@ func (g *gui) build() {
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
-	// The line carries what happened, and nothing else: no connection state
-	// standing in it, no discovery chatter (#433). It is hidden while it has
-	// nothing to say, which is most of the time.
+	// The state is one icon, always there, and the line is for what happened:
+	// the words that repeated the state were the report (#433), and losing the
+	// state altogether was the next one (#453).
+	g.stateGlyph = canvas.NewText("⚪", theme.Color(theme.ColorNameDisabled))
+	g.stateGlyph.TextSize = 18
+	g.stateGlyph.TextStyle = fyne.TextStyle{Bold: true}
+
 	g.status = g.text("")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
 	g.status.Hide()
@@ -568,7 +578,7 @@ func (g *gui) build() {
 	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
 	g.jumpBtn.Hide()
 
-	header := container.NewHBox(g.status)
+	header := container.NewHBox(g.stateGlyph, g.status)
 	header.Add(layout.NewSpacer())
 	header.Add(g.jumpBtn)
 	header.Add(g.stopBtn)
@@ -1018,6 +1028,8 @@ func (g *gui) beginStart() (int, bool) {
 		cancel()
 	}
 
+	fyne.Do(g.refreshStateGlyph)
+
 	return seq, true
 }
 
@@ -1028,17 +1040,25 @@ func (g *gui) beginStart() (int, bool) {
 // attempt opened must be closed instead of installed.
 func (g *gui) finishStart(seq int, install func()) bool {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	g.starting = false
 
 	if g.startSeq != seq {
+		g.mu.Unlock()
+
 		return false
 	}
 
 	if install != nil {
 		install()
 	}
+
+	g.mu.Unlock()
+
+	// The attempt is over and whatever it opened is installed: the icon now
+	// says hosting rather than starting, without waiting for a device to join
+	// (#453). It is outside the lock because fyne.Do can run the redraw inline.
+	fyne.Do(g.refreshStateGlyph)
 
 	return true
 }
@@ -1444,6 +1464,7 @@ func (g *gui) stop() {
 	g.reconnecting = false
 	g.retryCtx, g.retryCancel = nil, nil
 	g.liveSessions = 0
+	g.lost = false
 
 	// A Start that is still in flight is cancelled: its server closes itself
 	// when it opens instead of becoming the live one. Until this stop has
@@ -1460,6 +1481,7 @@ func (g *gui) stop() {
 	g.hideThisDevice()
 	g.setStatus("Stopping…")
 	g.updateButtons()
+	g.refreshStateGlyph()
 
 	go func() {
 		if sess != nil {
@@ -1764,9 +1786,11 @@ func (g *gui) attach(sess session.Session) {
 
 	g.mu.Lock()
 	g.sess = sess
+	g.lost = false
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
+	fyne.Do(g.refreshStateGlyph)
 
 	// The close notice is the one line that has to name the peer after the
 	// session is gone, so the name is captured here rather than read from a
@@ -1834,6 +1858,12 @@ func (g *gui) attach(sess session.Session) {
 		}
 
 		if closed {
+			// The session this window was using is gone without the user
+			// asking, which is what the red icon is for; a retry that starts
+			// will move it to amber (#453).
+			g.mu.Lock()
+			g.lost = true
+			g.mu.Unlock()
 
 			// A session the user ended is not a peer who left: Stop clears the
 			// live session before it closes it, so only a close that arrives
@@ -1841,6 +1871,8 @@ func (g *gui) attach(sess session.Session) {
 			// exactly the case a host has to be able to read afterwards.
 			g.addMessage(chatMessage{from: "system", text: disconnectLine(peer.get(), reason)})
 		}
+
+		fyne.Do(g.refreshStateGlyph)
 
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
@@ -1880,6 +1912,7 @@ func (g *gui) reconnectAfterDrop(sess session.Session, reason string) {
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
+	fyne.Do(g.refreshStateGlyph)
 
 	go g.retryLink(ctx, link, reason)
 }
@@ -1963,8 +1996,13 @@ func (g *gui) endReconnect(ctx context.Context, status string) {
 		return
 	}
 
+	g.mu.Lock()
+	g.lost = true
+	g.mu.Unlock()
+
 	g.setStatus(status)
 	fyne.Do(g.updateButtons)
+	fyne.Do(g.refreshStateGlyph)
 }
 
 // reconnectDelay is how long to wait before attempt n, counting from 1: the
@@ -2178,6 +2216,47 @@ func (g *gui) setStatus(text string) {
 		g.status.SetImportance(widget.MediumImportance)
 		g.status.Show()
 	})
+}
+
+// stateGlyphFor is the icon that stands for a connection state, and the colour
+// it takes when the platform's font has no emoji to draw (#453).
+//
+// The order is the order that matters: a retry in flight outranks the session
+// that dropped, and a host outranks a client.
+func stateGlyphFor(starting, reconnecting, hosting, connected, lost bool) (string, fyne.ThemeColorName) {
+	switch {
+	case starting:
+		return "🟡", theme.ColorNameWarning
+	case reconnecting:
+		return "🟠", theme.ColorNameWarning
+	case hosting:
+		return "🟢", theme.ColorNameSuccess
+	case connected:
+		return "🔵", theme.ColorNamePrimary
+	case lost:
+		return "🔴", theme.ColorNameError
+	}
+
+	return "⚪", theme.ColorNameDisabled
+}
+
+// refreshStateGlyph redraws the header's icon from the window's state.
+func (g *gui) refreshStateGlyph() {
+	if g.stateGlyph == nil {
+		return
+	}
+
+	g.mu.Lock()
+	starting, reconnecting := g.starting, g.reconnecting
+	hosting, connected := g.server != nil, g.sess != nil
+	lost := g.lost
+	g.mu.Unlock()
+
+	glyph, colour := stateGlyphFor(starting, reconnecting, hosting, connected, lost)
+
+	g.stateGlyph.Text = glyph
+	g.stateGlyph.Color = theme.Color(colour)
+	g.stateGlyph.Refresh()
 }
 
 // addMessage appends a line to the transcript and scrolls to it.
