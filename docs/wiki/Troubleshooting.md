@@ -59,6 +59,15 @@ Known, and being worked on
 before it is shown, so anything slow in the build is time the user spends looking
 at nothing.
 
+## A PDF or an audio file will not open on the phone
+
+Android does not let an app pass a private `file://` path to another app, and
+this build ships no `content://` provider, so **Open** is not offered on a phone
+([#305](https://github.com/fiwon123/cthrone/issues/305)). Press **Save as…** and
+pick a folder the file manager can see, then open the file from there.
+
+A desktop opens these with the system's own app, as before.
+
 ## Holding backspace on a phone deletes one character
 
 Not this app's bug, and not fixable from here: it is in the toolkit's Android
@@ -76,7 +85,7 @@ deleting from a buffer the app keeps putting back, and the repeat stops.
 Tracked upstream: [fyne-io/fyne#6648](https://github.com/fyne-io/fyne/issues/6648)
 — see [#290](https://github.com/fiwon123/cthrone/issues/290) for the report.
 
-What works today: pressing gives one character each time; select all (press and
-hold the field, **Select all**) and delete, or cut, to clear a long message.
-A desktop is unaffected.
+What works today: pressing gives one character each time; **the × inside the
+field empties it in one press** (the composer and the Setup fields all carry
+one); select all and cut also works. A desktop is unaffected.
 

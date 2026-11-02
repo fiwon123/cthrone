@@ -471,6 +471,7 @@ func (g *gui) build() {
 	// instead of pushing the transcript off the screen.
 	g.entry = widget.NewMultiLineEntry()
 	g.entry.Wrapping = fyne.TextWrapWord
+	withClear(g.entry)
 	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
 	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
@@ -515,14 +516,17 @@ func (g *gui) build() {
 	g.portEntry.SetText(strconv.Itoa(defaultPort))
 
 	g.bindEntry = widget.NewEntry()
+	withClear(g.bindEntry)
 	g.bindEntry.SetPlaceHolder("every interface")
 
 	// The name is filled in after the window is up (fillIdentity): reading it
 	// is I/O, and the window must not wait on the disk to appear.
 	g.nameEntry = widget.NewEntry()
+	withClear(g.nameEntry)
 	g.nameEntry.SetPlaceHolder("device name")
 
 	g.hostEntry = widget.NewEntry()
+	withClear(g.hostEntry)
 	g.hostEntry.SetPlaceHolder("192.168.1.100")
 
 	g.tokenEntry = widget.NewPasswordEntry()
@@ -530,12 +534,15 @@ func (g *gui) build() {
 	g.tokenEntry.OnChanged = func(string) { g.refreshCredential() }
 
 	g.fingerprintEntry = widget.NewEntry()
+	withClear(g.fingerprintEntry)
 	g.fingerprintEntry.SetPlaceHolder("certificate fingerprint (optional: pinned on first contact)")
 
 	g.subjectEntry = widget.NewEntry()
+	withClear(g.subjectEntry)
 	g.subjectEntry.SetText(natscore.DefaultSubject)
 
 	g.natsURLEntry = widget.NewEntry()
+	withClear(g.natsURLEntry)
 	g.natsURLEntry.SetText(natscore.DefaultBrokerURL)
 
 	g.tlsCheck = widgets.NewCheckRow("Encrypt with TLS", func(bool) { g.rebuildSetupForm() }, !g.mobile)
