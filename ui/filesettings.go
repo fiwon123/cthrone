@@ -230,6 +230,39 @@ func copyFile(source, target string) error {
 	return nil
 }
 
+// usableFolder reports whether dir is a folder this app can write a file into.
+//
+// It is a check rather than a guess on purpose. A phone's folder picker hands
+// back a content:// URI, whose Path() is something like /tree/primary:Download —
+// absolute, plausible and not a directory on any filesystem. Storing it used to
+// be silent, and from then on every received file failed at the move (#286).
+// Creating the folder and putting one byte in it is the only answer that covers
+// every platform, a read-only mount and a path that vanished.
+func usableFolder(dir string) error {
+	if dir == "" {
+		return errors.New("no folder chosen")
+	}
+
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("%s is not an absolute path", dir)
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("%s cannot be created: %w", dir, err)
+	}
+
+	probe, err := os.CreateTemp(dir, ".cthrone-probe-*")
+	if err != nil {
+		return fmt.Errorf("%s is not writable: %w", dir, err)
+	}
+
+	name := probe.Name()
+	probe.Close()
+	os.Remove(name)
+
+	return nil
+}
+
 // defaultStagingDir is where a file is assembled before it is saved: inside the
 // app's own storage, which exists on a phone and on a desktop alike.
 //

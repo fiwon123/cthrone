@@ -414,14 +414,21 @@ func (g *gui) finishTransfer(note *fileNote, file *wire.File) {
 func (g *gui) saveTo(note *fileNote, file *wire.File, folder string) {
 	target, err := moveInto(file.Path, folder, file.Name)
 	if err != nil {
+		// The bytes are already verifiable: the assembler checked the size and
+		// the SHA-256 before it handed this file over. So a move that fails is
+		// a problem with the folder, not with the transfer, and saying "failed"
+		// here told the user a file that arrived did not (#286).
+		//
+		// The row keeps the staged path and offers Save as…, which is the one
+		// action that can still put the file somewhere that works.
 		fyne.Do(func() {
-			note.path = ""
-			note.sent = 0
-			note.inline = false
-			note.state = transferFailed
+			note.path = file.Path
+			note.sent = file.Size
+			note.inline = showsInline(file.MIME, file.Size)
+			note.state = transferPending
 			g.refreshTransfer(note)
 		})
-		g.setStatus("Saving " + file.Name + " failed: " + err.Error())
+		g.setStatus("Received " + file.Name + ", but could not save it in " + folder + ": " + err.Error())
 
 		return
 	}
@@ -543,6 +550,15 @@ func (g *gui) storeFileSettings(folder string, ask bool) {
 	dir := expandFolder(folder)
 	if dir == "" {
 		g.setStatus("Not saved: " + folder + " is not an absolute path")
+
+		return
+	}
+
+	// A folder is remembered only if a file can land in it. The picker on a
+	// phone can return a path that is absolute and still is not a directory
+	// (#286), and remembering it would fail every later file in silence.
+	if err := usableFolder(dir); err != nil {
+		g.setStatus("Not saved: " + err.Error())
 
 		return
 	}
@@ -989,7 +1005,18 @@ func (g *gui) preferences() preferenceStore {
 
 // fileSettings is where received files go, and whether the user is asked first.
 func (g *gui) fileSettings() fileSettings {
-	return readFileSettings(g.preferences(), g.downloadDir())
+	fallback := g.downloadDir()
+	settings := readFileSettings(g.preferences(), fallback)
+
+	// A remembered folder can stop working — it was chosen on a phone that
+	// handed back something that is not a directory, or it was on a card that
+	// is no longer mounted. Falling back is better than failing every file
+	// against a path nobody can fix from the transcript (#286).
+	if err := usableFolder(settings.folder); err != nil {
+		settings.folder = fallback
+	}
+
+	return settings
 }
 
 // mimeOf names a picked file's type from its extension. The receiver uses it to

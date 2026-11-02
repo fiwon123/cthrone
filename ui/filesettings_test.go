@@ -368,3 +368,30 @@ func TestCopyIntoMissingSource(t *testing.T) {
 		t.Errorf("copyInto() wrote %d bytes from a missing source", out.Len())
 	}
 }
+
+// A folder is usable only if a file can land in it: an absolute path that names
+// something else — a phone's /tree/… from a content:// URI — is refused, and so
+// is a path under a regular file (#286).
+func TestUsableFolderChecksWhatAPathNames(t *testing.T) {
+	dir := t.TempDir()
+
+	made := filepath.Join(dir, "made", "here")
+	if err := usableFolder(made); err != nil {
+		t.Fatalf("usableFolder(%q) = %v, want the folder made", made, err)
+	}
+
+	if info, err := os.Stat(made); err != nil || !info.IsDir() {
+		t.Fatalf("usableFolder did not create a directory: %v", err)
+	}
+
+	file := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{"", "relative/path", file, filepath.Join(file, "under-a-file")} {
+		if err := usableFolder(bad); err == nil {
+			t.Errorf("usableFolder(%q) = nil, want a refusal", bad)
+		}
+	}
+}
