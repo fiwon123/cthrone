@@ -219,6 +219,12 @@ type gui struct {
 	// that does not change it does not re-lay the field out (#324).
 	composerRows int
 
+	// lastComposer is the text before the current change, so an appended newline
+	// can be told from a typed one, and editingComposer marks the changes this
+	// window makes itself (#323).
+	lastComposer    string
+	editingComposer bool
+
 	// starting and stopping guard the handover of the transport. While either
 	// is set, Host and Connect are disabled: a start that is still binding and a
 	// stop that is still closing the listener both own the port, and a second
@@ -523,8 +529,8 @@ func (g *gui) build() {
 	g.entry.SetMinRowsVisible(1)
 	// No placeholder: the field says nothing until the user types, and the
 	// keyboard's behaviour belongs in the docs, not in the message (#344).
-	g.entry.OnChanged = g.growComposer
-	g.entry.OnSubmitted = func(text string) { g.send(text) }
+	g.entry.OnChanged = g.composerChanged
+	g.entry.OnSubmitted = func(string) { g.insertComposerNewline() }
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
 	// Send is the primary action of the composer: the filled (high) importance
@@ -1620,6 +1626,71 @@ func (g *gui) attach(sess session.Session) {
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
 	})
+}
+
+// composerChanged runs on every change of the message field.
+//
+// A newline appended to the end is Enter, and Enter sends — the behaviour every
+// chat app a desktop user knows (#323). Fyne's multiline entry inserts a newline
+// for Enter and only reports Shift+Enter through OnSubmitted, so the two are told
+// apart here: the appended newline is taken back off and sent, while
+// Shift+Enter's newline is inserted by insertComposerNewline and never looks like
+// an append.
+//
+// A phone's keyboard has no Shift: its enter key appends the same newline, so it
+// sends too, which is what a phone expects.
+func (g *gui) composerChanged(text string) {
+	g.growComposer(text)
+
+	if g.editingComposer {
+		g.lastComposer = text
+
+		return
+	}
+
+	if text == g.lastComposer+"\n" {
+		g.lastComposer = ""
+		g.send(strings.TrimSuffix(text, "\n"))
+
+		return
+	}
+
+	g.lastComposer = text
+}
+
+// insertComposerNewline puts a line break where the cursor is: what Shift+Enter
+// does, and what the field's own Enter used to do.
+func (g *gui) insertComposerNewline() {
+	entry := g.entry
+	if entry == nil {
+		return
+	}
+
+	lines := strings.Split(entry.Text, "\n")
+	row, column := entry.CursorRow, entry.CursorColumn
+
+	if row < 0 || row >= len(lines) {
+		lines = append(lines, "")
+
+		row = len(lines) - 2
+		column = len([]rune(lines[row]))
+	}
+
+	runes := []rune(lines[row])
+	if column < 0 || column > len(runes) {
+		column = len(runes)
+	}
+
+	lines[row] = string(runes[:column]) + "\n" + string(runes[column:])
+
+	g.editingComposer = true
+	entry.SetText(strings.Join(lines, "\n"))
+	g.editingComposer = false
+
+	entry.CursorRow, entry.CursorColumn = row+1, 0
+	entry.Refresh()
+
+	g.lastComposer = entry.Text
 }
 
 // growComposer gives the field the rows its text needs, within the ceiling.
