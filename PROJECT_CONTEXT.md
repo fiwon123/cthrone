@@ -448,6 +448,11 @@ and the **Windows radio**, the **phone build** and the **APK** are still unrun
   the unclickable Setup tab (#189) — are asserted headless as painted-versus-
   hit-test pixel checks. A native rendered frame and the APK on a device are
   still unverified (#155).
+- **Roadmap**: every open issue is one item on the
+  [project board](https://github.com/users/fiwon123/projects/7), with its
+  milestone and its status (Todo, In Progress, Done). The issues are the source
+  of truth — the board is a view of them, kept by hand as work moves — and the
+  board's own description says so.
 - **Open**: see Backlog.
 
 ## Backlog
