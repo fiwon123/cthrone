@@ -208,17 +208,36 @@ func TestComposerStartsANewLineAndSendsOnShiftEnter(t *testing.T) {
 // rather than pushing the transcript off the screen. Fyne sizes a multi-line
 // entry from its visible-row count, so the height the field reports is the same
 // before and after a paragraph is typed into it.
-func TestComposerKeepsItsHeightWhateverIsTyped(t *testing.T) {
+// The composer starts at one line, grows with the message, and stops at the
+// ceiling — past that the text scrolls inside it (#324).
+func TestComposerGrowsToItsCeilingAndStops(t *testing.T) {
 	g := newTestGUI(t)
 
-	before := test.WidgetRenderer(g.entry).MinSize().Height
+	one := test.WidgetRenderer(g.entry).MinSize().Height
+
+	g.entry.SetText("first line")
+	one = test.WidgetRenderer(g.entry).MinSize().Height
+
+	g.entry.SetText("one\ntwo\nthree")
+	three := test.WidgetRenderer(g.entry).MinSize().Height
+
+	if three <= one {
+		t.Fatalf("the composer is %.1f tall for three lines and %.1f for one; it should grow", three, one)
+	}
 
 	g.entry.SetText(strings.Repeat("a line of a much longer message\n", 20))
+	capped := test.WidgetRenderer(g.entry).MinSize().Height
 
-	after := test.WidgetRenderer(g.entry).MinSize().Height
+	// The ceiling is composerRowsMax lines, so twenty lines is not twenty times
+	// as tall as one.
+	if capped > one*float32(composerRowsMax)+2 {
+		t.Errorf("the composer is %.1f tall for twenty lines; the ceiling is %d rows", capped, composerRowsMax)
+	}
 
-	if after > before {
-		t.Fatalf("the composer grew from %.1f to %.1f for a longer message, want a fixed height", before, after)
+	// And emptying it goes back to one line.
+	g.entry.SetText("")
+	if got := test.WidgetRenderer(g.entry).MinSize().Height; got != one {
+		t.Errorf("the composer is %.1f tall after being emptied, want the %.1f of one line", got, one)
 	}
 }
 

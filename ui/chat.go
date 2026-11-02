@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -8,28 +9,61 @@ import (
 // without limit. The oldest line and its row are dropped together.
 const maxMessages = 500
 
-// composerRowsDesktop and composerRowsTouch are how many lines the message
-// field shows before the text scrolls inside it. A phone gets one row fewer:
-// the transcript above it has less room to spare, and the Send button sits
-// under the field rather than beside it.
-const (
-	composerRowsDesktop = 4
-	composerRowsTouch   = 3
-)
+// composerRowsMax is the most lines the message field shows before the text
+// scrolls inside it. One line at rest, growing with the message, is the shape a
+// chat app teaches (#324); a fixed four rows wasted the transcript's height on an
+// empty field and stopped a long message short.
+const composerRowsMax = 5
 
-// composerRowCount is the visible-row count for the layout in force.
+// composerDefaultColumns is the estimate used before the field has been measured
+// — a phone at rest, which is the narrow case.
+const composerDefaultColumns = 32
+
+// composerRows is how many rows the field should show for text in a field of
+// columns characters: one per new line, plus one for each wrap, capped.
 //
-// It is a ceiling, not a starting size: Fyne sizes a multi-line entry from its
-// row count rather than from the text in it, so the composer is the same height
-// whether it holds one line or twenty. Growing with the text would mean a
-// scroll wrapper with a height recomputed on every keystroke, and this layout
-// has been broken by height arithmetic before (#186, #189).
-func composerRowCount(stack bool) int {
-	if stack {
-		return composerRowsTouch
+// Fyne wraps by pixel width and offers no measurement for "how many lines is
+// this", so the width is turned into columns by the caller and this counts
+// characters. It errs towards growing a line early, which is the harmless
+// direction: the field never hides a line the user is typing.
+func composerRows(text string, columns int) int {
+	if columns <= 0 {
+		columns = composerDefaultColumns
 	}
 
-	return composerRowsDesktop
+	rows := 0
+
+	for _, line := range strings.Split(text, "\n") {
+		wrapped := (len([]rune(line)) + columns - 1) / columns
+		if wrapped < 1 {
+			wrapped = 1
+		}
+
+		rows += wrapped
+	}
+
+	if rows < 1 {
+		rows = 1
+	}
+
+	if rows > composerRowsMax {
+		rows = composerRowsMax
+	}
+
+	return rows
+}
+
+// composerColumns is how many characters fit in a field of width pixels.
+//
+// It is an estimate — the theme's text size plus a little air — because the
+// alternative is measuring the text, and that is what the transcript's height
+// arithmetic got wrong twice (#186, #189).
+func composerColumns(width float32) int {
+	if width <= 0 {
+		return composerDefaultColumns
+	}
+
+	return int(width / 8)
 }
 
 // composerHint is the message field's placeholder. The two platforms differ in

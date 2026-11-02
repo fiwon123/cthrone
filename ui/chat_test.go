@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"fyne.io/fyne/v2/widget"
 )
 
 // TestChatMessageLine checks how a message reaches the screen: the row and the
@@ -221,23 +223,31 @@ func TestComposerHint(t *testing.T) {
 	}
 }
 
-// TestComposerRowCount checks the composer's height ceiling: a few lines and
-// then the text scrolls, with less room taken on a phone than on a desktop.
-func TestComposerRowCount(t *testing.T) {
-	desktop, touch := composerRowCount(false), composerRowCount(true)
-
-	if desktop != composerRowsDesktop || touch != composerRowsTouch {
-		t.Fatalf("composerRowCount = %d/%d, want %d/%d", desktop, touch, composerRowsDesktop, composerRowsTouch)
+// The composer starts at one line and grows with the message, up to a ceiling
+// where the text scrolls inside it (#324). Past that it stops being a composer
+// and starts being the screen.
+func TestComposerRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		text    string
+		columns int
+		want    int
+	}{
+		{"empty", "", 40, 1},
+		{"one line", "hello", 40, 1},
+		{"a newline", "hello\n", 40, 2},
+		{"three lines", "a\nb\nc", 40, 3},
+		{"a long paragraph wraps", strings.Repeat("x", 120), 40, 3},
+		{"more than the ceiling", strings.Repeat("x\n", 20), 40, composerRowsMax},
+		{"no measurement yet uses the default", strings.Repeat("x", 30), 0, 1},
 	}
 
-	if touch > desktop {
-		t.Errorf("the phone gets %d rows and the desktop %d, want the phone to get no more", touch, desktop)
-	}
-
-	// Past half a dozen rows the field stops being a composer and starts being
-	// the screen; the transcript is what the window is for.
-	if desktop > 5 {
-		t.Errorf("the composer shows %d rows, want a small ceiling", desktop)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := composerRows(tt.text, tt.columns); got != tt.want {
+				t.Errorf("composerRows(%q, %d) = %d, want %d", tt.text, tt.columns, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -252,4 +262,27 @@ func transcript(messages []chatMessage) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// The composer's actions read like a chat app's: a paperclip, and Send as the
+// primary action (#324). This is the shape, not the pixels.
+func TestComposerActionsReadLikeAChatApp(t *testing.T) {
+	for _, mobile := range []bool{false, true} {
+		name := "desktop"
+		if mobile {
+			name = "phone"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			g := newScreenGUI(t, mobile)
+
+			if got := g.attachBtn.Text(); got != "" {
+				t.Errorf("the attach action shows %q, want the paperclip alone", got)
+			}
+
+			if got := g.sendBtn.Importance(); got != widget.HighImportance {
+				t.Errorf("Send has importance %v, want the primary one", got)
+			}
+		})
+	}
 }
