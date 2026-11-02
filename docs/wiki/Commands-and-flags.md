@@ -53,3 +53,7 @@ older instruction still works — because a window has no subcommands.
 
 `--token` on the command line is visible in the process list; the environment or
 a file is the safer place for it.
+
+---
+
+<sub>🌐 **Previous:** [Across networks](Finding-devices-across-networks) · 🏠 [Home](Home) · **Next:** [Troubleshooting](Troubleshooting) 🚑</sub>

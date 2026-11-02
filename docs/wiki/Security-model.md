@@ -9,6 +9,20 @@
 | ✅ **wss:// by default** — the host's certificate pinned on first contact | `--no-tls` opts out |
 | ⚠️ **The shape stays visible** — who talks when, and to which subject or address | encryption is not anonymity |
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as 🔵 Device A
+    participant B as 🟢 Device B
+    A->>B: hello — ephemeral key, nonce, device key + signature
+    B->>A: hello — ephemeral key, nonce, device key + signature
+    Note over A,B: both derive the keys, and a six-digit code
+    A->>B: confirm — MAC over both hellos
+    Note over A,B: 👀 the two screens must show the same code
+    A-->>B: sealed frames — AES-256-GCM, sequence numbers
+    Note over A,B: a different key, or a replayed frame, ends the session
+```
+
 The short version. The long one, with the issues that decided it (#11, #109,
 #125, #124, #202), is in the README's Security section.
 
@@ -50,3 +64,7 @@ both screens at once.
   the process list, which is why the environment or a file is preferred).
 - Re-pin a name or an address that changed. `cthrone peers forget` is the way
   back, and it is deliberately manual.
+
+---
+
+<sub>🚑 **Previous:** [Troubleshooting](Troubleshooting) · 🏠 [Home](Home) · **Next:** [Verifying on real hardware](Verifying-on-real-hardware) 🧪</sub>

@@ -143,3 +143,7 @@ through the app rather than assumed.
   it.
 - Do not describe a test you did not run as passed. This project treats a
   skipped run as unverified, and so should a report.
+
+---
+
+<sub>🔒 **Previous:** [Security model](Security-model) · 🏠 [Home](Home) · **Next:** [Development](Development) 🛠️</sub>
