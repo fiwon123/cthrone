@@ -49,6 +49,9 @@ type audioEngine interface {
 	Play(clip *audioClip, onDone func(error)) error
 	Stop()
 	Position() time.Duration
+
+	// Seek moves the playhead, so Position reports from there (#399).
+	Seek(position time.Duration) error
 }
 
 // audioKind names the decoder that can read the first bytes of a file, or ""
@@ -360,6 +363,56 @@ func toOutput(samples []int16, rate, channels int) []byte {
 	}
 
 	return out
+}
+
+// audioPeakColumns is how many columns a waveform is reduced to. A row is a few
+// hundred pixels wide at most, and the control resamples this to whatever it is
+// given, so more columns would only cost memory.
+const audioPeakColumns = 240
+
+// audioPeaks reduces decoded PCM to one peak per column: the loudest sample of
+// the slice of the clip that column stands for. A clip with no samples has no
+// shape, and says so with nil (#399).
+func audioPeaks(pcm []byte, columns int) []float32 {
+	frame := audioChannels * 2
+	if columns <= 0 || len(pcm) < frame {
+		return nil
+	}
+
+	frames := len(pcm) / frame
+	peaks := make([]float32, columns)
+
+	for column := 0; column < columns; column++ {
+		first := column * frames / columns
+		last := (column + 1) * frames / columns
+
+		if last <= first {
+			last = first + 1
+		}
+
+		if last > frames {
+			last = frames
+		}
+
+		var peak int32
+
+		for f := first; f < last; f++ {
+			for channel := 0; channel < audioChannels; channel++ {
+				sample := int32(int16(binary.LittleEndian.Uint16(pcm[f*frame+channel*2:])))
+				if sample < 0 {
+					sample = -sample
+				}
+
+				if sample > peak {
+					peak = sample
+				}
+			}
+		}
+
+		peaks[column] = float32(peak) / 32768
+	}
+
+	return peaks
 }
 
 // audioClock is a position or a duration the way a player shows it: 0:07,

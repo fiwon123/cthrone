@@ -20,6 +20,7 @@ type fakeAudioEngine struct {
 	mu       sync.Mutex
 	plays    int
 	stops    int
+	seeks    []time.Duration
 	clip     *audioClip
 	onDone   func(error)
 	position time.Duration
@@ -39,6 +40,40 @@ func (f *fakeAudioEngine) Play(clip *audioClip, onDone func(error)) error {
 	f.onDone = onDone
 
 	return nil
+}
+
+// Seek records the move and makes Position report from there, the way a device
+// that started playing at the new point would.
+func (f *fakeAudioEngine) Seek(position time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.playErr != nil {
+		return f.playErr
+	}
+
+	f.seeks = append(f.seeks, position)
+	f.position = position
+
+	return nil
+}
+
+func (f *fakeAudioEngine) seekCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return len(f.seeks)
+}
+
+func (f *fakeAudioEngine) lastSeek() time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if len(f.seeks) == 0 {
+		return -1
+	}
+
+	return f.seeks[len(f.seeks)-1]
 }
 
 func (f *fakeAudioEngine) Stop() {
@@ -438,4 +473,110 @@ func TestTheClockMovesWhileTheClipPlays(t *testing.T) {
 	waitForCondition(t, "the clock to move", func() bool {
 		return strings.Contains(audio.clock.Text(), " / ")
 	})
+}
+
+// The waveform appears when the clip has been decoded — before that there is no
+// shape to draw, and the row shows what it always did (#399).
+func TestTheWaveformAppearsOnceTheClipIsDecoded(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	g.messages = []chatMessage{{file: audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))}}
+
+	audio := paintRow(t, g, 0)
+
+	if audio.wave.Visible() {
+		t.Error("the waveform is drawn before the clip was decoded")
+	}
+
+	audio.play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 1
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	audio = paintRow(t, g, 0)
+
+	if !audio.wave.Visible() {
+		t.Fatal("no waveform after the decode")
+	}
+
+	if len(audio.wave.Peaks()) == 0 {
+		t.Error("the waveform has no peaks")
+	}
+}
+
+// Tapping the shape moves the sound: playback continues from the chosen point,
+// and the device is told where (#399).
+func TestSeekingMovesThePlayhead(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	g.messages = []chatMessage{{file: audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))}}
+
+	audio := paintRow(t, g, 0)
+	audio.play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 1
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	audio = paintRow(t, g, 0)
+	audio.wave.Resize(fyne.NewSize(200, 40))
+	audio.wave.Tapped(&fyne.PointEvent{Position: fyne.NewPos(100, 20)})
+
+	waitForCondition(t, "the seek to reach the device", func() bool { return engine.seekCount() == 1 })
+
+	// The clip is one second of 48 kHz stereo, so half of it is half a second.
+	if got := engine.lastSeek(); got < 450*time.Millisecond || got > 550*time.Millisecond {
+		t.Errorf("sought to %v, want about half of the one-second clip", got)
+	}
+}
+
+// An idle clip tapped at a point starts there, which is what "play from this
+// moment" means (#399).
+func TestSeekingAnIdleClipStartsItThere(t *testing.T) {
+	engine := &fakeAudioEngine{}
+	installAudioEngine(t, engine)
+
+	g := newAudioTestGUI(t)
+	g.messages = []chatMessage{{file: audioNote(t, "memo.wav", testWAV(t, audioSampleRate, audioChannels, 16, audioSampleRate))}}
+
+	audio := paintRow(t, g, 0)
+	audio.play.Tapped(&fyne.PointEvent{})
+
+	waitForCondition(t, "the clip to start", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 1
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	g.stopAudio()
+	audio = paintRow(t, g, 0)
+	audio.wave.Resize(fyne.NewSize(200, 40))
+	audio.wave.Tapped(&fyne.PointEvent{Position: fyne.NewPos(150, 20)})
+
+	waitForCondition(t, "the clip to start again", func() bool {
+		plays, _ := engine.counts()
+
+		return plays == 2
+	})
+
+	waitForCondition(t, "the start point to reach the device", func() bool { return engine.seekCount() >= 1 })
+
+	if got := engine.lastSeek(); got < 700*time.Millisecond || got > 800*time.Millisecond {
+		t.Errorf("started at %v, want about three quarters of the one-second clip", got)
+	}
 }

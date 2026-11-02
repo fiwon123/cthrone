@@ -4,6 +4,7 @@ package ui
 
 import (
 	"bytes"
+	"io"
 	"sync"
 	"time"
 
@@ -144,6 +145,45 @@ func (e *otoEngine) Stop() {
 	if player != nil {
 		player.PauseAndStopReading()
 	}
+}
+
+// Seek moves the playhead into the clip, and playback continues from there.
+//
+// The device reports no playhead, so Position is the time since the clip
+// started; moving that anchor back by position is what makes the clock agree
+// with the sound after a seek (#399).
+func (e *otoEngine) Seek(position time.Duration) error {
+	e.mu.Lock()
+	player := e.player
+	duration := e.duration
+	e.mu.Unlock()
+
+	if player == nil {
+		return errAudioUnsupported
+	}
+
+	if position < 0 {
+		position = 0
+	}
+
+	if duration > 0 && position > duration {
+		position = duration
+	}
+
+	// A frame is four bytes, and a seek into the middle of one plays noise
+	// instead of sound.
+	frame := int64(audioChannels * 2)
+	offset := int64(position.Seconds()*audioSampleRate) * frame
+
+	if _, err := player.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+
+	e.mu.Lock()
+	e.started = time.Now().Add(-position)
+	e.mu.Unlock()
+
+	return nil
 }
 
 // Position is how far into the clip playback has got.

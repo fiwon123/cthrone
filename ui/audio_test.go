@@ -305,3 +305,49 @@ func TestAudioLabel(t *testing.T) {
 		})
 	}
 }
+
+// The shape is one peak per column: the loudest sample in the slice that column
+// stands for. A clip with no samples has no shape (#399).
+func TestAudioPeaksFindsTheLoudColumn(t *testing.T) {
+	// Four stereo frames, so four columns; the third is loud and the rest are
+	// silence.
+	pcm := make([]byte, 4*4)
+	binary.LittleEndian.PutUint16(pcm[2*4:], 16384)
+	binary.LittleEndian.PutUint16(pcm[2*4+2:], 16384)
+
+	peaks := audioPeaks(pcm, 4)
+	if len(peaks) != 4 {
+		t.Fatalf("audioPeaks() returned %d columns, want 4", len(peaks))
+	}
+
+	if peaks[2] != 0.5 {
+		t.Errorf("the loud column is %v, want 0.5 (16384 of 32768)", peaks[2])
+	}
+
+	for i, peak := range peaks {
+		if i != 2 && peak != 0 {
+			t.Errorf("column %d is %v, want silence", i, peak)
+		}
+	}
+
+	if got := audioPeaks(nil, 10); got != nil {
+		t.Errorf("an empty clip produced %v, want no shape", got)
+	}
+
+	if got := audioPeaks(make([]byte, 64), 0); got != nil {
+		t.Errorf("zero columns produced %v, want no shape", got)
+	}
+}
+
+// A negative sample is as loud as a positive one: the shape is the magnitude,
+// not the sign.
+func TestAudioPeaksUsesTheMagnitude(t *testing.T) {
+	pcm := make([]byte, 4)
+	binary.LittleEndian.PutUint16(pcm[0:], uint16(0x8000)) // -32768
+	binary.LittleEndian.PutUint16(pcm[2:], uint16(0x8000))
+
+	peaks := audioPeaks(pcm, 1)
+	if len(peaks) != 1 || peaks[0] != 1 {
+		t.Errorf("a full-scale negative sample gave %v, want 1", peaks)
+	}
+}
