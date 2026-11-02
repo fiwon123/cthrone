@@ -183,12 +183,6 @@ type gui struct {
 	// there next time instead of walking the toolkit's place list (#386).
 	lastPick string
 
-	// statusShowsState is whether the chat header's one line is currently the
-	// connection state, rather than a message about something that just
-	// happened. A message wins until it is cleared; the state then takes the
-	// line back (#383).
-	statusShowsState bool
-
 	// copyPopup is the "Copied" hint a label copy raises, and copyTimer takes
 	// it away again. The chat tab has its own line for the transcript's copy
 	// buttons; a button on Setup, Devices, or About has no such line, so the
@@ -511,11 +505,12 @@ func (g *gui) build() {
 	// There is no Copy all here any more: it copied the transcript as one
 	// string, which is not what a user who wants one message means, and a tap on
 	// a row already copies that row (#289).
+	// The line carries what happened, and nothing else: no connection state
+	// standing in it, no discovery chatter (#433). It is hidden while it has
+	// nothing to say, which is most of the time.
 	g.status = g.text("")
 	g.status.SetTextStyle(fyne.TextStyle{Bold: true})
-	g.statusShowsState = true
-
-	g.refreshConnectionState()
+	g.status.Hide()
 
 	// The Files action lives beside the transcript rather than in Setup: it is
 	// about what happens to a received file, which is a chat concern, and Setup
@@ -1754,7 +1749,6 @@ func (g *gui) attach(sess session.Session) {
 			g.peerName = p.Name()
 			g.mu.Unlock()
 
-			fyne.Do(g.refreshConnectionState)
 			peer.set(p.Name())
 
 			if p.First && p.Fingerprint != "" {
@@ -1852,7 +1846,6 @@ func (g *gui) reconnectAfterDrop(sess session.Session, reason string) {
 	g.mu.Unlock()
 
 	fyne.Do(g.updateButtons)
-	fyne.Do(g.refreshConnectionState)
 
 	go g.retryLink(ctx, link, reason)
 }
@@ -1896,7 +1889,6 @@ func (g *gui) retryLink(ctx context.Context, link *dialLink, reason string) {
 		g.attach(sess)
 		g.setStatus(connectedStatus(link, true))
 		g.addMessage(chatMessage{from: "system", text: "reconnected"})
-		fyne.Do(g.refreshConnectionState)
 		fyne.Do(g.updateButtons)
 
 		return
@@ -1939,7 +1931,6 @@ func (g *gui) endReconnect(ctx context.Context, status string) {
 
 	g.setStatus(status)
 	fyne.Do(g.updateButtons)
-	fyne.Do(g.refreshConnectionState)
 }
 
 // reconnectDelay is how long to wait before attempt n, counting from 1: the
@@ -2080,45 +2071,6 @@ func (g *gui) growComposer(text string) {
 	g.entry.SetMinRowsVisible(rows)
 }
 
-// refreshConnectionState writes the chat header's state: offline, connecting,
-// hosting, or connected to the device the handshake named.
-//
-// It reads the same fields the buttons do, so there is one truth about whether
-// this window is in a session (#345). The state goes on the header's one line,
-// and only while that line is the state: a message from setStatus owns it until
-// it is cleared, because "Cannot play …" is news and "offline" is not (#383).
-func (g *gui) refreshConnectionState() {
-	if g.status == nil || !g.statusShowsState {
-		return
-	}
-
-	g.mu.Lock()
-	sess, server, starting, reconnecting, peer := g.sess, g.server, g.starting, g.reconnecting, g.peerName
-	g.mu.Unlock()
-
-	// One line, one baseline: the mark is a character in the same text as the
-	// word, so they cannot drift apart (#364). The importance is the colour.
-	text, importance := "● offline", widget.LowImportance
-
-	switch {
-	case starting:
-		text, importance = "● connecting…", widget.WarningImportance
-	case reconnecting:
-		text, importance = "● reconnecting…", widget.WarningImportance
-	case server != nil:
-		text, importance = "● hosting", widget.SuccessImportance
-	case sess != nil:
-		text, importance = "● connected", widget.SuccessImportance
-		if peer != "" {
-			text = "● connected to " + peer
-		}
-	}
-
-	g.status.SetText(text)
-	g.status.SetImportance(importance)
-	g.status.Show()
-}
-
 // updateButtons enables what the current state can actually do. Send needs a
 // session; Stop also makes sense for a host with nobody connected yet. Host and
 // Connect change what this device is, and there can be only one of them — so
@@ -2179,16 +2131,15 @@ func (g *gui) canvasWidth() int {
 
 func (g *gui) setStatus(text string) {
 	fyne.Do(func() {
-		// An empty status is "nothing new to say", not "hide the line": the
-		// header gives it back to the connection state (#383).
+		// The line exists only while it has something to say: a sentence that
+		// stays, or a state standing in it, was the report (#364, #433).
 		if text == "" {
-			g.statusShowsState = true
-			g.refreshConnectionState()
+			g.status.SetText("")
+			g.status.Hide()
 
 			return
 		}
 
-		g.statusShowsState = false
 		g.status.SetText(text)
 		g.status.SetImportance(widget.MediumImportance)
 		g.status.Show()
@@ -2489,7 +2440,8 @@ func (g *gui) startDiscovery() {
 
 			fyne.Do(func() {
 				g.addBeacon(beacon)
-				g.setStatus("Discovered " + beacon.Name)
+				// The Devices list already shows it; the chat's line is for
+				// what happened in the conversation (#433).
 			})
 		})
 		g.listener.Start()
