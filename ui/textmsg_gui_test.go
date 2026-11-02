@@ -155,15 +155,10 @@ func waitForMessages(t *testing.T, g *gui, n int) []chatMessage {
 	return nil
 }
 
-// The composer is a chat field rather than a form field: Enter starts a new
-// line, Shift+Enter sends the whole body as one message, and the Send button is
-// the third way in — the only one a phone has, since its soft keyboard turns
-// the action key into a newline.
-//
-// The assertion that matters is the negative one: a finished line followed by
-// Enter must not send, because that is what a message typed in two parts used
-// to do.
-func TestComposerStartsANewLineAndSendsOnShiftEnter(t *testing.T) {
+// Enter sends and Shift+Enter breaks the line — the order every chat app a desktop
+// user knows, and the one a phone's keyboard has too, because its enter key
+// appends the same newline (#323).
+func TestComposerSendsOnEnterAndBreaksTheLineOnShiftEnter(t *testing.T) {
 	g := newTestGUI(t)
 
 	sess := newSendRecorder()
@@ -175,32 +170,40 @@ func TestComposerStartsANewLineAndSendsOnShiftEnter(t *testing.T) {
 		t.Fatal("the composer is single-line, so a message can never be more than one line")
 	}
 
+	// Enter sends what has been typed, and clears the field.
 	typeRunes(g.entry, "first line")
 	g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+
+	if got, want := string(sess.wait(t)), "first line"; got != want {
+		t.Fatalf("Enter sent %q, want %q", got, want)
+	}
+
+	if got := g.entry.Text; got != "" {
+		t.Errorf("the field reads %q after sending, want it empty", got)
+	}
+
+	// Shift+Enter breaks the line and sends nothing.
+	typeRunes(g.entry, "first line")
+	g.entry.KeyDown(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+	g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
+	g.entry.KeyUp(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
 	typeRunes(g.entry, "second line")
 
 	if got, want := g.entry.Text, "first line\nsecond line"; got != want {
-		t.Fatalf("after Enter the field reads %q, want %q", got, want)
+		t.Fatalf("after Shift+Enter the field reads %q, want %q", got, want)
 	}
 
 	select {
 	case <-sess.done:
-		t.Fatal("Enter sent the message, want a new line")
+		t.Fatal("Shift+Enter sent the message, want a new line")
 	default:
 	}
 
-	g.entry.KeyDown(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
-	g.entry.TypedKey(&fyne.KeyEvent{Name: fyne.KeyEnter})
-	g.entry.KeyUp(&fyne.KeyEvent{Name: desktop.KeyShiftLeft})
+	// And the button sends the whole body, newline included.
+	g.send(g.entry.Text)
 
-	// Ordinary text is handed over byte for byte — the envelope only wraps a
-	// line that begins with the magic — so the newline is what the peer gets.
 	if got, want := string(sess.wait(t)), "first line\nsecond line"; got != want {
-		t.Fatalf("sent %q, want %q", got, want)
-	}
-
-	if got := g.entry.Text; got != "" {
-		t.Errorf("the field still reads %q after sending, want it cleared", got)
+		t.Fatalf("the button sent %q, want %q", got, want)
 	}
 }
 
