@@ -10,6 +10,7 @@
 - [Commands and flags](Commands-and-flags)
 - [Troubleshooting](Troubleshooting)
 - [Security model](Security-model)
+- [Verifying on real hardware](Verifying-on-real-hardware)
 - [Development](Development)
 
 ---
