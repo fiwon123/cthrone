@@ -228,6 +228,17 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.16.0` is a presentation release. The **wiki** is rebuilt to be read: a
+landing page with badges and a diagram of terminal, window and phone into one
+sealed session and one room; a quick start on every page; a capability matrix
+per transport and per file kind; a proven/unproven table with the issue behind
+every ❌; diagrams for the host flow and the handshake; and Prev · Home · Next
+footers so it reads in order (#450). The **chat header shows its connection
+state as one colour glyph** — ⚪ offline, 🟡 starting, 🟢 hosting, 🔵 connected,
+🟠 reconnecting, 🔴 lost — so the line beside it is free for what happened, and
+the state is visible without opening Setup (#453). No transport, no wire format
+and no security rule changed.
+
 `v0.15.0` is the second report from a user, and the fixes it asked for. A
 message a host relays is **attributed to the device that typed it**: the sender
 travels in the frame header now, and a peer that may predate the field is given
