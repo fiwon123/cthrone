@@ -29,11 +29,11 @@ A gate is only worth having if it can fail.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file**: #85/#86 closed the last gap, so all 32
+**Every package has a test file**: #85/#86 closed the last gap, so all 33
 packages in the module carry tests and `go test ./...` prints no
 `? package [no test files]` line.
 
-- **Covered (32)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
+- **Covered (33)**: `main`, `cmd` (root), `cmd/assets`, `cmd/connect`,
   `cmd/exec`, `cmd/host`, `cmd/peers`, `cmd/recv`, `cmd/scan`, `cmd/ui`,
   `cmd/update`, `internal/auth`, `internal/chat`, `internal/core/bluetooth`,
   `internal/core/nats`, `internal/core/websocket` (scanner included),
@@ -42,7 +42,7 @@ packages in the module carry tests and `go test ./...` prints no
   tested without a radio), `internal/handlers/nats`,
   `internal/handlers/websocket`, `internal/install`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/update`, `internal/wire`,
-  `mobile`, `ui` (its
+  `gui` (the window binary's entry point, #382), `mobile`, `ui` (its
   non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
   copyable button and tab bar), and the gui-tagged widget tree (headless).
 
@@ -59,7 +59,7 @@ swaps Fyne's GL driver for the software one, so no GTK/X11/GL is needed. A
 native rendered frame and the APK on a device are still unverified (#155). The
 Bluetooth transport is in the same position: its framing, session and keepalive
 are exercised on an in-memory link, and no gate here opens a radio (#202, #206).
-Report what executed; "32/32 packages have tests" is not "the behaviour is
+Report what executed; "33/33 packages have tests" is not "the behaviour is
 covered".
 
 ### The race detector

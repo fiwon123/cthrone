@@ -174,11 +174,11 @@ already exists — so it needs `make reset` once.
 
 ### The current state of this suite — read this before claiming coverage
 
-**Every package has a test file.** #85/#86 closed the last gap: all 32 packages
+**Every package has a test file.** #85/#86 closed the last gap: all 33 packages
 in the module now carry tests, so `go test ./...` prints no `? package [no test
 files]` line and `make check` has no gap left to report.
 
-- **Covered (32 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
+- **Covered (33 packages)**: `main` (`github.com/fiwon123/cthrone`), `cmd`
   (root), `cmd/assets`, `cmd/connect`, `cmd/exec`, `cmd/host`, `cmd/peers`,
   `cmd/recv`, `cmd/scan`, `cmd/ui`, `cmd/update`, `internal/auth`,
   `internal/chat`, `internal/core/bluetooth`, `internal/core/nats`,
@@ -188,7 +188,8 @@ files]` line and `make check` has no gap left to report.
   portable, so tested without a radio), `internal/handlers/nats`,
   `internal/handlers/websocket`, `internal/install`, `internal/pairing`,
   `internal/session`, `internal/shutdown`, `internal/update`, `internal/wire`,
-  `mobile`, `ui` (its
+  `gui` (the window binary's entry point: it starts the window whatever the
+  arguments are, #382), `mobile`, `ui` (its
   non-GUI settings logic), `ui/widgets` (the selectable-text helpers, the
   copyable button and tab bar), and the gui-tagged widget tree (headless — see
   below).
