@@ -1906,6 +1906,17 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 		return
 	}
 
+	// On a phone the keyboard covers the bottom of the screen and the window
+	// resizes under it, so the tap meant for Send can land on a row — and a row
+	// copies, so the message is copied instead of sent (#325). While the composer
+	// holds the keyboard, a tap on the transcript only puts it away: the next tap
+	// copies, deliberately.
+	if g.mobile && g.composerHasKeyboard() {
+		g.win.Canvas().Unfocus()
+
+		return
+	}
+
 	message := g.messages[id]
 
 	g.chatList.Unselect(id)
@@ -1917,6 +1928,18 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 	}
 
 	g.copyToClipboard(message.line())
+}
+
+// composerHasKeyboard reports whether the message field is the focused object,
+// which is when a phone's keyboard is up for it.
+func (g *gui) composerHasKeyboard() bool {
+	if g.entry == nil || g.win == nil || g.win.Canvas() == nil {
+		return false
+	}
+
+	focused := g.win.Canvas().Focused()
+
+	return focused == fyne.Focusable(g.entry)
 }
 
 // copyToClipboard puts text on the clipboard and confirms it on screen.
