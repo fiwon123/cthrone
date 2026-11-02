@@ -171,7 +171,11 @@ darwin: $(BUILD_DIR) ## build the macOS CLI archives (arm64, amd64)
 #   gui-darwin   must run on macOS; refused elsewhere
 #   gui-android  needs the Android SDK + NDK and the fyne CLI
 #
-# `gui-android` renders mobile/AndroidManifest.xml from its template first, so the
+# The Android build number is derived from the version (0.11.3 -> 1103), not from
+# the commit count: CI checks out shallow, where a count is always 1, and a
+# versionCode that never changes makes an update indistinguishable from a
+# reinstall. `gui-android` renders mobile/AndroidManifest.xml from its template
+# first, so the
 # APK is locked to portrait and still carries the release's version (#302); the
 # generated file is removed afterwards and is not committed. `fyne package`
 # without this target falls back to the CLI's own manifest — rotation allowed.
@@ -297,7 +301,7 @@ gui-android: $(BUILD_DIR) ## build the Android APK (needs Android SDK + NDK and 
 	  [0-9]*.[0-9]*.[0-9]*) : ;; \
 	  *) echo "ERROR: '$(VERSION)' is not an x.y.z version — pass VERSION=v<major>.<minor>.<patch>." >&2; exit 1 ;; \
 	esac; \
-	build="$$(git rev-list --count HEAD 2>/dev/null || echo 1)"; \
+	build="$$(echo "$$version" | awk -F. '{printf "%d", $$1*10000 + $$2*100 + $$3}')"; \
 	mkdir -p $(GUI_BUILD) && \
 	sed -e "s/@VERSION@/$$version/g" -e "s/@BUILD@/$$build/g" \
 	  mobile/AndroidManifest.xml.tmpl > mobile/AndroidManifest.xml && \
