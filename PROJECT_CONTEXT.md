@@ -228,6 +228,14 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.13.1` is a documentation patch: the video decision is now a plan. The wiki
+page **Video in the app** records why a pure-Go decoder is not an option, what
+cgo FFmpeg would cost on each platform (including the mingw cross-build and the
+NDK one), the licence rule that keeps this project MIT, where a decoder plugs in
+beside the audio player, and the tests that would prove it — split into what a
+fake decoder can prove and what needs a real one and a screen. It says plainly
+that nothing is implemented. No code changed (#404, #389).
+
 `v0.13.0` adds the shape of the sound. An audio row now carries a **waveform**
 under its Play button — one peak per column, from the decode the player already
 did — and the waveform is the **seek control**: tap or drag it, and the clip
