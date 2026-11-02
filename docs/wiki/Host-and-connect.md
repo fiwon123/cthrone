@@ -2,8 +2,8 @@
 
 ## 🚦 The icon in the chat header
 
-One glyph, always there, so you never have to open Setup to know where you
-stand:
+One glyph and one word, always there, so you never have to open Setup to know
+where you stand:
 
 | | | |
 |---|---|---|
@@ -14,9 +14,10 @@ stand:
 | 🟠 | **reconnecting** | the link dropped and it is trying again |
 | 🔴 | **lost** | the link went away and nothing is retrying |
 
-The transcript still says *what* happened ("Disconnected: …", "Encrypted with
-…"); the icon says *where you stand now*. A red icon is worth a look at
-**Stop** — pressing it and hosting again is the fastest reset.
+The transcript still says *what* happened ("Disconnected: …", "Paired with …");
+the header says *where you stand now*, and a line above the message box carries
+anything the app needs to say — tap it to copy it. A red icon is worth a look at
+**Stop**: pressing it and hosting again is the fastest reset.
 
 ## ⚡ In a hurry
 
