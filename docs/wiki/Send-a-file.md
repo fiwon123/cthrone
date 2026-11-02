@@ -21,6 +21,27 @@ a desktop only: Android will not let an app pass a private `file://` path to
 another app, so on a phone the row offers **Save as…** instead — save it
 somewhere the file manager can see, then open it from there.
 
+## Playing an audio clip
+
+A **WAV** or **MP3** clip the app received or sent plays on its row: **Play**
+starts it, the same button becomes **Stop**, and the clock beside it shows the
+position over the length. One clip sounds at a time — pressing Play on another
+sends the first row back to Play — and stopping the connection silences the
+device. The clip is decoded when it is played, not when the row is painted, so a
+long one is decoded beside the window and starts a moment later.
+
+The player is built into every GUI build, desktop and phone alike. It is bound to
+what a chat window needs, not to a music library:
+
+- **WAV and MP3 only.** Ogg/Vorbis, AAC/M4A and FLAC have no decoder in this
+  build, so those rows keep the actions above and the icon says what they are. A
+  phone's voice memo is usually AAC/M4A.
+- **32 MiB of decoded sound**, a little under three minutes at the device's
+  format; a longer clip is refused with a sentence rather than held in memory.
+- The device is opened on the first **Play**. A machine with no audio server
+  gets a status line saying the clip cannot be played, and the rest of the app
+  works as before.
+
 A multi-line message and a file both carry the sender's name: text in-band as a
 prefix, a file in an optional header field that an older peer ignores.
 
@@ -34,8 +55,6 @@ prefix, a file in an optional header field that an older peer ignores.
 
 ## Known gaps
 
-- **Audio does not play inside the app.** The row offers the device's own player
-  where the platform allows it, and on a phone the way out is Save as…; a player
-  of our own needs a decoder and an audio device this toolkit does not carry
-  ([#306](https://github.com/fiwon123/cthrone/issues/306)).
 - A **PDF is not drawn**: it opens in the device's reader, by design.
+- **Audio plays only as WAV or MP3.** Ogg, AAC/M4A and FLAC have no decoder in
+  this build; those rows offer Open or Save as…, as before.

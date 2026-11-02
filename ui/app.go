@@ -194,6 +194,26 @@ type gui struct {
 	incoming  map[string]*incomingTransfer
 	assembler *wire.Assembler
 
+	// audio is the window's one sound device, made on the first Play: a window
+	// that never plays anything never touches the sound card (#306). audioPath
+	// is the clip it is sounding, audioGen tells a decode or a clock ticker that
+	// a newer action has superseded it, and audioClock is the row widget that
+	// ticker writes to — dropped by whichever row is painted next, because the
+	// list reuses that widget for another message.
+	//
+	// audioDurations remembers a length once a clip has been decoded, so a
+	// repaint can show it without decoding the file again; the decode runs
+	// beside the UI, so the map is guarded by mu. playableFiles is the same
+	// answer per path, and is only touched while painting, like the picture and
+	// text caches.
+	audio          audioEngine
+	audioPath      string
+	audioGen       int
+	audioDuration  time.Duration
+	audioClock     *widgets.Text
+	audioDurations map[string]time.Duration
+	playableFiles  map[string]bool
+
 	// devices
 	beacons    []device
 	beaconList *widget.List
@@ -527,6 +547,13 @@ func (g *gui) build() {
 			icon := widget.NewIcon(theme.FileIcon())
 			icon.Hide()
 
+			// A clip this build can decode plays in the row itself: seven
+			// seconds of speech does not deserve a second window, and on a
+			// phone handing the file to another app was the only option left
+			// (#305, #306). The clock beside the button is the length, or how
+			// far into the clip the sound has got.
+			audio := newAudioRow(g)
+
 			// The sender has a line of its own, in a colour of its own, so a room
 			// of three is readable at a glance (#346). It is a canvas.Text
 			// because that carries any colour; a themed label takes a colour
@@ -536,7 +563,7 @@ func (g *gui) build() {
 
 			caption := container.NewVBox(sender, row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box)
 		},
 		g.updateChatRow,
 	)
@@ -1332,6 +1359,11 @@ func (g *gui) offerPairing(token, deviceFingerprint, certificateFingerprint, own
 // a half-written file, and leaving it running would leave one behind.
 func (g *gui) stop() {
 	g.cancelTransfers()
+	g.stopAudio()
+
+	if g.chatList != nil {
+		g.chatList.Refresh()
+	}
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
@@ -1386,6 +1418,10 @@ func (g *gui) stop() {
 // there is no event loop left to come back to.
 func (g *gui) shutdown() {
 	g.stopCopyHint()
+
+	// The device goes back to the machine before the process does, and no
+	// widget is touched: there is no event loop left to return to.
+	g.stopAudio()
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
@@ -2158,6 +2194,13 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	save, _ := row.Objects[3].(*widgets.CopyButton)
 	open, _ := row.Objects[4].(*widgets.CopyButton)
 
+	// The player is the sixth object, and optional: a row built before it was
+	// added still paints as the file row it was.
+	var audio audioRow
+	if len(row.Objects) > 5 {
+		audio, _ = audioRowOf(row.Objects[5])
+	}
+
 	var label *widgets.Text
 	var icon *widget.Icon
 	var sender *canvas.Text
@@ -2193,6 +2236,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, preview, icon, save, open)
+	g.fillAudioRow(m, audio)
 
 	width := row.Size().Width
 	if g.chatList == nil || width <= 0 {
