@@ -183,8 +183,13 @@ type gui struct {
 	listHint   *widgets.Text
 	listener   *discovery.Listener
 
-	mu     sync.Mutex
-	sess   session.Session
+	mu   sync.Mutex
+	sess session.Session
+
+	// hub is the room this window hosts, while it hosts. A host's own message
+	// goes through it, not through the one session `sess` happens to hold: a
+	// host with two devices used to reach only the last one that joined (#320).
+	hub    *session.Hub
 	server liveServer
 
 	// starting and stopping guard the handover of the transport. While either
@@ -1034,7 +1039,10 @@ func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 		return
 	}
 
-	if !g.finishStart(seq, func() { g.server = handle }) {
+	if !g.finishStart(seq, func() {
+		g.server = handle
+		g.hub = handle.Hub()
+	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)
 
@@ -1070,7 +1078,10 @@ func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts 
 	// binding released the port it was told about, not this one, so this
 	// server closes itself: otherwise the app would be running a host with
 	// nobody holding the button that stops it.
-	if !g.finishStart(seq, func() { g.server = handle }) {
+	if !g.finishStart(seq, func() {
+		g.server = handle
+		g.hub = handle.Hub()
+	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)
 
@@ -1178,7 +1189,7 @@ func (g *gui) stop() {
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
-	g.sess, g.server = nil, nil
+	g.sess, g.server, g.hub = nil, nil, nil
 
 	// A Start that is still in flight is cancelled: its server closes itself
 	// when it opens instead of becoming the live one. Until this stop has
@@ -1223,7 +1234,7 @@ func (g *gui) shutdown() {
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server
-	g.sess, g.server = nil, nil
+	g.sess, g.server, g.hub = nil, nil, nil
 	g.startSeq++
 	g.mu.Unlock()
 
@@ -1243,12 +1254,9 @@ func (g *gui) send(text string) {
 		return
 	}
 
-	g.mu.Lock()
-	sess := g.sess
-	g.mu.Unlock()
-
-	if sess == nil {
-		g.setStatus("Nothing to send to — connect, or wait for a device to join")
+	sender, err := g.outgoing()
+	if err != nil {
+		g.setStatus("Nothing to send to — " + err.Error())
 
 		return
 	}
@@ -1269,7 +1277,7 @@ func (g *gui) send(text string) {
 	g.addMessage(chatMessage{text: text})
 
 	go func() {
-		if err := sess.Send(payload); err != nil {
+		if err := sender.Send(payload); err != nil {
 			g.setStatus("Send failed: " + err.Error())
 		}
 	}()
