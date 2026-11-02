@@ -28,14 +28,25 @@ type audioRow struct {
 	box   *fyne.Container
 	play  *widgets.CopyButton
 	clock *widgets.Text
+	wave  *widgets.Waveform
 }
 
 // newAudioRow builds the player a row carries, hidden until a row needs it.
+//
+// The waveform is under the button and the clock: a row can be walked through a
+// clip by dragging it, which is the one thing the buttons cannot do (#399).
 func newAudioRow(g *gui) audioRow {
 	play := widgets.NewButtonWithIcon("Play", theme.MediaPlayIcon(), nil, g.copyLabel)
 	clock := g.text("")
+	wave := widgets.NewWaveform(nil)
+	wave.Hide()
 
-	row := audioRow{box: container.NewHBox(play, clock), play: play, clock: clock}
+	row := audioRow{
+		box:   container.NewVBox(container.NewHBox(play, clock), wave),
+		play:  play,
+		clock: clock,
+		wave:  wave,
+	}
 	row.hide()
 
 	return row
@@ -48,17 +59,27 @@ func audioRowOf(object fyne.CanvasObject) (audioRow, bool) {
 		return audioRow{}, false
 	}
 
-	play, ok := box.Objects[0].(*widgets.CopyButton)
+	top, ok := box.Objects[0].(*fyne.Container)
+	if !ok || len(top.Objects) < 2 {
+		return audioRow{}, false
+	}
+
+	play, ok := top.Objects[0].(*widgets.CopyButton)
 	if !ok {
 		return audioRow{}, false
 	}
 
-	clock, ok := box.Objects[1].(*widgets.Text)
+	clock, ok := top.Objects[1].(*widgets.Text)
 	if !ok {
 		return audioRow{}, false
 	}
 
-	return audioRow{box: box, play: play, clock: clock}, true
+	wave, ok := box.Objects[1].(*widgets.Waveform)
+	if !ok {
+		return audioRow{}, false
+	}
+
+	return audioRow{box: box, play: play, clock: clock, wave: wave}, true
 }
 
 func (r audioRow) hide() {
@@ -125,6 +146,8 @@ func (g *gui) fillAudioRow(m chatMessage, row audioRow) {
 		g.audioClock = row.clock
 		g.mu.Unlock()
 
+		g.fillWaveform(row, path, g.audioFraction())
+
 		row.show()
 
 		return
@@ -142,7 +165,27 @@ func (g *gui) fillAudioRow(m chatMessage, row audioRow) {
 	}
 	g.mu.Unlock()
 
+	g.fillWaveform(row, path, 0)
+
 	row.show()
+}
+
+// fillWaveform gives the row's seek control the clip's shape, where the sound
+// has got to, and the handler that moves it. A clip this window has not decoded
+// has no shape yet, so the control stays hidden rather than drawing an empty
+// box (#399).
+func (g *gui) fillWaveform(row audioRow, path string, fraction float32) {
+	peaks := g.audioPeaksFor(path)
+	if len(peaks) == 0 {
+		row.wave.Hide()
+
+		return
+	}
+
+	row.wave.SetPeaks(peaks)
+	row.wave.SetFraction(fraction)
+	row.wave.SetOnSeek(func(chosen float32) { g.seekAudio(path, float64(chosen)) })
+	row.wave.Show()
 }
 
 // playsHere reports whether a row in this state holds a whole file on disk: a
@@ -167,7 +210,58 @@ func (g *gui) toggleAudio(path string) {
 		return
 	}
 
-	g.startAudio(path)
+	g.startAudio(path, 0)
+}
+
+// seekAudio moves through the clip at path: while it plays, playback continues
+// from the chosen point; while it is idle, it starts there (#399).
+func (g *gui) seekAudio(path string, fraction float64) {
+	if !g.audioPlaying(path) {
+		g.startAudio(path, fraction)
+
+		return
+	}
+
+	duration, _ := g.audioProgress()
+	if duration <= 0 {
+		return
+	}
+
+	if fraction < 0 {
+		fraction = 0
+	}
+
+	if fraction > 1 {
+		fraction = 1
+	}
+
+	if err := g.player().Seek(time.Duration(float64(duration) * fraction)); err != nil {
+		g.setStatus("Cannot move through " + filepath.Base(path) + ": " + err.Error())
+
+		return
+	}
+
+	if g.chatList != nil {
+		g.chatList.Refresh()
+	}
+}
+
+// audioFraction is how far into the playing clip the sound has got, 0..1.
+func (g *gui) audioFraction() float32 {
+	duration, position := g.audioProgress()
+	if duration <= 0 || position <= 0 {
+		return 0
+	}
+
+	return float32(position) / float32(duration)
+}
+
+// audioPeaksFor is the clip's shape, when this window has decoded it.
+func (g *gui) audioPeaksFor(path string) []float32 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.audioPeaks[path]
 }
 
 // startAudio decodes path beside the UI and hands the clip to the device.
@@ -176,7 +270,7 @@ func (g *gui) toggleAudio(path string) {
 // is not a conversation. Decoding happens off the UI goroutine because a
 // three-minute clip is real work; the row says Stop as soon as Play is pressed,
 // so the tap has an answer before the decode finishes.
-func (g *gui) startAudio(path string) {
+func (g *gui) startAudio(path string, from float64) {
 	g.stopAudio()
 
 	g.mu.Lock()
@@ -189,6 +283,11 @@ func (g *gui) startAudio(path string) {
 
 	go func() {
 		clip, err := decodeAudio(path)
+
+		var peaks []float32
+		if err == nil {
+			peaks = audioPeaks(clip.pcm, audioPeakColumns)
+		}
 
 		fyne.Do(func() {
 			g.mu.Lock()
@@ -220,6 +319,18 @@ func (g *gui) startAudio(path string) {
 			}
 
 			g.audioDurations[path] = clip.duration
+
+			if g.audioPeaks == nil {
+				g.audioPeaks = make(map[string][]float32)
+			}
+
+			if len(g.audioPeaks) >= previewCacheMax {
+				clear(g.audioPeaks)
+			}
+
+			if len(peaks) > 0 {
+				g.audioPeaks[path] = peaks
+			}
 			g.mu.Unlock()
 
 			// Play runs on the UI goroutine with Stop, so the two cannot be
@@ -233,6 +344,10 @@ func (g *gui) startAudio(path string) {
 				g.setStatus("Cannot play " + filepath.Base(path) + ": " + err.Error())
 
 				return
+			}
+
+			if from > 0 {
+				_ = g.audio.Seek(time.Duration(float64(clip.duration) * from))
 			}
 
 			go g.tickAudio(gen)
