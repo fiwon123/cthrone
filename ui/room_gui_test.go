@@ -200,3 +200,25 @@ func TestTheRoomGetsThePayloadUnchanged(t *testing.T) {
 		t.Errorf("the room got %q, want the %q that was sent", got, payload)
 	}
 }
+
+// A host handle has a room only where the radio is built: on Android and macOS
+// the same name is the unsupported stand-in. Asking for the room instead of
+// assuming the method keeps those builds compiling — CI caught this by failing
+// the darwin and APK jobs (#320).
+func TestTheRoomIsAskedForNotAssumed(t *testing.T) {
+	hub := session.NewHub()
+
+	if got := hubOf(fakeRoom{hub: hub}); got != hub {
+		t.Errorf("hubOf(handle with a room) = %v, want the room", got)
+	}
+
+	if got := hubOf(noRoom{}); got != nil {
+		t.Errorf("hubOf(handle without a room) = %v, want nil", got)
+	}
+}
+
+type fakeRoom struct{ hub *session.Hub }
+
+func (f fakeRoom) Hub() *session.Hub { return f.hub }
+
+type noRoom struct{}

@@ -1057,7 +1057,7 @@ func (g *gui) hostBluetooth(seq int, data *appdata.Data, opts pairing.Options) {
 
 	if !g.finishStart(seq, func() {
 		g.server = handle
-		g.hub = handle.Hub()
+		g.hub = hubOf(handle)
 	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)
@@ -1096,7 +1096,7 @@ func (g *gui) hostWebsocket(seq int, data *appdata.Data, tlsConf auth.TLS, opts 
 	// nobody holding the button that stops it.
 	if !g.finishStart(seq, func() {
 		g.server = handle
-		g.hub = handle.Hub()
+		g.hub = hubOf(handle)
 	}) {
 		_ = handle.Stop()
 		fyne.Do(g.updateButtons)

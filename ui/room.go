@@ -15,6 +15,27 @@ var (
 	errEmptyRoom = errors.New("nobody has joined the room yet")
 )
 
+// roomHost is the part of a host handle the window needs beyond Stop: the room
+// its sessions join.
+//
+// It is asked for rather than assumed because the Bluetooth handle only has one
+// where the radio is built: on Android and macOS the same name is the
+// unsupported stand-in, which has no room and never will (#320).
+type roomHost interface {
+	Hub() *session.Hub
+}
+
+// hubOf is the room behind a host handle, or nil when the platform's handle has
+// none.
+func hubOf(handle any) *session.Hub {
+	room, ok := handle.(roomHost)
+	if !ok {
+		return nil
+	}
+
+	return room.Hub()
+}
+
 // roomSender sends a payload to every session a host holds.
 //
 // A host is a room, and its own message has to reach all of it. It used to go
