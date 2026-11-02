@@ -107,7 +107,7 @@ func TestThePerfLineSummarisesTheMessagePath(t *testing.T) {
 	}
 
 	line := lines[0]
-	for _, want := range []string{"25 messages", "2.00 ms each", "last 2.00 ms", "7 rows", "2 live"} {
+	for _, want := range []string{"25 messages", "2.00 ms each", "last 2.00 ms", "7 rows", "2 live", "goroutines", "MB heap"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the perf line %q does not carry %q", line, want)
 		}
