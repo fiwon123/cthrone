@@ -52,6 +52,47 @@ func TestHubBroadcast(t *testing.T) {
 	}
 }
 
+// A host's Stop empties the room: every session is told, and the room is left
+// with nobody to relay to. Closing the transport's listener is not enough on a
+// websocket, where the connection is hijacked (#385).
+func TestHubCloseEndsEverySession(t *testing.T) {
+	h := NewHub()
+	a := newFake("a", "1.1.1.1")
+	b := newFake("b", "2.2.2.2")
+	h.Register(a)
+	h.Register(b)
+
+	var reasons []string
+
+	a.AddCloseHandler(func(r string) { reasons = append(reasons, "a: "+r) })
+	b.AddCloseHandler(func(r string) { reasons = append(reasons, "b: "+r) })
+
+	if ended := h.Close("the host stopped"); ended != 2 {
+		t.Fatalf("Close ended %d sessions, want 2", ended)
+	}
+
+	if len(reasons) != 2 {
+		t.Fatalf("%d sessions were told, want 2: %v", len(reasons), reasons)
+	}
+
+	for _, reason := range reasons {
+		if reason != "a: the host stopped" && reason != "b: the host stopped" {
+			t.Errorf("a session was told %q, want the host's reason", reason)
+		}
+	}
+
+	// The rooms the sessions left took themselves out: a broadcast has nowhere
+	// left to go.
+	if sent := h.Broadcast("", []byte("anyone?")); sent != 0 {
+		t.Errorf("Broadcast reached %d sessions after Close, want 0", sent)
+	}
+
+	// Closing an empty room is not an error, and neither is closing it twice.
+	if ended := h.Close("again"); ended != 0 {
+		t.Errorf("a second Close ended %d sessions, want 0", ended)
+	}
+}
+
 func TestBaseNotify(t *testing.T) {
 	b := NewBase("x", "r")
 	var got string

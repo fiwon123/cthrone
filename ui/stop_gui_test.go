@@ -61,10 +61,10 @@ func TestStopIsInTheHeaderAndNotBesideSend(t *testing.T) {
 				t.Fatal("the Stop button is not in the painted tree")
 			}
 
-			// The copy confirmation is in the header, which is what makes it a
-			// handle on the header without a new field.
-			if header != parents[g.copyHint] {
-				t.Errorf("Stop is in %T, not in the header with the copy line", header)
+			// The status line is in the header, which is what makes it a handle
+			// on the header without a new field (#383).
+			if header != parents[g.status] {
+				t.Errorf("Stop is in %T, not in the header with the status line", header)
 			}
 
 			if parents[g.stopBtn] == parents[g.sendBtn] {

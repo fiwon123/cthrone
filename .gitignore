@@ -53,3 +53,6 @@ go.work.sum
 
 # Written by `make gui-android` with the release tag.
 /mobile/version_build.go
+
+# Generated resource for the Windows window build (moved into gui/ while it runs)
+/gui/rsrc_windows_amd64.syso
