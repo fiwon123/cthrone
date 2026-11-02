@@ -221,6 +221,15 @@ type gui struct {
 	audioDurations map[string]time.Duration
 	audioPeaks     map[string][]float32
 
+	// audioPrepared remembers the clips whose length and waveform are already
+	// known, and audioPreparing bounds the background decode to one at a time.
+	// audioClip is the last decoded clip, kept so the Play that follows reading
+	// its waveform does not decode the file a second time (#435).
+	audioPrepared  map[string]bool
+	audioPreparing bool
+	audioClip      *audioClip
+	audioClipPath  string
+
 	// audioResumeAt is where the sound stopped in each clip, as a fraction, so
 	// Play continues there instead of starting over (#409). A clip that played
 	// to its end has no entry.
@@ -270,8 +279,11 @@ type gui struct {
 	liveSessions int
 
 	// What the transcript has already decoded or read, by path, so a repaint
-	// does not do the I/O again (#321). They are only touched while painting,
-	// which happens on the UI goroutine.
+	// does not do the I/O again (#321). Painting is on the UI goroutine, but a
+	// background prepare refreshes the transcript when it finishes, and the
+	// test driver runs that inline on the prepare's goroutine — so the caches
+	// take cacheMu rather than trusting the thread (#435).
+	cacheMu        sync.Mutex
 	pictures       map[string]fyne.Resource
 	decodableFiles map[string]bool
 	texts          map[string]string

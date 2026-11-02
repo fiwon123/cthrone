@@ -210,11 +210,18 @@ func fractionOf(position, duration time.Duration) float64 {
 // A GIF that turns out to be a still picture is remembered as not animatable,
 // so its row stops offering a Play that cannot work.
 func (g *gui) animatable(path string) bool {
-	if ok, known := g.videoFiles[path]; known {
+	g.cacheMu.Lock()
+	ok, known := g.videoFiles[path]
+	g.cacheMu.Unlock()
+
+	if known {
 		return ok
 	}
 
-	ok := canPlayVideo(path)
+	ok = canPlayVideo(path)
+
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
 
 	if g.videoFiles == nil {
 		g.videoFiles = make(map[string]bool)
@@ -232,6 +239,9 @@ func (g *gui) animatable(path string) bool {
 // notAnimatable remembers that a file this build thought it could animate is
 // not one, so the row gives the picture back to the still preview.
 func (g *gui) notAnimatable(path string) {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+
 	if g.videoFiles == nil {
 		g.videoFiles = make(map[string]bool)
 	}

@@ -13,6 +13,11 @@ import (
 	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
+// decodeClip is the decoder the player and the waveform both use. It is a
+// variable so a test can count the decodes: preparing a waveform and then
+// pressing Play must be one decode, not two (#435).
+var decodeClip = decodeAudio
+
 // audioPollInterval is how often a playing row's clock moves. The device
 // reports no playhead, so the window asks the engine where it is; four times a
 // second is enough to look like a clock and cheap enough to leave running.
@@ -129,10 +134,15 @@ func (g *gui) fillAudioRow(m chatMessage, row audioRow) {
 	}
 
 	path := m.file.path
+
+	// The wave is the control, so it has to be there before Play: the first
+	// paint of an audio row decodes the clip in the background, once (#435).
+	g.prepareWaveform(path)
+
 	row.play.SetOnTapped(func() { g.toggleAudio(path) })
 
 	if g.audioPlaying(path) {
-		duration, position := g.audioProgress()
+		duration, position := g.audioShownProgress(path)
 
 		row.play.SetText("Stop")
 		row.play.SetIcon(theme.MediaStopIcon())
@@ -284,8 +294,19 @@ func (g *gui) startAudio(path string, from float64) {
 
 	g.chatList.Refresh()
 
+	g.mu.Lock()
+	cached, cachedPath := g.audioClip, g.audioClipPath
+	g.mu.Unlock()
+
 	go func() {
-		clip, err := decodeAudio(path)
+		clip, err := cached, error(nil)
+
+		// A clip the waveform prepared is the clip Play wants: decoding it
+		// again to hear what was just drawn would be the same file twice
+		// (#435).
+		if clip == nil || cachedPath != path {
+			clip, err = decodeClip(path)
+		}
 
 		var peaks []float32
 		if err == nil {
@@ -313,26 +334,8 @@ func (g *gui) startAudio(path string, from float64) {
 			g.mu.Lock()
 			g.audioDuration = clip.duration
 
-			if g.audioDurations == nil {
-				g.audioDurations = make(map[string]time.Duration)
-			}
-
-			if len(g.audioDurations) >= previewCacheMax {
-				clear(g.audioDurations)
-			}
-
-			g.audioDurations[path] = clip.duration
-
-			if g.audioPeaks == nil {
-				g.audioPeaks = make(map[string][]float32)
-			}
-
-			if len(g.audioPeaks) >= previewCacheMax {
-				clear(g.audioPeaks)
-			}
-
 			if len(peaks) > 0 {
-				g.audioPeaks[path] = peaks
+				g.rememberClip(path, clip, peaks)
 			}
 			g.mu.Unlock()
 
@@ -358,6 +361,90 @@ func (g *gui) startAudio(path string, from float64) {
 			g.chatList.Refresh()
 		})
 	}()
+}
+
+// prepareWaveform decodes a clip in the background the first time its row is
+// painted, so the waveform is there before Play and a tap can choose a point
+// without starting the sound first (#435).
+//
+// One decode at a time: a transcript can show several audio rows at once, and
+// decoding all of them at once would spend the machine on clips nobody asked to
+// hear. A row that was skipped gets its turn on the next paint.
+func (g *gui) prepareWaveform(path string) {
+	g.mu.Lock()
+
+	if g.audioPrepared[path] || g.audioPreparing {
+		g.mu.Unlock()
+
+		return
+	}
+
+	g.audioPreparing = true
+	g.mu.Unlock()
+
+	go func() {
+		clip, err := decodeClip(path)
+
+		g.mu.Lock()
+		g.audioPreparing = false
+
+		if err == nil {
+			g.rememberClip(path, clip, audioPeaks(clip.pcm, audioPeakColumns))
+		}
+
+		g.mu.Unlock()
+
+		// No repaint from here: a background goroutine that paints is a paint
+		// from a second thread, and the row's next paint — a scroll, a message,
+		// the layout settling — picks the waveform up. What the row shows is
+		// read from the caches, so nothing else is needed to make it appear.
+	}()
+}
+
+// rememberClip records what a decode learned about a clip. The caller holds the
+// lock.
+func (g *gui) rememberClip(path string, clip *audioClip, peaks []float32) {
+	if g.audioDurations == nil {
+		g.audioDurations = make(map[string]time.Duration)
+	}
+
+	if g.audioPeaks == nil {
+		g.audioPeaks = make(map[string][]float32)
+	}
+
+	if g.audioPrepared == nil {
+		g.audioPrepared = make(map[string]bool)
+	}
+
+	if len(g.audioDurations) >= previewCacheMax {
+		clear(g.audioDurations)
+		clear(g.audioPeaks)
+		clear(g.audioPrepared)
+	}
+
+	g.audioDurations[path] = clip.duration
+	g.audioPeaks[path] = peaks
+	g.audioPrepared[path] = true
+
+	// One slot: the clip a Play is most likely to want next.
+	g.audioClip, g.audioClipPath = clip, path
+}
+
+// audioShownProgress is what the row draws while the sound is starting: the
+// live position once the device has it, and the remembered one until then, so a
+// resumed clip does not flash back to the start (#435).
+func (g *gui) audioShownProgress(path string) (time.Duration, time.Duration) {
+	duration, position := g.audioProgress()
+	if duration > 0 {
+		return duration, position
+	}
+
+	known := g.audioDurationFor(path)
+	if known <= 0 {
+		return duration, position
+	}
+
+	return known, time.Duration(float64(known) * g.audioResume(path))
 }
 
 // stopAudio silences the clip that is sounding, keeping the playhead where the
@@ -507,11 +594,18 @@ func (g *gui) player() audioEngine {
 // per path: the answer comes from the header, and a repaint must not open the
 // file again.
 func (g *gui) playable(path string) bool {
-	if ok, known := g.playableFiles[path]; known {
+	g.cacheMu.Lock()
+	ok, known := g.playableFiles[path]
+	g.cacheMu.Unlock()
+
+	if known {
 		return ok
 	}
 
-	ok := canPlayAudio(path)
+	ok = canPlayAudio(path)
+
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
 
 	if g.playableFiles == nil {
 		g.playableFiles = make(map[string]bool)
