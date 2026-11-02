@@ -228,6 +228,15 @@ and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
 
+`v0.16.1` is a patch on the chat header. The **state icon is the header now**,
+with no sentence beside it: a device joining, an encryption, or a scan that
+found nothing no longer writes there (#459). The **message line moved under the
+transcript**, above the composer, where a status bar belongs, and **a tap on it
+copies what it says** — the sentence was there and could not be taken out of the
+app. A scan that finds nothing, over the network or the radio, records a
+**transcript row** instead, so the outcome can be read and copied later. No
+transport, no wire format and no security rule changed.
+
 `v0.16.0` is a presentation release. The **wiki** is rebuilt to be read: a
 landing page with badges and a diagram of terminal, window and phone into one
 sealed session and one room; a quick start on every page; a capability matrix
