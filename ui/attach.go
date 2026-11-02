@@ -822,8 +822,8 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	path := m.file.path
 
 	switch {
-	case path != "" && m.file.inline && decodableImage(path):
-		if res, err := fyne.LoadResourceFromPath(path); err == nil {
+	case path != "" && m.file.inline && g.decodable(path):
+		if res := g.previewPicture(path); res != nil {
 			showPicture(pic, res)
 		} else {
 			pic.Hide()
@@ -844,7 +844,7 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	drawn := false
 
 	if path != "" && showsText(mimeOf(m.file.name), m.file.size) {
-		if body := textPreview(path); body != "" {
+		if body := g.previewText(path); body != "" {
 			preview.SetText(body)
 			preview.Show()
 			drawn = true

@@ -200,3 +200,78 @@ func TestADesktopKeepsTheOpenButton(t *testing.T) {
 		t.Error("a desktop hid the Open button, which works there")
 	}
 }
+
+// Painting a row must not decode its picture again: the list repaints visible
+// rows on every message, so a transcript with pictures got slower the more was
+// said (#321).
+func TestARowDecodesItsPictureOnce(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	path := writeTestPNG(t)
+
+	loads := 0
+	previous := loadPicture
+	loadPicture = func(p string) (fyne.Resource, error) {
+		loads++
+
+		return previous(p)
+	}
+	t.Cleanup(func() { loadPicture = previous })
+
+	checks := 0
+	previousCheck := canDecodeFile
+	canDecodeFile = func(p string) bool {
+		checks++
+
+		return previousCheck(p)
+	}
+	t.Cleanup(func() { canDecodeFile = previousCheck })
+
+	note := &fileNote{id: "id-1", name: "photo.png", size: testFileSize(t, path), state: transferSaved, path: path, inline: true}
+
+	for paint := 1; paint <= 3; paint++ {
+		pic, preview, icon := fillRowOnScreen(t, g, note)
+		if !pic.Visible() && preview.Visible() {
+			t.Fatalf("paint %d drew neither picture nor text", paint)
+		}
+		_ = icon
+	}
+
+	if loads != 1 {
+		t.Errorf("the picture was decoded %d times over three paints, want 1", loads)
+	}
+
+	if checks != 1 {
+		t.Errorf("the decodability was probed %d times over three paints, want 1", checks)
+	}
+}
+
+// The same rule for a text file: read once, painted many times (#321).
+func TestATextRowReadsItsFileOnce(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("the minutes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reads := 0
+	previous := readText
+	readText = func(p string) string {
+		reads++
+
+		return previous(p)
+	}
+	t.Cleanup(func() { readText = previous })
+
+	note := &fileNote{id: "id-1", name: "notes.txt", size: 12, state: transferSaved, path: path}
+
+	for paint := 1; paint <= 3; paint++ {
+		fillRowOnScreen(t, g, note)
+	}
+
+	if reads != 1 {
+		t.Errorf("the text was read %d times over three paints, want 1", reads)
+	}
+}

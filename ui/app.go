@@ -192,6 +192,13 @@ type gui struct {
 	hub    *session.Hub
 	server liveServer
 
+	// What the transcript has already decoded or read, by path, so a repaint
+	// does not do the I/O again (#321). They are only touched while painting,
+	// which happens on the UI goroutine.
+	pictures       map[string]fyne.Resource
+	decodableFiles map[string]bool
+	texts          map[string]string
+
 	// starting and stopping guard the handover of the transport. While either
 	// is set, Host and Connect are disabled: a start that is still binding and a
 	// stop that is still closing the listener both own the port, and a second
