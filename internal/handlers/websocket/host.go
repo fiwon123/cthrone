@@ -123,6 +123,14 @@ func (s *Server) Wait() error {
 // stub a test uses to avoid binding a port — is stopped without a panic.
 func (s *Server) Stop() error {
 	s.stop.Do(func() {
+		// The room goes first, while the sockets can still carry the goodbye.
+		// http.Server.Close closes the listeners and the idle connections but
+		// **not** hijacked ones — and a websocket is hijacked — so without this
+		// a client kept talking to a host that had stopped serving (#385).
+		if s.hub != nil {
+			s.hub.Close("the host stopped")
+		}
+
 		// The http server closes the listeners it serves and drops the
 		// connections; the listener is closed here as well, because a stop that
 		// arrived before Serve registered it would otherwise leave the socket
