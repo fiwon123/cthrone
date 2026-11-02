@@ -204,6 +204,10 @@ type gui struct {
 	updateTag string
 	updateAt  time.Time
 
+	// composerRows is the row count the message field is showing, so a keystroke
+	// that does not change it does not re-lay the field out (#324).
+	composerRows int
+
 	// starting and stopping guard the handover of the transport. While either
 	// is set, Host and Connect are disabled: a start that is still binding and a
 	// stop that is still closing the listener both own the port, and a second
@@ -489,21 +493,21 @@ func (g *gui) build() {
 	g.entry = widget.NewMultiLineEntry()
 	g.entry.Wrapping = fyne.TextWrapWord
 	withClear(g.entry)
-	g.entry.SetMinRowsVisible(composerRowCount(g.lay.Stack))
+	g.entry.SetMinRowsVisible(1)
 	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
+	g.entry.OnChanged = g.growComposer
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 
 	g.sendBtn = widgets.NewButtonWithIcon("Send", theme.MailSendIcon(), func() { g.send(g.entry.Text) }, g.copyLabel)
+	// Send is the primary action of the composer: the filled (high) importance
+	// makes it the thing a thumb finds without reading (#324).
+	g.sendBtn.SetImportance(widget.HighImportance)
 	g.sendBtn.Disable()
 
-	attachLabel := "Attach"
-	if g.lay.Stack {
-		// The paperclip says it on a phone, where the row has no width to spare.
-		attachLabel = ""
-	}
-
 	g.attachBtn = widgets.NewButtonWithIcon("Attach", theme.MailAttachmentIcon(), g.pickFile, g.copyLabel)
-	g.attachBtn.SetText(attachLabel)
+	// The paperclip is the label: in a chat composer the icon is the word, and
+	// the row's width belongs to the field (#324).
+	g.attachBtn.SetText("")
 	g.attachBtn.Disable()
 
 	// The queue starts with the window and outlives any one session: a file
@@ -1556,6 +1560,24 @@ func (g *gui) attach(sess session.Session) {
 		fyne.Do(g.updateButtons)
 		g.setStatus("Disconnected: " + reason)
 	})
+}
+
+// growComposer gives the field the rows its text needs, within the ceiling.
+//
+// Only a change of row count touches the widget: SetMinRowsVisible re-lays the
+// field out, and doing that on every keystroke is what makes typing feel heavy.
+func (g *gui) growComposer(text string) {
+	if g.entry == nil {
+		return
+	}
+
+	rows := composerRows(text, composerColumns(g.entry.Size().Width))
+	if rows == g.composerRows {
+		return
+	}
+
+	g.composerRows = rows
+	g.entry.SetMinRowsVisible(rows)
 }
 
 // updateButtons enables what the current state can actually do. Send needs a
