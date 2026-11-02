@@ -24,7 +24,7 @@ func chatRowWithMessage(t *testing.T, mobile bool) (*gui, fyne.CanvasObject) {
 	g.win.Resize(fyne.NewSize(900, 640))
 	g.win.Content().Refresh()
 
-	want := g.messages[0].line()
+	want := g.messages[0].body()
 
 	row := paintedText(g.win.Content(), want, 0)
 	if row == nil {
