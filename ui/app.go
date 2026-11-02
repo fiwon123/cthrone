@@ -494,7 +494,8 @@ func (g *gui) build() {
 	g.entry.Wrapping = fyne.TextWrapWord
 	withClear(g.entry)
 	g.entry.SetMinRowsVisible(1)
-	g.entry.SetPlaceHolder(composerHint(g.lay.Stack))
+	// No placeholder: the field says nothing until the user types, and the
+	// keyboard's behaviour belongs in the docs, not in the message (#344).
 	g.entry.OnChanged = g.growComposer
 	g.entry.OnSubmitted = func(text string) { g.send(text) }
 

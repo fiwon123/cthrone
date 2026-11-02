@@ -66,22 +66,6 @@ func composerColumns(width float32) int {
 	return int(width / 8)
 }
 
-// composerHint is the message field's placeholder. The two platforms differ in
-// exactly one thing — how a message is sent — so the hint names that, and both
-// say that Enter starts a new line: a user who expects Enter to send would
-// otherwise think the field was broken.
-//
-// The phone has no Shift+Enter to press — its soft keyboard turns the action
-// key into a newline for a multi-line field — so the button is what the touch
-// hint names.
-func composerHint(stack bool) string {
-	if stack {
-		return "Type a message… Enter starts a new line, Send sends it"
-	}
-
-	return "Type a message… Enter starts a new line, Shift+Enter sends it"
-}
-
 // chatMessage is one line of the transcript: what was said, and who said it. A
 // message the user typed themselves carries no sender and renders as "You".
 //
