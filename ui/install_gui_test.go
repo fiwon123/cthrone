@@ -396,3 +396,166 @@ func TestAPhonesCheckNamesTheReleaseOnTheReleaseButton(t *testing.T) {
 		t.Errorf("a desktop's release button reads %q, want the plain name", got)
 	}
 }
+
+// withReleaseList answers the release list from memory, so a test never reads
+// github.com.
+func withReleaseList(t *testing.T, tags []string) {
+	t.Helper()
+
+	previous := listReleases
+	listReleases = func(context.Context, *http.Client, string) ([]string, error) {
+		return tags, nil
+	}
+
+	t.Cleanup(func() { listReleases = previous })
+}
+
+// withRunningVersion sets the version this build reports, which is what the
+// release list is searched for.
+func withRunningVersion(t *testing.T, version string) {
+	t.Helper()
+
+	previous := Version
+	Version = version
+
+	t.Cleanup(func() { Version = previous })
+}
+
+// The way back to the release before this one is offered where it can work: a
+// published build on a desktop. A build from source has no release before it,
+// and a phone cannot replace its own package (#384).
+func TestThePreviousReleaseButtonIsOfferedOnlyWhereItCanWork(t *testing.T) {
+	t.Run("a published desktop build", func(t *testing.T) {
+		withRunningVersion(t, "v0.12.1")
+
+		g := newScreenGUI(t, false)
+		g.refreshPrevious()
+
+		if !g.previousBtn.Visible() {
+			t.Error("a published build on a desktop was not offered the release before it")
+		}
+	})
+
+	t.Run("a build from source", func(t *testing.T) {
+		withRunningVersion(t, placeholderVersion)
+
+		g := newScreenGUI(t, false)
+		g.refreshPrevious()
+
+		if g.previousBtn.Visible() {
+			t.Error("a build with no release version was offered one")
+		}
+	})
+
+	t.Run("a phone", func(t *testing.T) {
+		withRunningVersion(t, "v0.12.1")
+
+		previous := selfInstallable
+		selfInstallable = func() bool { return false }
+		t.Cleanup(func() { selfInstallable = previous })
+
+		g := newScreenGUI(t, true)
+		g.refreshPrevious()
+
+		if g.previousBtn.Visible() {
+			t.Error("a phone was offered a button that replaces a package it cannot replace")
+		}
+	})
+}
+
+// Pressing it asks, then installs the release the list says came before the one
+// running — not the newest, and not a guess from the version number.
+func TestPreviousReleaseInstallsTheOneBeforeThis(t *testing.T) {
+	recorder, target := withInstallRecorder(t)
+	recorder.result = installpkg.Result{
+		Tag:      "v0.12.0",
+		Target:   target,
+		Previous: target + installpkg.PreviousSuffix,
+	}
+
+	withRunningVersion(t, "v0.12.1")
+	withReleaseList(t, []string{"v0.12.1", "v0.12.0", "v0.11.7"})
+	acceptConfirm(t)
+
+	g := newScreenGUI(t, false)
+	g.installPreviousRelease()
+
+	waitForAboutNote(t, g, "Installed v0.12.0")
+
+	requests := recorder.installs()
+	if len(requests) != 1 {
+		t.Fatalf("%d installs ran, want 1", len(requests))
+	}
+
+	if requests[0].Tag != "v0.12.0" {
+		t.Errorf("installed %q, want the release before v0.12.1", requests[0].Tag)
+	}
+}
+
+// A list that cannot be read, or one without this build in it, is a sentence on
+// the tab — never a question with no version in it.
+func TestPreviousReleaseReportsWhenThereIsNone(t *testing.T) {
+	withRunningVersion(t, "v0.12.1")
+	withReleaseList(t, []string{"v0.12.1"})
+
+	g := newScreenGUI(t, false)
+	g.installPreviousRelease()
+
+	note := waitForAboutNote(t, g, "No published release comes before")
+
+	if !strings.Contains(note, "v0.12.1") {
+		t.Errorf("the note = %q, want it to name this version", note)
+	}
+
+	if g.previousBtn.Disabled() {
+		t.Error("the button stayed disabled after the list was read")
+	}
+}
+
+// The restart button appears only once an install has something to restart, and
+// pressing it starts the installed binary and leaves this one (#384).
+func TestRestartIsOfferedAfterAnInstallAndStartsTheNewBinary(t *testing.T) {
+	recorder, target := withInstallRecorder(t)
+	recorder.result = installpkg.Result{
+		Tag:      "v0.12.2",
+		Target:   target,
+		Previous: target + installpkg.PreviousSuffix,
+	}
+
+	var (
+		started string
+		quits   int
+	)
+
+	previousStart, previousQuit := launchAgain, quitWindow
+	launchAgain = func(exe string, _ []string) error {
+		started = exe
+
+		return nil
+	}
+	quitWindow = func() { quits++ }
+	t.Cleanup(func() { launchAgain, quitWindow = previousStart, previousQuit })
+
+	g := newScreenGUI(t, false)
+
+	if g.restartBtn.Visible() {
+		t.Error("the restart button is offered before anything was installed")
+	}
+
+	g.runInstall("v0.12.2")
+	waitForAboutNote(t, g, "Installed v0.12.2")
+
+	if !g.restartBtn.Visible() {
+		t.Fatal("the restart button was not offered after an install")
+	}
+
+	test.Tap(g.restartBtn)
+
+	if started != target {
+		t.Errorf("restart started %q, want the installed binary %q", started, target)
+	}
+
+	if quits != 1 {
+		t.Errorf("the window quit %d times, want 1", quits)
+	}
+}

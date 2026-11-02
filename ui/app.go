@@ -159,6 +159,8 @@ type gui struct {
 	updateBtn       *widgets.CopyButton
 	releaseBtn      *widgets.CopyButton
 	installBtn      *widgets.CopyButton
+	previousBtn     *widgets.CopyButton
+	restartBtn      *widgets.CopyButton
 	revertBtn       *widgets.CopyButton
 	wikiBtn         *widgets.CopyButton
 
@@ -2537,6 +2539,16 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	g.installBtn = widgets.NewButtonWithIcon("Install", theme.DownloadIcon(), g.installRelease, g.copyLabel)
 	g.installBtn.Hide()
 
+	// The way back has two forms, and they are different questions. Revert puts
+	// back the binary an install replaced; "previous release" fetches the one
+	// published before this from the release page, which is the only route for
+	// a build that arrived by unpacking the archive (#384).
+	g.previousBtn = widgets.NewButtonWithIcon("Install previous release", theme.ContentUndoIcon(), g.installPreviousRelease, g.copyLabel)
+	g.previousBtn.Hide()
+
+	g.restartBtn = widgets.NewButtonWithIcon("Restart", theme.MediaReplayIcon(), g.restartAfterInstall, g.copyLabel)
+	g.restartBtn.Hide()
+
 	g.revertBtn = widgets.NewButtonWithIcon("Revert to previous", theme.ContentUndoIcon(), g.revertRelease, g.copyLabel)
 	g.revertBtn.Hide()
 
@@ -2558,6 +2570,8 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 		g.updateBtn,
 		g.aboutNote,
 		g.installBtn,
+		g.previousBtn,
+		g.restartBtn,
 		g.revertBtn,
 		note,
 		g.releaseBtn,
@@ -2568,6 +2582,7 @@ func (g *gui) buildAbout() fyne.CanvasObject {
 	// brought up to date now rather than staying empty until the next rebuild.
 	g.refreshCredential()
 	g.refreshRevert()
+	g.refreshPrevious()
 
 	return container.NewVScroll(container.NewPadded(body))
 }
