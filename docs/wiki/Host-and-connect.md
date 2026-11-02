@@ -1,5 +1,23 @@
 # Host and connect
 
+## 🚦 The icon in the chat header
+
+One glyph, always there, so you never have to open Setup to know where you
+stand:
+
+| | | |
+|---|---|---|
+| ⚪ | **offline** | nothing running |
+| 🟡 | **starting** | a host or a connect is being opened |
+| 🟢 | **hosting** | this window is serving a room |
+| 🔵 | **connected** | a client, with its device |
+| 🟠 | **reconnecting** | the link dropped and it is trying again |
+| 🔴 | **lost** | the link went away and nothing is retrying |
+
+The transcript still says *what* happened ("Disconnected: …", "Encrypted with
+…"); the icon says *where you stand now*. A red icon is worth a look at
+**Stop** — pressing it and hosting again is the fastest reset.
+
 ## ⚡ In a hurry
 
 ```bash
