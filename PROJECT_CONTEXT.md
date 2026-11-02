@@ -220,12 +220,6 @@ half file at once instead of waiting for a timeout (#237, #238). Discovery now
 reaches a second segment: a host announces itself by unicast to every address
 this device has pinned, which is what a broadcast cannot do (#239).
 
-An in-app player plays a received or sent **WAV or MP3** clip on its own row —
-Play and Stop on one button, a position clock, one clip at a time, the decode
-done beside the UI and refused past 32 MiB, and the sound device opened only on
-the first Play (#306). Other formats keep the row's Open/Save actions; nothing is
-claimed about hearing it on a phone yet (#155).
-
 It also carries the hardening that came out of asking what a peer can make this
 program do: a command's output is bounded and its whole process tree dies at the
 deadline (#269), a received file's name can no longer escape the download folder
@@ -233,6 +227,20 @@ deadline (#269), a received file's name can no longer escape the download folder
 and `recv`/`exec` — which were stubs, one of them running commands **locally**
 while its help said remote — now refuse and say so (#275). The suite runs under
 the race detector and a fuzzer in CI (#262, #264).
+
+`v0.12.0` adds the two things a chat window was still missing. A **dropped
+client asks for its link again**: a GUI connection that closes without the user
+pressing Stop retries with a backoff from one second to a minute, says
+`reconnecting…` in the header, stops when the user does, and never retries a
+refusal — a peer that answered no is an answer, not a drop (#326). And a
+**sound plays where it was sent**: a received or sent WAV or MP3 clip plays on
+its own row, with Play and Stop on one button, a position clock, one clip at a
+time, the decode done beside the UI and refused past 32 MiB, and the sound
+device opened only on the first Play (#306). Other formats keep the row's
+Open/Save actions, and the player is in every GUI build — including the APK,
+where nothing has heard it yet (#155). No transport and no security rule
+changes in this release; the Bluetooth radio on Windows, and the phone build
+and the APK on a device, are still unproven (#224, #216, #206, #155).
 
 `v0.11.7` is a patch on that, and the rest of the same report. Enter is
 deterministic on a phone: it always breaks the line, and the Send button or the
