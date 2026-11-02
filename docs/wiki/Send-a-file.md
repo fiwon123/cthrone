@@ -80,3 +80,7 @@ the decoder, not the player (see [Video in the app](Video-in-the-app)).
 - A **PDF is not drawn**: it opens in the device's reader, by design.
 - **Audio plays only as WAV or MP3.** Ogg, AAC/M4A and FLAC have no decoder in
   this build; those rows offer Open or Save as…, as before.
+
+---
+
+<sub>🔑 **Previous:** [Pairing and peers](Pairing-and-peers) · 🏠 [Home](Home) · **Next:** [Video in the app](Video-in-the-app) 🎞️</sub>

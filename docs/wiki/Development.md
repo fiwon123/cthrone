@@ -69,3 +69,7 @@ gh workflow run release.yml --ref main -f version=vX.Y.Z
 
 It runs `make check` first. Publishing the draft by hand creates the tag; the
 workflow never pushes one.
+
+---
+
+<sub>🧪 **Previous:** [Verifying on real hardware](Verifying-on-real-hardware) · 🏠 [Home](Home) · **Next:** [Home](Home) 🏠</sub>

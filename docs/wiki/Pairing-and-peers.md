@@ -49,3 +49,7 @@ cannot be mixed: a peer speaking the other one is refused, never downgraded.
 
 A `token` file left by v0.6.0 in the configuration directory is **not** read on
 its own. The app tells you it is there and offers to delete it.
+
+---
+
+<sub>🚀 **Previous:** [Host and connect](Host-and-connect) · 🏠 [Home](Home) · **Next:** [Send a file](Send-a-file) 📎</sub>

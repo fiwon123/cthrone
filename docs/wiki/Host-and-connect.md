@@ -10,6 +10,14 @@ cthrone connect 192.168.1.5  # on the other one
 The host prints its address. Compare the six-digit code on both screens, accept
 on the host, and type.
 
+```mermaid
+flowchart LR
+    H["🟢 cthrone host<br/>prints an address"] -->|"websocket · NATS · Bluetooth"| C["🔵 cthrone connect"]
+    C --> K["🔢 six-digit code<br/>on both screens"]
+    K -->|✅ accept on the host| M["💬 type"]
+    K -->|❌ refuse| X["🚫 no session"]
+```
+
 The default transport needs nothing but the two binaries: one device hosts, the
 other connects.
 
@@ -67,3 +75,7 @@ connected to once, because the host then also announces itself to that address
 by unicast. See
 [Finding devices across networks](Finding-devices-across-networks), and
 [NATS](NATS) when the network isolates its own clients.
+
+---
+
+<sub>🏠 **Previous:** [Home](Home) · 🏠 [Home](Home) · **Next:** [Pairing and peers](Pairing-and-peers) 🔑</sub>

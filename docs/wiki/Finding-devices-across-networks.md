@@ -61,3 +61,7 @@ still link-local multicast: it crosses a segment only when the router has an
 mDNS reflector, which consumer equipment almost never does. It would have added
 a dependency and a second discovery mechanism to reach exactly the networks the
 unicast beacon already reaches.
+
+---
+
+<sub>🛰️ **Previous:** [NATS](NATS) · 🏠 [Home](Home) · **Next:** [Commands and flags](Commands-and-flags) 🧰</sub>
