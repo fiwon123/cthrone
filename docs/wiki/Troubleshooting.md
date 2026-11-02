@@ -108,3 +108,6 @@ What works today: pressing gives one character each time; **the × inside the
 field empties it in one press** (the composer and the Setup fields all carry
 one); select all and cut also works. A desktop is unaffected.
 
+---
+
+<sub>🧰 **Previous:** [Commands and flags](Commands-and-flags) · 🏠 [Home](Home) · **Next:** [Security model](Security-model) 🔒</sub>

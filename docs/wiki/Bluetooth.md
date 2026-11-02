@@ -67,3 +67,7 @@ the window either offers the transport or does not. A central-only phone build
 must **connect but not host**, so the platform fact becomes a per-role
 capability — can connect, can host — rather than one flag. #206 is where that
 shape lands.
+
+---
+
+<sub>🎞️ **Previous:** [Video in the app](Video-in-the-app) · 🏠 [Home](Home) · **Next:** [NATS](NATS) 🛰️</sub>

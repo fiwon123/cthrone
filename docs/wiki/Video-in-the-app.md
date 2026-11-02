@@ -127,3 +127,7 @@ None of that can be done on the machine this page was written on: no
 - The rule that nothing leaves the app to be heard or seen — the bytes are
   already on disk.
 - The "does not do" list on the release page stays true until this ships.
+
+---
+
+<sub>📎 **Previous:** [Send a file](Send-a-file) · 🏠 [Home](Home) · **Next:** [Bluetooth](Bluetooth) 📶</sub>

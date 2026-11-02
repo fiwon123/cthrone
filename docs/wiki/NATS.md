@@ -43,3 +43,7 @@ conversation does not outlive the session it happened in.
 There is no host to ask on a first contact: a subject has no single person
 behind it. A first contact on NATS is therefore pinned without a prompt, and the
 handshake version still gates the two credential models.
+
+---
+
+<sub>📶 **Previous:** [Bluetooth](Bluetooth) · 🏠 [Home](Home) · **Next:** [Across networks](Finding-devices-across-networks) 🌐</sub>

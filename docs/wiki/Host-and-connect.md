@@ -1,5 +1,23 @@
 # Host and connect
 
+## 🚦 The icon in the chat header
+
+One glyph, always there, so you never have to open Setup to know where you
+stand:
+
+| | | |
+|---|---|---|
+| ⚪ | **offline** | nothing running |
+| 🟡 | **starting** | a host or a connect is being opened |
+| 🟢 | **hosting** | this window is serving a room |
+| 🔵 | **connected** | a client, with its device |
+| 🟠 | **reconnecting** | the link dropped and it is trying again |
+| 🔴 | **lost** | the link went away and nothing is retrying |
+
+The transcript still says *what* happened ("Disconnected: …", "Encrypted with
+…"); the icon says *where you stand now*. A red icon is worth a look at
+**Stop** — pressing it and hosting again is the fastest reset.
+
 ## ⚡ In a hurry
 
 ```bash
@@ -9,6 +27,14 @@ cthrone connect 192.168.1.5  # on the other one
 
 The host prints its address. Compare the six-digit code on both screens, accept
 on the host, and type.
+
+```mermaid
+flowchart LR
+    H["🟢 cthrone host<br/>prints an address"] -->|"websocket · NATS · Bluetooth"| C["🔵 cthrone connect"]
+    C --> K["🔢 six-digit code<br/>on both screens"]
+    K -->|✅ accept on the host| M["💬 type"]
+    K -->|❌ refuse| X["🚫 no session"]
+```
 
 The default transport needs nothing but the two binaries: one device hosts, the
 other connects.
@@ -67,3 +93,7 @@ connected to once, because the host then also announces itself to that address
 by unicast. See
 [Finding devices across networks](Finding-devices-across-networks), and
 [NATS](NATS) when the network isolates its own clients.
+
+---
+
+<sub>🏠 **Previous:** [Home](Home) · 🏠 [Home](Home) · **Next:** [Pairing and peers](Pairing-and-peers) 🔑</sub>
