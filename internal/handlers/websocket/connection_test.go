@@ -115,6 +115,12 @@ func TestConnectExplainsARefusedConnection(t *testing.T) {
 	if err.Error() != "the host refused the connection: it needs the shared secret" {
 		t.Errorf("expected the refusal to name the missing secret, got %q", err.Error())
 	}
+
+	// The sentence is for a person; the identity is for a caller that retries,
+	// which must not ask a host that said no again (#326).
+	if !errors.Is(err, ErrRefused) {
+		t.Errorf("a refused connection is not ErrRefused: %v", err)
+	}
 }
 
 // A TLS handshake that fails because the host is serving plaintext is the one
