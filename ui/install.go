@@ -64,11 +64,23 @@ func (g *gui) offerInstall(tag string) {
 		return
 	}
 
-	// A phone cannot replace its own package, so it is not offered a button
-	// that can only fail: the check's answer names the APK, and the release
-	// page installs it (#285).
-	if tag == "" || !selfInstallable() {
+	// A phone cannot replace its own package, so it is not offered a button that
+	// can only fail. The release page is its installer, so that is the button
+	// that names the release: check, press, download, and Android installs it
+	// (#285, #366).
+	if tag == "" {
 		g.installBtn.Hide()
+
+		return
+	}
+
+	if !selfInstallable() {
+		g.installBtn.Hide()
+
+		if g.releaseBtn != nil {
+			g.releaseBtn.SetText("Get " + tag)
+			g.releaseBtn.SetCopyText("Get " + tag)
+		}
 
 		return
 	}
