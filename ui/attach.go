@@ -131,6 +131,27 @@ func (g *gui) pickStart() fyne.ListableURI {
 	return nil
 }
 
+// folderStart is dir as a picker location, or nil when it is not there.
+//
+// A file dialog opens here rather than at the toolkit's place list: the folder
+// the user chose for received files is the one a save should start from (#469).
+func (g *gui) folderStart(dir string) fyne.ListableURI {
+	if dir == "" {
+		return nil
+	}
+
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return nil
+	}
+
+	uri, err := storage.ListerForURI(storage.NewFileURI(dir))
+	if err != nil {
+		return nil
+	}
+
+	return uri
+}
+
 // rememberPick records the folder a pick came from, so the next one opens
 // there. A phone's content:// URI has no folder to remember.
 func (g *gui) rememberPick(reader fyne.URIReadCloser) {
@@ -460,29 +481,24 @@ func (g *gui) updateProgress(note *fileNote, sent int64) {
 // finishTransfer turns a receiving row into the finished one, and hands the file
 // to the save policy.
 //
-// The row is updated from the staged copy first, so a picture can be drawn while
-// ask mode waits for an answer: the verified bytes are all there, only their
-// final home is undecided.
+// The row is updated from the staged copy first, so a picture can be drawn
+// before the file is put away: the verified bytes are all there, only their
+// final home is undecided. Manual mode leaves them there and the row offers
+// Save as…; only the opt-in automatic mode moves the file into the folder
+// (#469).
 func (g *gui) finishTransfer(note *fileNote, file *wire.File) {
 	settings := g.fileSettings()
-
-	state := transferSaved
-	if settings.policy == saveAsk {
-		state = transferPending
-	}
 
 	fyne.Do(func() {
 		note.name = file.Name
 		note.path = file.Path
 		note.sent = file.Size
 		note.inline = showsInline(file.MIME, file.Size)
-		note.state = state
+		note.state = transferPending
 		g.refreshTransfer(note)
 	})
 
-	if settings.policy == saveAsk {
-		g.askWhereToSave(note, file.Name, file.Path)
-
+	if settings.policy != saveAuto {
 		return
 	}
 
@@ -549,6 +565,13 @@ func (g *gui) askWhereToSave(note *fileNote, name, staged string) {
 
 		save.SetFileName(name)
 		save.Resize(g.dialogSize())
+
+		// Open where the file would have gone, so the choice is a folder the
+		// user already picked rather than the toolkit's place list (#469).
+		if start := g.folderStart(g.fileSettings().folder); start != nil {
+			save.SetLocation(start)
+		}
+
 		save.Show()
 	})
 }
@@ -579,16 +602,16 @@ func (g *gui) writeStaged(note *fileNote, name, staged string, writer fyne.URIWr
 	})
 }
 
-// showFiles is the Files dialog: where received files go, and whether the user
-// wants to be asked first.
+// showFiles is the Files dialog: where received files go, what happens on
+// arrival, and where the files of this conversation actually are.
 func (g *gui) showFiles() {
 	settings := g.fileSettings()
 
 	folder := widget.NewEntry()
 	folder.SetText(settings.folder)
 
-	ask := widgets.NewCheckRow("Ask before saving each file", nil, !g.mobile)
-	ask.SetChecked(settings.policy == saveAsk)
+	auto := widgets.NewCheckRow("Save received files automatically", nil, !g.mobile)
+	auto.SetChecked(settings.policy == saveAuto)
 
 	choose := widgets.NewButtonWithIcon("Choose…", theme.FolderOpenIcon(), func() {
 		picker := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
@@ -608,28 +631,121 @@ func (g *gui) showFiles() {
 		picker.Show()
 	}, g.copyLabel)
 
-	items := []*widget.FormItem{
-		// The picker is the normal way in on a phone, where typing a path is
-		// close to impossible; the field stays for a path pasted from a desktop.
-		widgets.FormRow("Folder", container.NewBorder(nil, nil, nil, choose, folder), !g.mobile),
-		{Text: "", Widget: ask},
+	folderRow := container.NewBorder(g.label("Folder"), nil, nil, choose, folder)
+
+	// The files the conversation has received, and where each one is. The row
+	// action copies its path, which is the thing a user needs when the file is
+	// already in the app's storage or in a folder they have forgotten (#469).
+	received := g.receivedFiles()
+
+	list := container.NewVBox()
+	if len(received) == 0 {
+		list.Add(g.label("No files received in this conversation yet."))
+	} else {
+		for _, file := range received {
+			list.Add(g.receivedFileRow(file))
+		}
 	}
 
-	form := dialog.NewForm("Files", "Save", "Cancel", items, func(ok bool) {
+	scroll := container.NewVScroll(list)
+	scroll.SetMinSize(fyne.NewSize(0, 160))
+
+	body := container.NewVBox(
+		g.label("A received file waits in the app until you press Save as… on its row, unless automatic saving is on."),
+		folderRow,
+		auto,
+		widget.NewSeparator(),
+		g.heading("Received files"),
+		scroll,
+	)
+
+	if canOpenFiles() {
+		body.Add(widgets.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() {
+			dir := expandFolder(folder.Text)
+			if dir == "" {
+				g.setStatus("Not opened: " + folder.Text + " is not an absolute path")
+
+				return
+			}
+
+			g.openPage(storage.NewFileURI(dir).String())
+		}, g.copyLabel))
+	}
+
+	form := dialog.NewCustomConfirm("Files", "Save", "Cancel", body, func(ok bool) {
 		if !ok {
 			return
 		}
 
-		g.storeFileSettings(folder.Text, ask.Checked())
+		g.storeFileSettings(folder.Text, auto.Checked())
 	}, g.win)
 	form.Resize(g.dialogSize())
 	form.Show()
 }
 
+// receivedFile is one row of the Files dialog: the name, the path a tap copies,
+// and the line the row shows.
+type receivedFile struct {
+	path string
+	line string
+}
+
+// receivedFiles is what the conversation has received, in transcript order.
+//
+// It is the rows the reader can still see — the transcript is capped — rather
+// than a folder listing: the download folder can hold files this program never
+// received, and a file dropped from the capped log has no row left to point at.
+func (g *gui) receivedFiles() []receivedFile {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	files := make([]receivedFile, 0, len(g.messages))
+
+	for _, message := range g.messages {
+		note := message.file
+		if note == nil || message.from == "" {
+			continue
+		}
+
+		switch note.state {
+		case transferSaved, transferPending, transferFailed:
+			files = append(files, receivedFile{path: note.path, line: receivedFileLine(note)})
+		}
+	}
+
+	return files
+}
+
+// receivedFileLine says what the Files dialog needs to say about one arrival:
+// the row's own line, with the one case it does not spell out — an unsaved file
+// is still in the app's storage.
+func receivedFileLine(note *fileNote) string {
+	if note.state == transferPending && note.path != "" {
+		return fmt.Sprintf("%s (%s) — not saved (kept in the app)", note.name, humanBytes(note.size))
+	}
+
+	return note.line()
+}
+
+// receivedFileRow is one Files-dialog entry. Tapping it copies the path, which
+// is the part a user needs to find the file again.
+func (g *gui) receivedFileRow(file receivedFile) fyne.CanvasObject {
+	if file.path == "" {
+		return g.label(file.line)
+	}
+
+	button := widget.NewButton(file.line, func() {
+		g.copyToClipboard(file.path)
+	})
+	button.Alignment = widget.ButtonAlignLeading
+
+	return button
+}
+
 // storeFileSettings validates and remembers the choice, so it survives a
 // restart. A folder that is not a path is refused rather than silently replaced
 // by the fallback, because the user meant to change it.
-func (g *gui) storeFileSettings(folder string, ask bool) {
+func (g *gui) storeFileSettings(folder string, auto bool) {
 	dir := expandFolder(folder)
 	if dir == "" {
 		g.setStatus("Not saved: " + folder + " is not an absolute path")
@@ -646,20 +762,20 @@ func (g *gui) storeFileSettings(folder string, ask bool) {
 		return
 	}
 
-	settings := fileSettings{folder: dir, policy: saveAuto}
-	if ask {
-		settings.policy = saveAsk
+	settings := fileSettings{folder: dir, policy: saveManual}
+	if auto {
+		settings.policy = saveAuto
 	}
 
 	writeFileSettings(g.preferences(), settings)
 
-	if ask {
-		g.setStatus("Files will be saved in " + dir + " — asking first")
+	if auto {
+		g.setStatus("Files will be saved automatically in " + dir)
 
 		return
 	}
 
-	g.setStatus("Files will be saved in " + dir)
+	g.setStatus("Files will wait in the app until saved — folder " + dir)
 }
 
 // refreshTransfer repaints the row a note belongs to.
@@ -703,7 +819,7 @@ func (g *gui) receiveFrame(from string, payload []byte) {
 	}
 
 	if frame.Header.Kind == wire.KindText {
-		g.addMessage(chatMessage{from: from, text: string(frame.Payload)})
+		g.addMessage(chatMessage{from: from, text: string(frame.Payload), hidden: frame.Header.Hidden})
 
 		return
 	}
@@ -944,7 +1060,10 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	switch {
 	case path == "" || drawn || m.file.inline || !canOpenFiles():
 		open.Hide()
-	case m.file.state == transferSaved || m.file.state == transferSent:
+	case m.file.state == transferSaved || m.file.state == transferSent || m.file.state == transferPending:
+		// A pending file is in the app's storage, which is still a path this
+		// desktop can hand to the system opener: a received PDF does not have
+		// to be saved before it can be read (#469).
 		open.SetOnTapped(func() { g.openFile(path) })
 		open.Show()
 	default:
@@ -1088,6 +1207,13 @@ func (g *gui) saveAs(path string) {
 
 	save.SetFileName(filepath.Base(path))
 	save.Resize(g.dialogSize())
+
+	// Start where files are meant to go, so a save is a confirmation rather
+	// than a hunt through the toolkit's places (#469).
+	if start := g.folderStart(g.fileSettings().folder); start != nil {
+		save.SetLocation(start)
+	}
+
 	save.Show()
 }
 

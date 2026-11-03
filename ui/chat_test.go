@@ -216,15 +216,150 @@ func TestComposerRows(t *testing.T) {
 	}
 }
 
-// transcript renders every message in order, one per line.
-//
-// It used to be the app's Copy all action as well; that button is gone (#289),
-// and what is left is the test helper the log-cap and line tests need.
+// transcript is the whole-log rendering the tests assert: order kept, one line
+// per message. It is the production transcriptOf, wrapped so the log-cap and
+// line tests read like the clipboard action they check (#469).
 func transcript(messages []chatMessage) string {
-	lines := make([]string, len(messages))
-	for i, m := range messages {
-		lines[i] = m.line()
+	return transcriptOf(messages)
+}
+
+// TestSelectionRange covers the two taps a reader makes: either end may be the
+// first one, and the span is the same either way (#469).
+func TestSelectionRange(t *testing.T) {
+	tests := []struct {
+		name         string
+		sel          selection
+		wantStart    int
+		wantEnd      int
+		wantCount    int
+		wantContains []int
+		wantExcluded []int
+	}{
+		{
+			name:      "nothing tapped yet",
+			sel:       selection{active: true, anchor: noSelection, focus: noSelection},
+			wantStart: noSelection,
+			wantEnd:   noSelection,
+		},
+		{
+			name:      "one message",
+			sel:       selection{active: true, anchor: 2, focus: 2},
+			wantStart: 2,
+			wantEnd:   2,
+			wantCount: 1,
+			// 2 is both the start and the end; 1 and 3 are outside.
+			wantContains: []int{2},
+			wantExcluded: []int{0, 1, 3},
+		},
+		{
+			name:         "downwards",
+			sel:          selection{active: true, anchor: 1, focus: 3},
+			wantStart:    1,
+			wantEnd:      3,
+			wantCount:    3,
+			wantContains: []int{1, 2, 3},
+			wantExcluded: []int{0, 4},
+		},
+		{
+			name:         "upwards",
+			sel:          selection{active: true, anchor: 3, focus: 1},
+			wantStart:    1,
+			wantEnd:      3,
+			wantCount:    3,
+			wantContains: []int{1, 2, 3},
+			wantExcluded: []int{0, 4},
+		},
+		{
+			name:      "inactive covers nothing",
+			sel:       selection{active: false, anchor: 1, focus: 3},
+			wantStart: 1,
+			wantEnd:   3,
+		},
 	}
 
-	return strings.Join(lines, "\n")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.sel.start(); got != tt.wantStart {
+				t.Errorf("start() = %d, want %d", got, tt.wantStart)
+			}
+
+			if got := tt.sel.end(); got != tt.wantEnd {
+				t.Errorf("end() = %d, want %d", got, tt.wantEnd)
+			}
+
+			if got := tt.sel.count(); got != tt.wantCount {
+				t.Errorf("count() = %d, want %d", got, tt.wantCount)
+			}
+
+			for _, index := range tt.wantContains {
+				if !tt.sel.contains(index) {
+					t.Errorf("contains(%d) = false, want true", index)
+				}
+			}
+
+			for _, index := range tt.wantExcluded {
+				if tt.sel.contains(index) {
+					t.Errorf("contains(%d) = true, want false", index)
+				}
+			}
+		})
+	}
+}
+
+// TestRemoveRange cuts a span out of the log: the head, the tail and the middle
+// keep what is left in order (#469).
+func TestRemoveRange(t *testing.T) {
+	messages := []chatMessage{{text: "a"}, {text: "b"}, {text: "c"}, {text: "d"}}
+
+	tests := []struct {
+		name string
+		from int
+		to   int
+		want []string
+	}{
+		{"the middle two", 1, 2, []string{"a", "d"}},
+		{"the head", 0, 1, []string{"c", "d"}},
+		{"the tail", 2, 3, []string{"a", "b"}},
+		{"one message", 2, 2, []string{"a", "b", "d"}},
+		{"everything", 0, len(messages) - 1, nil},
+		{"past the end", 2, 99, []string{"a", "b"}},
+		{"an empty span", 2, 1, []string{"a", "b", "c", "d"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := removeRange(append([]chatMessage(nil), messages...), tt.from, tt.to)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("removeRange(%d, %d) left %d message(s), want %d", tt.from, tt.to, len(got), len(tt.want))
+			}
+
+			for i, want := range tt.want {
+				if got[i].text != want {
+					t.Errorf("message %d = %q, want %q", i, got[i].text, want)
+				}
+			}
+		})
+	}
+}
+
+// TestHiddenBodyAndLine checks what a hidden row draws and what a copy takes:
+// the mask on screen, the secret on the clipboard (#469).
+func TestHiddenBodyAndLine(t *testing.T) {
+	hidden := chatMessage{from: "laptop", text: "hunter2", hidden: true}
+
+	if got := hidden.body(); got != hiddenBody {
+		t.Errorf("body() = %q, want the mask", got)
+	}
+
+	if got := hidden.line(); got != "laptop: hunter2" {
+		t.Errorf("line() = %q, want the text a copy should keep", got)
+	}
+
+	revealed := hidden
+	revealed.revealed = true
+
+	if got := revealed.body(); got != "hunter2" {
+		t.Errorf("revealed body() = %q, want the text", got)
+	}
 }

@@ -33,7 +33,8 @@ func (s *memoryStore) SetBool(key string, value bool) {
 }
 
 // TestReadFileSettingsDefaults is a fresh install: the platform's folder and no
-// dialog, because a queue of files must not become a queue of dialogs.
+// automatic save, because a received file is not put in Downloads until the
+// user asks for it (#469).
 func TestReadFileSettingsDefaults(t *testing.T) {
 	settings := readFileSettings(newMemoryStore(), "/home/me/Downloads")
 
@@ -41,8 +42,8 @@ func TestReadFileSettingsDefaults(t *testing.T) {
 		t.Errorf("folder = %q, want the fallback", settings.folder)
 	}
 
-	if settings.policy != saveAuto {
-		t.Errorf("policy = %v, want auto", settings.policy)
+	if settings.policy != saveManual {
+		t.Errorf("policy = %v, want manual", settings.policy)
 	}
 }
 
@@ -51,22 +52,34 @@ func TestReadFileSettingsDefaults(t *testing.T) {
 func TestReadFileSettingsStored(t *testing.T) {
 	store := newMemoryStore()
 
-	writeFileSettings(store, fileSettings{folder: "/data/files", policy: saveAsk})
+	writeFileSettings(store, fileSettings{folder: "/data/files", policy: saveAuto})
 
 	got := readFileSettings(store, "/home/me/Downloads")
 	if got.folder != "/data/files" {
 		t.Errorf("folder = %q, want /data/files", got.folder)
 	}
 
-	if got.policy != saveAsk {
-		t.Errorf("policy = %v, want ask", got.policy)
+	if got.policy != saveAuto {
+		t.Errorf("policy = %v, want auto", got.policy)
 	}
 
-	// Switching back must store the zero value, not leave "ask" behind.
-	writeFileSettings(store, fileSettings{folder: "/data/files", policy: saveAuto})
+	// Switching back must store the zero value, not leave "auto" behind.
+	writeFileSettings(store, fileSettings{folder: "/data/files", policy: saveManual})
 
-	if got := readFileSettings(store, "/home/me/Downloads"); got.policy != saveAuto {
-		t.Errorf("policy after asking was turned off = %v, want auto", got.policy)
+	if got := readFileSettings(store, "/home/me/Downloads"); got.policy != saveManual {
+		t.Errorf("policy after automatic saving was turned off = %v, want manual", got.policy)
+	}
+}
+
+// TestTheOldAskKeyIsNotRead keeps an upgrade from resurrecting the previous
+// policy: both of its states are the manual default now, and a stale key must
+// not decide anything (#469).
+func TestTheOldAskKeyIsNotRead(t *testing.T) {
+	store := newMemoryStore()
+	store.SetBool("download.ask", true)
+
+	if got := readFileSettings(store, "/home/me/Downloads"); got.policy != saveManual {
+		t.Errorf("policy with the old ask key = %v, want manual", got.policy)
 	}
 }
 
@@ -82,14 +95,14 @@ func TestReadFileSettingsIgnoresARelativeFolder(t *testing.T) {
 }
 
 // TestReadFileSettingsNilStore is the no-toolkit case: a window that has no
-// preferences still saves somewhere.
+// preferences still saves somewhere, and still asks first.
 func TestReadFileSettingsNilStore(t *testing.T) {
 	got := readFileSettings(nil, "/home/me/Downloads")
-	if got.folder != "/home/me/Downloads" || got.policy != saveAuto {
-		t.Errorf("settings = %+v, want the fallback and auto", got)
+	if got.folder != "/home/me/Downloads" || got.policy != saveManual {
+		t.Errorf("settings = %+v, want the fallback and manual", got)
 	}
 
-	writeFileSettings(nil, fileSettings{folder: "/x", policy: saveAsk})
+	writeFileSettings(nil, fileSettings{folder: "/x", policy: saveAuto})
 }
 
 // TestExpandFolder covers what a user actually types and what a picker hands

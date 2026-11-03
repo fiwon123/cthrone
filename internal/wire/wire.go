@@ -124,6 +124,15 @@ type Header struct {
 	// rather than a new frame kind — a new kind would make an older peer refuse
 	// the transfer.
 	Sender string `json:"sender,omitempty"`
+
+	// Hidden asks the receiver to mask a message until it is revealed, for a
+	// secret typed into a room (#469). It is presentation, not encryption: the
+	// payload is sealed end to end like every other, and this only decides how
+	// it is drawn. It is additive for the reason Sender is — a peer built
+	// before the field reads the text and shows it, rather than refusing the
+	// frame — and it is carried in the header because a hidden sentence has to
+	// be wrapped (the receiver has no other place to learn the flag).
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // Frame is a parsed message: the header and the bytes it describes.
@@ -166,15 +175,17 @@ func IsFrame(data []byte) bool {
 // Encode serialises a frame.
 //
 // Text is returned unchanged: it is not a frame, and wrapping it would break
-// the peer that predates this format. The one exception is text that begins
-// with the magic, which the receiver would read as a frame: that text is
-// wrapped in a KindText frame, so it arrives as the sentence it is instead of
-// as the damaged frame it looks like. Parse unwraps it.
+// the peer that predates this format. The exceptions are text that begins with
+// the magic — which the receiver would read as a frame and so is wrapped in a
+// KindText frame — and text that carries a sender or the hidden flag, because
+// the header is the only place those travel (#431, #469). Parse unwraps the
+// frame in all three cases.
 func Encode(h Header, payload []byte) ([]byte, error) {
 	// A plain sentence travels unwrapped, so a peer that predates the envelope
-	// reads it as text (#201). A sentence a host relays is the exception: it
-	// has to carry the sender, and there is nowhere else to put it (#431).
-	if h.Kind == KindText && h.Sender == "" && !IsFrame(payload) {
+	// reads it as text (#201). A sentence a host relays, or one the sender
+	// marked hidden, is the exception: it has to carry header fields, and there
+	// is nowhere else to put them (#431, #469).
+	if h.Kind == KindText && h.Sender == "" && !h.Hidden && !IsFrame(payload) {
 		return payload, nil
 	}
 
