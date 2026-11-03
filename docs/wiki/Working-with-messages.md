@@ -64,7 +64,8 @@ else that should not be read over a shoulder:
   keyboard is what opens;
 - the row you send is masked too, and so is the row on the other device — the
   flag travels in the frame's header, and an older peer ignores it and shows the
-  text;
+  text. A terminal peer prints it as plain text, because the terminal has no
+  masked row;
 - **tap a masked row once to reveal it, and again to copy it**. Copy all, and a
   deliberate copy, keep the real text.
 
