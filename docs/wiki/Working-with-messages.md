@@ -10,18 +10,20 @@
 | 🗑️ **delete a message** | **Select** it, then **Delete** |
 | 🧹 **start clean** | **Select**, then **Clear all** |
 | 🙈 **send a secret** | press the eye in the composer before typing |
+| 🙈 **hide a message on this screen** | press its own eye |
 
 Every one of those acts on **this device's transcript only**. Nothing is
 recalled from the other device, and nothing is sent to it.
 
 ## Copy
 
-A tap on a row puts the whole row on the clipboard — sender and text, the same
-line the transcript shows. That is still the fastest copy for one message, and
-it is the gesture a chat app teaches.
+A tap on a row puts the **message text** on the clipboard — no `You:` and no
+`laptop:` in front of it. The sender stays on screen, where the row draws it.
+That is the fastest copy for one message, and it is the gesture a chat app
+teaches.
 
-**Copy all** in the header copies the conversation in order, one message per
-line. It is off while the transcript is empty.
+**Copy all** in the header copies the conversation in order, one message text
+per line. It is off while the transcript is empty.
 
 ## Select a range
 
@@ -35,7 +37,7 @@ phone, so the range has a gesture of its own:
 The rows in the span are marked with **✓** on their sender line, the header says
 how many are selected, and it offers:
 
-- **Copy** — the span, one message per line;
+- **Copy** — the selected messages' text, one per line;
 - **Delete** — remove it from this device;
 - **Clear all** — empty the transcript, after a confirmation;
 - **Cancel** — leave the selection without changing anything.
@@ -57,8 +59,13 @@ written to disk or sent to a peer.
 
 ## Hidden messages
 
-Press the **eye** in the composer before typing a password, a key or anything
-else that should not be read over a shoulder:
+Every **text** row carries an **eye**: press it to mask the message on this
+screen, and again to show it. It is a local mask — the other device is
+unchanged — and it is there for any message, sent or received. A file row has no
+eye.
+
+To send a message **as a password**, press the eye in the composer before
+typing:
 
 - the field is masked while you type, and on a phone the platform's password
   keyboard is what opens;
@@ -66,8 +73,8 @@ else that should not be read over a shoulder:
   flag travels in the frame's header, and an older peer ignores it and shows the
   text. A terminal peer prints it as plain text, because the terminal has no
   masked row;
-- **tap a masked row once to reveal it, and again to copy it**. Copy all, and a
-  deliberate copy, keep the real text.
+- **a tap on a row copies its text**, masked or not; the eye is the control that
+  shows it.
 
 > ⚠️ **Hidden is presentation, not encryption.** Every payload is already sealed
 > end to end; hidden only decides how the row is drawn. The other device — and a
@@ -81,7 +88,10 @@ automatically** in the **Files** dialog if a conversation expects a queue of
 files; the row then says where each one landed.
 
 The same dialog lists the files this conversation received and where each one
-is. Tap a row to copy its path. On a desktop, **Open folder** opens the folder.
+is. Tap a row to copy its path. On a desktop, **Open folder** opens the folder;
+a phone does not offer it, because Android and iOS will not let an app pass a
+private folder to the file manager. On a phone the folder is a full-width line
+with **Choose…** under it.
 
 See [Send a file](Send-a-file) for the file actions themselves.
 

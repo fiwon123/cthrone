@@ -631,7 +631,18 @@ func (g *gui) showFiles() {
 		picker.Show()
 	}, g.copyLabel)
 
-	folderRow := container.NewBorder(g.label("Folder"), nil, nil, choose, folder)
+	var folderRow fyne.CanvasObject
+	if g.lay.Stack {
+		// Touch: the path gets the whole width and the picker sits under it,
+		// so the folder is readable without a button squeezing it (#474).
+		folderRow = container.NewVBox(
+			g.label("Folder"),
+			folder,
+			container.NewGridWithColumns(1, choose),
+		)
+	} else {
+		folderRow = container.NewBorder(g.label("Folder"), nil, nil, choose, folder)
+	}
 
 	// The files the conversation has received, and where each one is. The row
 	// action copies its path, which is the thing a user needs when the file is
@@ -659,7 +670,7 @@ func (g *gui) showFiles() {
 		scroll,
 	)
 
-	if canOpenFiles() {
+	if canOpenFolders() {
 		body.Add(widgets.NewButtonWithIcon("Open folder", theme.FolderOpenIcon(), func() {
 			dir := expandFolder(folder.Text)
 			if dir == "" {

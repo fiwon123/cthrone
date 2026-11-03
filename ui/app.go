@@ -344,6 +344,11 @@ type gui struct {
 	// that does not change it does not re-lay the field out (#324).
 	composerRows int
 
+	// composerActions is the row of attach/hide/send controls. It is kept so a
+	// test can prove a growing message grows the field and not the buttons
+	// (#474).
+	composerActions *fyne.Container
+
 	// lastComposer is the text before the current change, so an appended newline
 	// can be told from a typed one, and editingComposer marks the changes this
 	// window makes itself (#323).
@@ -725,9 +730,16 @@ func (g *gui) build() {
 			sender := canvas.NewText("", theme.Color(theme.ColorNameForeground))
 			sender.TextStyle = fyne.TextStyle{Bold: true}
 
+			// A text row carries its own hide/show eye: the direct control a
+			// message needs, instead of a gesture the row also uses for copy
+			// (#474). A file row has nothing to mask, so it stays hidden.
+			reveal := widgets.NewButtonWithIcon("", theme.VisibilityOffIcon(), nil, g.copyLabel)
+			reveal.SetCopyText("")
+			reveal.Hide()
+
 			caption := container.NewVBox(sender, row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box, video.box)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, reveal, caption), pic, preview, save, open, audio.box, video.box)
 		},
 		g.updateChatRow,
 	)
@@ -776,11 +788,13 @@ func (g *gui) build() {
 	g.attachBtn.SetText("")
 	g.attachBtn.Disable()
 
-	// Hide is the composer's secret mode: an eye that masks the field while a
-	// password or a key is typed, and shows it again on the next press (#469).
+	// The composer's eye is the password switch: an eye that masks the field
+	// while a password or a key is typed, and shows it again on the next press
+	// (#469). The row you send carries the flag, so the other screen masks it
+	// too (#474).
 	g.hideBtn = widgets.NewButtonWithIcon("Hide", theme.VisibilityOffIcon(), g.toggleHidden, g.copyLabel)
 	g.hideBtn.SetText("")
-	g.hideBtn.SetCopyText("Hide the message")
+	g.hideBtn.SetCopyText("Send as password")
 
 	// The queue starts with the window and outlives any one session: a file
 	// picked while the connection is being replaced still has a worker to hand
@@ -790,11 +804,15 @@ func (g *gui) build() {
 
 	var input fyne.CanvasObject
 	if g.lay.Stack {
-		// Touch: a full-width field, and the actions below it, stacked one per
-		// line when even two do not fit.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.attachBtn, g.hideBtn, g.sendBtn))
+		// Touch: the field on its own line, then the actions. Send takes the
+		// rest of the row beside the two icons, so a thumb does not aim at a
+		// blank half-cell, and the row keeps its height while the field grows
+		// (#474).
+		g.composerActions = container.NewBorder(nil, nil, container.NewHBox(g.attachBtn, g.hideBtn), nil, g.sendBtn)
+		input = container.NewVBox(g.entry, g.composerActions)
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.hideBtn, g.sendBtn), g.entry)
+		g.composerActions = container.NewHBox(g.attachBtn, g.hideBtn, g.sendBtn)
+		input = container.NewBorder(nil, nil, nil, g.composerActions, g.entry)
 	}
 
 	// The status sits under the transcript, above the composer: it is a bar for
@@ -2155,15 +2173,15 @@ func (g *gui) toggleHidden() {
 
 	if g.hidden {
 		g.hideBtn.SetIcon(theme.VisibilityIcon())
-		g.hideBtn.SetCopyText("Show the message")
-		g.setStatus("Hidden: the message is masked, and arrives masked")
+		g.hideBtn.SetCopyText("Send normally")
+		g.setStatus("Password mode: the message is masked, and arrives masked")
 
 		return
 	}
 
 	g.hideBtn.SetIcon(theme.VisibilityOffIcon())
-	g.hideBtn.SetCopyText("Hide the message")
-	g.setStatus("Hidden mode off")
+	g.hideBtn.SetCopyText("Send as password")
+	g.setStatus("Password mode off")
 }
 
 // composerChanged runs on every change of the message field.
@@ -2553,9 +2571,10 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	var label *widgets.Text
 	var icon *widget.Icon
 	var sender *canvas.Text
+	var reveal *widgets.CopyButton
 
-	// The caption cell holds the icon and a box of the sender line over the
-	// message; the parts are found by type rather than by index.
+	// The caption cell holds the icon, the row's eye and a box of the sender
+	// line over the message; the parts are found by type rather than by index.
 	if caption != nil {
 		for _, object := range caption.Objects {
 			switch part := object.(type) {
@@ -2563,6 +2582,8 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 				label = part
 			case *widget.Icon:
 				icon = part
+			case *widgets.CopyButton:
+				reveal = part
 			case *fyne.Container:
 				for _, inner := range part.Objects {
 					switch piece := inner.(type) {
@@ -2576,7 +2597,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		}
 	}
 
-	if label == nil || icon == nil || sender == nil || pic == nil || preview == nil || save == nil || open == nil {
+	if label == nil || icon == nil || sender == nil || reveal == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
@@ -2584,6 +2605,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	g.setSenderLine(sender, &m, g.sel.contains(id))
 	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
+	g.setReveal(reveal, id, m)
 	g.fillFileRow(m, pic, preview, icon, save, open)
 	g.fillAudioRow(m, audio)
 	g.fillVideoRow(m, video)
@@ -2595,6 +2617,68 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	row.Resize(fyne.NewSize(width, row.MinSize().Height))
 	g.chatList.SetItemHeight(id, row.MinSize().Height)
+}
+
+// setReveal binds a text row's eye: a masked row offers Show, a visible one
+// offers Hide. A file row has nothing to mask, so its eye stays hidden (#474).
+func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chatMessage) {
+	if button == nil {
+		return
+	}
+
+	if m.file != nil {
+		button.Hide()
+
+		return
+	}
+
+	button.Show()
+	button.SetCopyText("")
+
+	if m.masked() {
+		button.SetIcon(theme.VisibilityIcon())
+		button.SetOnTapped(func() { g.revealMessage(id) })
+
+		return
+	}
+
+	button.SetIcon(theme.VisibilityOffIcon())
+	button.SetOnTapped(func() { g.hideMessage(id) })
+}
+
+// hideMessage masks one row on this device. It is local: a received message is
+// not recalled from the sender, and the other device is unchanged (#474).
+func (g *gui) hideMessage(id widget.ListItemID) {
+	g.mu.Lock()
+	if id < 0 || id >= len(g.messages) {
+		g.mu.Unlock()
+
+		return
+	}
+
+	g.messages[id].hidden = true
+	g.messages[id].revealed = false
+	g.mu.Unlock()
+
+	g.chatList.RefreshItem(id)
+	g.setStatus("Message hidden on this device — the other device is unchanged")
+}
+
+// revealMessage shows a masked row again, on this device only.
+func (g *gui) revealMessage(id widget.ListItemID) {
+	g.mu.Lock()
+	if id < 0 || id >= len(g.messages) {
+		g.mu.Unlock()
+
+		return
+	}
+
+	g.messages[id].hidden = true
+	g.messages[id].revealed = true
+	g.mu.Unlock()
+
+	g.chatList.RefreshItem(id)
+	g.setStatus("Message revealed")
 }
 
 // selectChatRow copies the message that was tapped, or opens a picture.
@@ -2632,28 +2716,13 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 		return
 	}
 
-	// A masked message is revealed before it is copied: the first tap is the
-	// answer to "what did I receive?", and the second is the copy. Copying a
-	// password off the screen the moment it was touched is the wrong first
-	// move (#469).
-	if message.masked() {
-		g.mu.Lock()
-		g.messages[id].revealed = true
-		g.mu.Unlock()
-
-		g.chatList.RefreshItem(id)
-		g.setStatus("Revealed — tap again to copy")
-
-		return
-	}
-
 	if message.file != nil && message.file.inline && message.file.path != "" {
 		g.showImage(message.file.path)
 
 		return
 	}
 
-	g.copyToClipboard(message.line())
+	g.copyToClipboard(message.copyText())
 }
 
 // beginSelection enters the range-copy mode: the next transcript tap marks one

@@ -52,6 +52,15 @@ var (
 		return runtime.GOOS != "ios"
 	}
 
+	// canOpenFolders reports whether a folder can be handed to the platform's
+	// file manager. Android and iOS refuse a private file:// path for the same
+	// reason they refuse a file, and a folder has no loopback route (#474). The
+	// row's Open is a file and uses canOpenFiles; this is only the Files
+	// dialog's button. It is a variable so a test can present a phone.
+	canOpenFolders = func() bool {
+		return canOpenFolderOn(runtime.GOOS)
+	}
+
 	// selfInstallable reports whether this build may offer Install and Revert.
 	// It is a variable so a test can put a phone in front of the window: what
 	// matters is the platform the binary was built for, not the layout.
@@ -376,6 +385,12 @@ func noteInstalled(result installpkg.Result) error {
 // goos and goarch are the platform this build runs on. They are functions so
 // the request the install makes is easy to read in a test.
 func goos() string { return runtime.GOOS }
+
+// canOpenFolderOn is the platform rule behind canOpenFolders, kept pure so a
+// table test can name the platforms (#474).
+func canOpenFolderOn(goos string) bool {
+	return goos != "android" && goos != "ios"
+}
 
 // goarch is the architecture this build runs on.
 func goarch() string { return runtime.GOARCH }
