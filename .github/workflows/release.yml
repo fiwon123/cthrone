@@ -509,13 +509,14 @@ jobs:
 
           - **Only WAV and MP3 play inside the app.** Those two play on the file's
             own row; Ogg/Vorbis, AAC/M4A and FLAC have no decoder in this build,
-            so they open with another app — and on a phone that means **Save as…**
-            and the file manager.
-          - **PDFs are not drawn**: they open with the device's viewer.
+            so they open with another app — the system app on a desktop, the
+            browser on a phone.
+          - **PDFs are not drawn**: they open with the device's viewer on a
+            desktop, and in the browser on a phone.
           - **An animated GIF plays; a video does not.** GIFs play on their row with
             a seek bar. MP4, H.264 and WebM need a codec this build does not carry,
-            so those open with the device's player — or **Save as…** on a phone. The
-            plan is on the wiki's
+            so those open with the device's player — the system app on a desktop,
+            the browser on a phone. The plan is on the wiki's
             [Video in the app](https://github.com/fiwon123/cthrone/blob/main/docs/wiki/Video-in-the-app.md)
             page.
           - **`recv`/`exec` are not implemented.**
@@ -523,6 +524,12 @@ jobs:
             **APK on a device** have not been run yet. Nothing here has been
             heard on a phone either: the in-app player is compiled into the APK
             and has never been run on one.
+          - **Opening a file on a phone has not been tried on a device.** It serves
+            the file to the browser over a loopback link; the steps and where to
+            report are in
+            [Verifying on real hardware](https://github.com/fiwon123/cthrone/blob/main/docs/wiki/Verifying-on-real-hardware.md)
+            under "Opening a file on a phone". Until that result, treat it as
+            unproven.
 
           Each of those has an issue, and the wiki's
           [Verifying on real hardware](https://github.com/fiwon123/cthrone/blob/main/docs/wiki/Verifying-on-real-hardware.md)
