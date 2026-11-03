@@ -312,6 +312,10 @@ type gui struct {
 	hub    *session.Hub
 	server liveServer
 
+	// openServer is the one-file loopback server behind a phone's Open (#470).
+	// It is closed by the next Open, after openServeWindow, or at shutdown.
+	openServer *http.Server
+
 	// liveSessions is how many sessions this window holds. A host holds one per
 	// device in its room, and the receiver is prepared for the first and closed
 	// with the last (#342).
@@ -1594,6 +1598,10 @@ func (g *gui) shutdown() {
 	// The device goes back to the machine before the process does, and no
 	// widget is touched: there is no event loop left to return to.
 	g.stopAudio()
+
+	// A file being served to the browser stops with the window: a listener
+	// left behind would keep a private file reachable after the app is gone.
+	g.closeOpenServer()
 
 	g.mu.Lock()
 	sess, server := g.sess, g.server

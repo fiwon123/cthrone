@@ -42,13 +42,14 @@ var (
 	// canOpenFiles reports whether a received file can be handed to another app
 	// on this platform.
 	//
-	// A desktop hands the path to the system opener. Android cannot: since API 24
-	// a file:// URI may not leave the app (FileUriExposedException), and this
-	// toolkit ships no content:// provider, so an Open button there can only
-	// fail. The row offers Save as… instead, which uses the system file dialog
-	// and does work (#305). It is a variable so a test can present a phone.
+	// A desktop hands the path to the system opener. Android cannot pass a
+	// private file:// path (FileUriExposedException), and this APK has no
+	// content provider, so Open there serves the file to the browser from a
+	// loopback URL instead — still another app, and the way an APK with no Java
+	// source step can do it (#470). iOS has no implementation, so the button is
+	// not offered there. It is a variable so a test can present a phone.
 	canOpenFiles = func() bool {
-		return runtime.GOOS != "android" && runtime.GOOS != "ios"
+		return runtime.GOOS != "ios"
 	}
 
 	// selfInstallable reports whether this build may offer Install and Revert.
