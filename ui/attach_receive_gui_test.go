@@ -19,7 +19,8 @@ import (
 //
 // No test did this before (#286): the receive tests stopped at one chunk, at a
 // cancel and at an abort, so nothing proved that a finished transfer reaches the
-// folder.
+// app's storage. The default is manual now (#469), so that is where it stays
+// until the row's Save as… is pressed.
 func TestAWholeFileArrivesThroughTheReceivePath(t *testing.T) {
 	g := newScreenGUI(t, false)
 	g.prepareReceive()
@@ -39,8 +40,49 @@ func TestAWholeFileArrivesThroughTheReceivePath(t *testing.T) {
 		g.receiveFrame("laptop", frame)
 	}
 
-	settings := g.fileSettings()
-	saved := filepath.Join(settings.folder, "notes.txt")
+	if len(g.messages) != 1 || g.messages[0].file == nil {
+		t.Fatalf("the transcript holds %d rows, want one file row", len(g.messages))
+	}
+
+	note := g.messages[0].file
+	if state := note.state; state != transferPending {
+		t.Errorf("the row is in state %v, want not saved", state)
+	}
+
+	got, err := os.ReadFile(note.path)
+	if err != nil {
+		t.Fatalf("the file did not stay in the app's storage: %v", err)
+	}
+
+	if !bytes.Equal(got, body) {
+		t.Errorf("the file that landed has %d bytes, want the %d that were sent", len(got), len(body))
+	}
+}
+
+// Automatic saving is the opt-in: the same arrival is moved into the chosen
+// folder at once, and the row says where it went (#469).
+func TestAutoSavePutsTheFileInTheFolder(t *testing.T) {
+	g := newScreenGUI(t, false)
+	folder := g.fileSettings().folder
+	g.storeFileSettings(folder, true)
+	g.prepareReceive()
+
+	body := bytes.Repeat([]byte("cthrone "), 4_000)
+	recorder := newSendRecorder()
+
+	if err := sendFile(context.Background(), recorder, "id-1", "notes.txt", "text/plain", int64(len(body)), bytes.NewReader(body), nil); err != nil {
+		t.Fatalf("sendFile: %v", err)
+	}
+
+	recorder.mu.Lock()
+	frames := append([][]byte(nil), recorder.sent...)
+	recorder.mu.Unlock()
+
+	for _, frame := range frames {
+		g.receiveFrame("laptop", frame)
+	}
+
+	saved := filepath.Join(folder, "notes.txt")
 
 	got, err := os.ReadFile(saved)
 	if err != nil {
@@ -49,10 +91,6 @@ func TestAWholeFileArrivesThroughTheReceivePath(t *testing.T) {
 
 	if !bytes.Equal(got, body) {
 		t.Errorf("the file that landed has %d bytes, want the %d that were sent", len(got), len(body))
-	}
-
-	if len(g.messages) != 1 || g.messages[0].file == nil {
-		t.Fatalf("the transcript holds %d rows, want one file row", len(g.messages))
 	}
 
 	if state := g.messages[0].file.state; state != transferSaved {
@@ -162,6 +200,7 @@ func TestASecondDeviceJoiningKeepsTheAssembler(t *testing.T) {
 // is still connected and still sends files (#342).
 func TestAFileArrivesAfterAnotherDeviceLeaves(t *testing.T) {
 	g := newScreenGUI(t, false)
+	g.storeFileSettings(g.fileSettings().folder, true)
 
 	first := recorder(t, "laptop")
 	second := recorder(t, "phone")

@@ -544,3 +544,37 @@ func TestEncodeWrapsATextFrameThatCarriesASender(t *testing.T) {
 		t.Errorf("an unnamed sentence = %q, want it unwrapped", plain)
 	}
 }
+
+// A hidden sentence carries its flag in the header so the receiver masks the
+// same line the sender masked (#469). It is wrapped for the same reason a
+// relayed one is, and a peer that predates the field still reads the text.
+func TestEncodeWrapsAHiddenTextFrame(t *testing.T) {
+	hidden, err := Encode(Header{Kind: KindText, Hidden: true}, []byte("hunter2"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	if !IsFrame(hidden) {
+		t.Fatalf("a hidden sentence was not wrapped: %q", hidden)
+	}
+
+	frame, err := Parse(hidden)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if !frame.Header.Hidden || string(frame.Payload) != "hunter2" {
+		t.Errorf("frame = %+v %q, want the hidden flag and the sentence", frame.Header, frame.Payload)
+	}
+
+	// The flag must not leak into an ordinary sentence: an older peer reads
+	// those byte for byte, and wrapping them would break that promise.
+	plain, err := Encode(Header{Kind: KindText}, []byte("hello"))
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+
+	if IsFrame(plain) || string(plain) != "hello" {
+		t.Errorf("an ordinary sentence = %q, want it unwrapped", plain)
+	}
+}

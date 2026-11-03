@@ -178,7 +178,27 @@ type gui struct {
 	sendBtn   *widgets.CopyButton
 	stopBtn   *widgets.CopyButton
 	attachBtn *widgets.CopyButton
+	hideBtn   *widgets.CopyButton
 	messages  []chatMessage
+
+	// hidden is the composer's secret mode: while it is on the field is a
+	// password entry, and the message carries the hidden flag (#469).
+	hidden bool
+
+	// sel is the range-copy state: while it is active the chat header swaps to
+	// the selection controls, and a transcript tap marks an end instead of
+	// copying a row (#469). headerHolder holds both headers so switching is one
+	// visibility change rather than a rebuild.
+	sel          selection
+	headerHolder *fyne.Container
+	selectHeader *fyne.Container
+	selectBtn    *widgets.CopyButton
+	copyAllBtn   *widgets.CopyButton
+	selCount     *widget.Label
+	selCopyBtn   *widgets.CopyButton
+	selDeleteBtn *widgets.CopyButton
+	selClearBtn  *widgets.CopyButton
+	selCancelBtn *widgets.CopyButton
 
 	// lastPick is the folder the last attached file came from: the picker opens
 	// there next time instead of walking the toolkit's place list (#386).
@@ -592,11 +612,56 @@ func (g *gui) build() {
 	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
 	g.jumpBtn.Hide()
 
+	// Copy all is the transcript action the older header dropped (#289): a
+	// reader who wants the whole conversation back with the button that says
+	// so, and not a row at a time (#469).
+	g.copyAllBtn = widgets.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), g.copyAll, g.copyLabel)
+	g.copyAllBtn.Disable()
+
+	// Select is the mobile-friendly copy gesture: two taps pick the ends of a
+	// span, and the header becomes the actions that span has (#469).
+	g.selectBtn = widgets.NewButtonWithIcon("Select", theme.ListIcon(), g.beginSelection, g.copyLabel)
+	g.selectBtn.Disable()
+
+	if g.lay.Stack {
+		g.copyAllBtn.SetText("")
+		g.selectBtn.SetText("")
+	}
+
 	header := container.NewHBox(g.stateGlyph, g.stateWord)
 	header.Add(layout.NewSpacer())
 	header.Add(g.jumpBtn)
+	header.Add(g.copyAllBtn)
+	header.Add(g.selectBtn)
 	header.Add(g.stopBtn)
 	header.Add(filesBtn)
+
+	// The selection header replaces the state row while a range is being built:
+	// the state is not what the reader is doing then, and five actions do not
+	// fit beside a word that says nothing about them (#469).
+	g.selCount = widget.NewLabel("0 selected")
+
+	g.selCopyBtn = widgets.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), g.copySelection, g.copyLabel)
+	g.selDeleteBtn = widgets.NewButtonWithIcon("Delete", theme.DeleteIcon(), g.deleteSelection, g.copyLabel)
+	g.selClearBtn = widgets.NewButtonWithIcon("Clear all", theme.ContentClearIcon(), g.clearTranscript, g.copyLabel)
+	g.selCancelBtn = widgets.NewButtonWithIcon("Cancel", theme.CancelIcon(), g.endSelection, g.copyLabel)
+
+	if g.lay.Stack {
+		for _, button := range []*widgets.CopyButton{g.selCopyBtn, g.selDeleteBtn, g.selClearBtn, g.selCancelBtn} {
+			button.SetText("")
+		}
+	}
+
+	g.selectHeader = container.NewHBox(
+		g.selCount,
+		layout.NewSpacer(),
+		g.selCopyBtn,
+		g.selDeleteBtn,
+		g.selClearBtn,
+		g.selCancelBtn,
+	)
+	g.selectHeader.Hide()
+	g.headerHolder = container.NewStack(header, g.selectHeader)
 
 	// One row per message, not one label holding the whole log: appending then
 	// costs a row instead of a re-wrap of every line, and a row is a tap target
@@ -707,6 +772,12 @@ func (g *gui) build() {
 	g.attachBtn.SetText("")
 	g.attachBtn.Disable()
 
+	// Hide is the composer's secret mode: an eye that masks the field while a
+	// password or a key is typed, and shows it again on the next press (#469).
+	g.hideBtn = widgets.NewButtonWithIcon("Hide", theme.VisibilityOffIcon(), g.toggleHidden, g.copyLabel)
+	g.hideBtn.SetText("")
+	g.hideBtn.SetCopyText("Hide the message")
+
 	// The queue starts with the window and outlives any one session: a file
 	// picked while the connection is being replaced still has a worker to hand
 	// it to, and that worker reports the failure if there is nothing to send to.
@@ -715,18 +786,18 @@ func (g *gui) build() {
 
 	var input fyne.CanvasObject
 	if g.lay.Stack {
-		// Touch: a full-width field, and the two actions below it, stacked
-		// one per line when even two do not fit.
-		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.attachBtn, g.sendBtn))
+		// Touch: a full-width field, and the actions below it, stacked one per
+		// line when even two do not fit.
+		input = container.NewVBox(g.entry, container.NewGridWithColumns(g.lay.ActionColumns, g.attachBtn, g.hideBtn, g.sendBtn))
 	} else {
-		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.sendBtn), g.entry)
+		input = container.NewBorder(nil, nil, nil, container.NewHBox(g.attachBtn, g.hideBtn, g.sendBtn), g.entry)
 	}
 
 	// The status sits under the transcript, above the composer: it is a bar for
 	// what just happened, not a second header line. The header answers "where
 	// do I stand" with the state icon, and nothing else (#457).
 	chat := container.NewBorder(
-		container.NewVBox(container.NewPadded(header), widget.NewSeparator()),
+		container.NewVBox(container.NewPadded(g.headerHolder), widget.NewSeparator()),
 		container.NewVBox(container.NewPadded(g.status), container.NewPadded(input)),
 		nil, nil,
 		g.chatList,
@@ -1565,9 +1636,13 @@ func (g *gui) send(text string) {
 	// Text goes through the envelope, which is what keeps the one string the
 	// receiver would misread — a message beginning with the magic — from
 	// arriving as a damaged frame: Encode wraps that line in a text frame, and
-	// the receiver unwraps it. For every other message Encode hands the bytes
-	// back unchanged, so a peer that predates the envelope still reads it.
-	payload, err := wire.Encode(wire.Header{Kind: wire.KindText}, []byte(text))
+	// the receiver unwraps it. A hidden message is wrapped for the same reason:
+	// the flag has to travel in the header (#469). For every other message
+	// Encode hands the bytes back unchanged, so a peer that predates the
+	// envelope still reads it.
+	hidden := g.hidden
+
+	payload, err := wire.Encode(wire.Header{Kind: wire.KindText, Hidden: hidden}, []byte(text))
 	if err != nil {
 		g.setStatus("Not sent: " + err.Error())
 
@@ -1575,7 +1650,7 @@ func (g *gui) send(text string) {
 	}
 
 	g.entry.SetText("")
-	g.addMessage(chatMessage{text: text})
+	g.addMessage(chatMessage{text: text, hidden: hidden})
 	g.scrollToLatest()
 
 	go func() {
@@ -2058,6 +2133,31 @@ func refusedDial(err error) bool {
 		errors.Is(err, discovery.ErrCertificateChanged)
 }
 
+// toggleHidden turns the composer's secret mode on or off.
+//
+// While it is on the field is a password entry: the characters are concealed,
+// and on a phone the platform's password keyboard is what opens, so a secret is
+// not handed to a third-party keyboard either. The eye says which way the next
+// press goes (#469).
+func (g *gui) toggleHidden() {
+	g.hidden = !g.hidden
+
+	g.entry.Password = g.hidden
+	g.entry.Refresh()
+
+	if g.hidden {
+		g.hideBtn.SetIcon(theme.VisibilityIcon())
+		g.hideBtn.SetCopyText("Show the message")
+		g.setStatus("Hidden: the message is masked, and arrives masked")
+
+		return
+	}
+
+	g.hideBtn.SetIcon(theme.VisibilityOffIcon())
+	g.hideBtn.SetCopyText("Hide the message")
+	g.setStatus("Hidden mode off")
+}
+
 // composerChanged runs on every change of the message field.
 //
 // A newline appended to the end is Enter, and Enter sends — the behaviour every
@@ -2159,6 +2259,7 @@ func (g *gui) updateButtons() {
 	hasServer := g.server != nil
 	reconnecting := g.reconnecting
 	busy := g.starting || g.stopping
+	hasMessages := len(g.messages) > 0
 	g.mu.Unlock()
 
 	if hasSession {
@@ -2167,6 +2268,25 @@ func (g *gui) updateButtons() {
 	} else {
 		g.sendBtn.Disable()
 		g.attachBtn.Disable()
+	}
+
+	// Copy all and Select act on the transcript, not on the connection: they
+	// work while offline, and only a conversation with something in it gives
+	// them something to act on (#469).
+	if g.copyAllBtn != nil {
+		if hasMessages {
+			g.copyAllBtn.Enable()
+		} else {
+			g.copyAllBtn.Disable()
+		}
+	}
+
+	if g.selectBtn != nil {
+		if hasMessages {
+			g.selectBtn.Enable()
+		} else {
+			g.selectBtn.Disable()
+		}
 	}
 
 	// Stop is how a user ends a retry loop as well as a session: without it
@@ -2292,6 +2412,7 @@ func (g *gui) addMessage(m chatMessage) {
 		g.mu.Unlock()
 
 		g.chatList.Refresh()
+		g.updateButtons()
 
 		if follow {
 			g.scrollToLatest()
@@ -2452,7 +2573,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	}
 
 	m := g.messages[id]
-	g.setSenderLine(sender, &m)
+	g.setSenderLine(sender, &m, g.sel.contains(id))
 	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	g.fillFileRow(m, pic, preview, icon, save, open)
@@ -2474,6 +2595,9 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 // the clipboard, instead of asking a finger to drag a selection handle through
 // a tall, wrapping label. A picture row is the exception — tapping it opens the
 // file the way tapping an image everywhere else does.
+//
+// While a range is being built the tap marks an end instead (#469): the row is
+// the only target a thumb can hit, so it is the selection handle.
 func (g *gui) selectChatRow(id widget.ListItemID) {
 	if id < 0 || id >= len(g.messages) {
 		return
@@ -2494,6 +2618,27 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 
 	g.chatList.Unselect(id)
 
+	if g.sel.active {
+		g.tapSelection(id)
+
+		return
+	}
+
+	// A masked message is revealed before it is copied: the first tap is the
+	// answer to "what did I receive?", and the second is the copy. Copying a
+	// password off the screen the moment it was touched is the wrong first
+	// move (#469).
+	if message.masked() {
+		g.mu.Lock()
+		g.messages[id].revealed = true
+		g.mu.Unlock()
+
+		g.chatList.RefreshItem(id)
+		g.setStatus("Revealed — tap again to copy")
+
+		return
+	}
+
 	if message.file != nil && message.file.inline && message.file.path != "" {
 		g.showImage(message.file.path)
 
@@ -2501,6 +2646,280 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 	}
 
 	g.copyToClipboard(message.line())
+}
+
+// beginSelection enters the range-copy mode: the next transcript tap marks one
+// end of the span and the one after it marks the other.
+func (g *gui) beginSelection() {
+	g.mu.Lock()
+	empty := len(g.messages) == 0
+	g.mu.Unlock()
+
+	if empty {
+		return
+	}
+
+	g.sel = selection{active: true, anchor: noSelection, focus: noSelection}
+	g.showSelectionHeader(true)
+	g.updateSelectionHeader()
+	g.setStatus("Tap the first message, then the last")
+}
+
+// endSelection leaves range mode and puts the chat header back.
+func (g *gui) endSelection() {
+	if !g.sel.active {
+		return
+	}
+
+	g.sel = selection{anchor: noSelection, focus: noSelection}
+	g.showSelectionHeader(false)
+	g.chatList.Refresh()
+}
+
+// showSelectionHeader swaps the state row for the selection actions, or back.
+func (g *gui) showSelectionHeader(show bool) {
+	if g.headerHolder == nil || g.selectHeader == nil || len(g.headerHolder.Objects) < 2 {
+		return
+	}
+
+	state := g.headerHolder.Objects[0]
+
+	if show {
+		state.Hide()
+		g.selectHeader.Show()
+	} else {
+		g.selectHeader.Hide()
+		state.Show()
+	}
+}
+
+// updateSelectionHeader says how many rows the span covers and which actions
+// have something to act on.
+func (g *gui) updateSelectionHeader() {
+	if g.selCount == nil {
+		return
+	}
+
+	count := g.sel.count()
+	g.selCount.SetText(fmt.Sprintf("%d selected", count))
+
+	for _, button := range []*widgets.CopyButton{g.selCopyBtn, g.selDeleteBtn} {
+		if button == nil {
+			continue
+		}
+
+		if count > 0 {
+			button.Enable()
+		} else {
+			button.Disable()
+		}
+	}
+}
+
+// tapSelection marks one end of the span. The first tap sets both ends, so a
+// single message can be copied or deleted without a second tap.
+func (g *gui) tapSelection(id int) {
+	if id < 0 || id >= len(g.messages) {
+		return
+	}
+
+	if g.sel.anchor == noSelection {
+		g.sel.anchor = id
+		g.setStatus("Tap the last message")
+	}
+
+	g.sel.focus = id
+	g.updateSelectionHeader()
+	g.chatList.Refresh()
+}
+
+// selectionSpan is the range the header's actions apply to, clamped to the log.
+func (g *gui) selectionSpan() (int, int, bool) {
+	g.mu.Lock()
+	count := len(g.messages)
+	g.mu.Unlock()
+
+	if !g.sel.active || count == 0 {
+		return 0, 0, false
+	}
+
+	start := g.sel.start()
+	if start == noSelection || start >= count {
+		return 0, 0, false
+	}
+
+	end := g.sel.end()
+	if end >= count {
+		end = count - 1
+	}
+
+	return start, end, true
+}
+
+// copySelection puts the selected span on the clipboard, one message per line.
+func (g *gui) copySelection() {
+	start, end, ok := g.selectionSpan()
+	if !ok {
+		return
+	}
+
+	g.mu.Lock()
+	text := transcriptOf(g.messages[start : end+1])
+	g.mu.Unlock()
+
+	g.copyToClipboard(text)
+	g.setStatus(fmt.Sprintf("Copied %d message(s)", end-start+1))
+	g.endSelection()
+}
+
+// copyAll puts the whole transcript on the clipboard in order, sender included.
+func (g *gui) copyAll() {
+	g.mu.Lock()
+	text := transcriptOf(g.messages)
+	count := len(g.messages)
+	g.mu.Unlock()
+
+	if text == "" {
+		return
+	}
+
+	g.copyToClipboard(text)
+	g.setStatus(fmt.Sprintf("Copied %d message(s)", count))
+}
+
+// deleteSelection removes the selected span from this device.
+func (g *gui) deleteSelection() {
+	start, end, ok := g.selectionSpan()
+	if !ok {
+		return
+	}
+
+	g.removeMessages(start, end)
+}
+
+// removeMessages takes a span out of the transcript, and with it the app's own
+// unsaved copies of any files in it. Nothing is sent to the other device: this
+// is the local transcript, not the conversation (#469).
+func (g *gui) removeMessages(start, end int) {
+	g.mu.Lock()
+	count := len(g.messages)
+
+	notes := make([]*fileNote, 0, end-start+1)
+	for i := start; i <= end && i < count; i++ {
+		if g.messages[i].file != nil {
+			notes = append(notes, g.messages[i].file)
+		}
+	}
+
+	g.messages = removeRange(g.messages, start, end)
+	g.mu.Unlock()
+
+	for _, note := range notes {
+		g.discardStaged(note)
+	}
+
+	g.sel = selection{anchor: noSelection, focus: noSelection}
+	g.showSelectionHeader(false)
+	g.chatList.Refresh()
+	g.updateButtons()
+	g.setStatus(fmt.Sprintf("Deleted %d message(s) from this device", end-start+1))
+}
+
+// askClear is the question before the transcript is emptied.
+//
+// It is a variable so a test can answer without a dialog, the same seam
+// install.go uses for its confirmations.
+var askClear = func(g *gui, count int, answer func(bool)) {
+	g.showCopyableConfirm(
+		"Clear all messages",
+		fmt.Sprintf("Clear all %d messages on this device?\n\nThey are not recalled from the other device, and files already saved are kept.", count),
+		"Clear", "Cancel",
+		answer,
+	)
+}
+
+// clearTranscript empties the transcript, after asking: it is the "start clean"
+// action, and the one delete that can take a whole conversation with it.
+func (g *gui) clearTranscript() {
+	g.mu.Lock()
+	count := len(g.messages)
+
+	notes := make([]*fileNote, 0, count)
+	for _, message := range g.messages {
+		if message.file != nil {
+			notes = append(notes, message.file)
+		}
+	}
+	g.mu.Unlock()
+
+	if count == 0 {
+		return
+	}
+
+	askClear(g, count, func(ok bool) {
+		if !ok {
+			return
+		}
+
+		g.cancelTransfers()
+		g.abandonIncoming()
+
+		g.mu.Lock()
+		g.messages = nil
+		g.mu.Unlock()
+
+		for _, note := range notes {
+			g.discardStaged(note)
+		}
+
+		g.sel = selection{anchor: noSelection, focus: noSelection}
+		g.showSelectionHeader(false)
+		g.chatList.Refresh()
+		g.updateButtons()
+		g.setStatus("Transcript cleared on this device")
+	})
+}
+
+// discardStaged removes the app's own unsaved copy behind a row, and only that.
+//
+// A row waiting to be saved points into the staging folder; deleting the row
+// should not leave the bytes there for a message nobody can reach. A saved row
+// points at the user's folder, and a sent row at the user's own file, and
+// neither is this function's to remove (#469).
+func (g *gui) discardStaged(note *fileNote) {
+	if note == nil || note.path == "" || note.state != transferPending {
+		return
+	}
+
+	root, err := filepath.Abs(g.stagingDir())
+	if err != nil {
+		return
+	}
+
+	path, err := filepath.Abs(note.path)
+	if err != nil {
+		return
+	}
+
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return
+	}
+
+	_ = os.Remove(path)
+}
+
+// abandonIncoming marks every arrival still being assembled, so the receive
+// loop drops it instead of adding a row to a transcript that was just cleared.
+func (g *gui) abandonIncoming() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, entry := range g.incoming {
+		if entry != nil {
+			entry.abandoned = true
+		}
+	}
 }
 
 // composerHasKeyboard reports whether the message field is the focused object,

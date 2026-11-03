@@ -425,7 +425,7 @@ func (n fileNote) line() string {
 		return fmt.Sprintf("%s (%s) — saved", n.name, humanBytes(n.size))
 
 	case transferPending:
-		return fmt.Sprintf("%s (%s) — waiting to be saved", n.name, humanBytes(n.size))
+		return fmt.Sprintf("%s (%s) — not saved", n.name, humanBytes(n.size))
 
 	case transferFailed:
 		return n.name + " — failed"

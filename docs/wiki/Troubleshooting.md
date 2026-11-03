@@ -70,10 +70,21 @@ at nothing.
 
 Android does not let an app pass a private `file://` path to another app, and
 this build ships no `content://` provider, so **Open** is not offered on a phone
-([#305](https://github.com/fiwon123/cthrone/issues/305)). Press **Save as…** and
+([#305](https://github.com/fiwon123/cthrone/issues/305),
+[#470](https://github.com/fiwon123/cthrone/issues/470)). Press **Save as…** and
 pick a folder the file manager can see, then open the file from there.
 
 A desktop opens these with the system's own app, as before.
+
+## A received file is not in Downloads
+
+By default a received file waits in the app's own storage: the row says **not
+saved** and offers **Save as…**. That is deliberate — an arriving picture is not
+written into Downloads unless you ask ([#469](https://github.com/fiwon123/cthrone/issues/469)).
+Turn on **Save received files automatically** in the **Files** dialog if you
+want arrivals to land in the chosen folder on their own; the row then says
+**saved to <path>**. The Files dialog also lists the files this conversation
+received, and each row copies its path.
 
 ## Play does nothing, or the row says the clip cannot be played
 

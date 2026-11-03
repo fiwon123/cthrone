@@ -17,16 +17,27 @@ a row of its own. The terminal has no file command — text only.
 
 ## Receiving
 
-The row reports the transfer, then offers **Save as…** once it is complete. A
-picture the toolkit can decode is drawn inline under the caption, so a
+Nothing is written into Downloads unless you ask for it. The row reports the
+transfer, then says **not saved** and offers **Save as…**: the verified file
+waits in the app's own storage until you choose where it goes.
+
+Turn on **Save received files automatically** in the **Files** dialog if you
+want arrivals to land in a folder on their own; each row then says **saved to
+<path>**. The same dialog lists the files this conversation received and where
+each one is: tap a row to copy its path, and on a desktop **Open folder** opens
+the folder.
+
+A picture the toolkit can decode is drawn inline under the caption, so a
 screenshot arrives as a picture rather than a filename. A file the app cannot
 draw — a PDF, an audio clip, an archive — shows an icon for its kind beside the
 caption, so two different files do not read as the same line.
 
 **Open** hands a file to whatever the device uses for that type. It is offered on
-a desktop only: Android will not let an app pass a private `file://` path to
-another app, so on a phone the row offers **Save as…** instead — save it
-somewhere the file manager can see, then open it from there.
+a desktop, including for a file still waiting to be saved — the app's copy is on
+the disk. Android will not let an app pass a private `file://` path to another
+app without a content provider, so on a phone the row offers **Save as…**
+instead — save it somewhere the file manager can see, then open it from there
+([#470](https://github.com/fiwon123/cthrone/issues/470)).
 
 ## Playing an audio clip
 
