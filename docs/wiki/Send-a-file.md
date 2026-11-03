@@ -25,7 +25,9 @@ Turn on **Save received files automatically** in the **Files** dialog if you
 want arrivals to land in a folder on their own; each row then says **saved to
 <path>**. The same dialog lists the files this conversation received and where
 each one is: tap a row to copy its path, and on a desktop **Open folder** opens
-the folder.
+the folder. On a phone the folder is a full-width line with **Choose…** under
+it, and **Open folder** is not offered — Android and iOS will not hand a private
+folder to the file manager (#474).
 
 A picture the toolkit can decode is drawn inline under the caption, so a
 screenshot arrives as a picture rather than a filename. A file the app cannot
