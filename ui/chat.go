@@ -97,18 +97,16 @@ func (m chatMessage) masked() bool {
 	return m.hidden && !m.revealed
 }
 
-// line renders the message the way the transcript shows it.
-func (m chatMessage) line() string {
-	sender := "You"
-	if m.from != "" {
-		sender = m.from
-	}
-
+// copyText is what a copy puts on the clipboard: the message itself, never the
+// sender. The row draws attribution on its own line, and a pasted message is
+// the text the user wanted — "laptop: " in front of it is the transcript's
+// business, not the clipboard's (#474).
+func (m chatMessage) copyText() string {
 	if m.file != nil {
-		return sender + ": " + m.file.line()
+		return m.file.line()
 	}
 
-	return sender + ": " + m.text
+	return m.text
 }
 
 // body is what a message says without the sender in front of it.
@@ -310,11 +308,12 @@ func (s selection) contains(index int) bool {
 }
 
 // transcriptOf renders messages in order, one per line: the whole-log copy, and
-// the range copy the selection header offers.
+// the range copy the selection header offers. It is the message text only; the
+// sender stays on screen (#474).
 func transcriptOf(messages []chatMessage) string {
 	lines := make([]string, len(messages))
 	for i, m := range messages {
-		lines[i] = m.line()
+		lines[i] = m.copyText()
 	}
 
 	return strings.Join(lines, "\n")

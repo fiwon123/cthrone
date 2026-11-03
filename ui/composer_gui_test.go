@@ -32,6 +32,35 @@ func TestComposerActionsReadLikeAChatApp(t *testing.T) {
 	}
 }
 
+// On a phone the three actions share one row and Send fills the rest; a
+// multi-line message grows the field and leaves the action row alone (#474).
+func TestPhoneComposerActionsStayOnOneRow(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	g.win.Resize(fyne.NewSize(360, 720))
+	g.win.Content().Resize(fyne.NewSize(360, 720))
+	g.win.Content().Refresh()
+
+	if g.sendBtn.Size().Width <= g.attachBtn.Size().Width {
+		t.Errorf("Send is %.1f wide and attach %.1f: Send does not take the rest of the row",
+			g.sendBtn.Size().Width, g.attachBtn.Size().Width)
+	}
+
+	actionsHeight := g.composerActions.MinSize().Height
+	entryHeight := g.entry.MinSize().Height
+
+	g.entry.SetText("one\ntwo\nthree\nfour\nfive")
+	g.win.Content().Refresh()
+
+	if g.entry.MinSize().Height <= entryHeight {
+		t.Error("a five-line message did not grow the field")
+	}
+
+	if got := g.composerActions.MinSize().Height; got != actionsHeight {
+		t.Errorf("the action row is %.1f high after a five-line message, was %.1f", got, actionsHeight)
+	}
+}
+
 // The message field says nothing until the user types: the hint it carried was
 // the field's first line spent on instructions (#344).
 func TestTheComposerHasNoPlaceholder(t *testing.T) {

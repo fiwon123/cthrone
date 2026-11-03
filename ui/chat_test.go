@@ -6,26 +6,26 @@ import (
 	"testing"
 )
 
-// TestChatMessageLine checks how a message reaches the screen: the row and the
-// clipboard carry the same rendering, so a copy is what was read.
-func TestChatMessageLine(t *testing.T) {
+// TestChatMessageCopyText checks what a copy puts on the clipboard: the message
+// itself, with no sender in front of it (#474).
+func TestChatMessageCopyText(t *testing.T) {
 	tests := []struct {
 		name string
 		msg  chatMessage
 		want string
 	}{
-		{"own message", chatMessage{text: "hello"}, "You: hello"},
-		{"own empty text", chatMessage{}, "You: "},
-		{"peer message", chatMessage{from: "laptop", text: "hi"}, "laptop: hi"},
-		{"peer with empty text", chatMessage{from: "laptop"}, "laptop: "},
-		{"colon in the text", chatMessage{from: "laptop", text: "a: b"}, "laptop: a: b"},
-		{"multi-line text", chatMessage{text: "one\ntwo"}, "You: one\ntwo"},
+		{"own message", chatMessage{text: "hello"}, "hello"},
+		{"own empty text", chatMessage{}, ""},
+		{"peer message", chatMessage{from: "laptop", text: "hi"}, "hi"},
+		{"peer with empty text", chatMessage{from: "laptop"}, ""},
+		{"colon in the text", chatMessage{from: "laptop", text: "a: b"}, "a: b"},
+		{"multi-line text", chatMessage{text: "one\ntwo"}, "one\ntwo"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.msg.line(); got != tt.want {
-				t.Errorf("line() = %q, want %q", got, tt.want)
+			if got := tt.msg.copyText(); got != tt.want {
+				t.Errorf("copyText() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -57,8 +57,8 @@ func TestSenderLabel(t *testing.T) {
 	}
 }
 
-// TestTranscript checks the whole-log copy: order kept, one line per message,
-// and nothing for an empty log.
+// TestTranscript checks the whole-log copy: order kept, one message per line,
+// and nothing for an empty log (#474).
 func TestTranscript(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -66,11 +66,11 @@ func TestTranscript(t *testing.T) {
 		want     string
 	}{
 		{"empty", nil, ""},
-		{"one", []chatMessage{{text: "hello"}}, "You: hello"},
+		{"one", []chatMessage{{text: "hello"}}, "hello"},
 		{
 			"in order",
 			[]chatMessage{{text: "hi"}, {from: "laptop", text: "hello"}},
-			"You: hi\nlaptop: hello",
+			"hi\nhello",
 		},
 	}
 
@@ -343,17 +343,18 @@ func TestRemoveRange(t *testing.T) {
 	}
 }
 
-// TestHiddenBodyAndLine checks what a hidden row draws and what a copy takes:
-// the mask on screen, the secret on the clipboard (#469).
-func TestHiddenBodyAndLine(t *testing.T) {
+// TestHiddenBodyAndCopyText checks what a hidden row draws and what a copy
+// takes: the mask on screen, the secret on the clipboard, and no sender (#469,
+// #474).
+func TestHiddenBodyAndCopyText(t *testing.T) {
 	hidden := chatMessage{from: "laptop", text: "hunter2", hidden: true}
 
 	if got := hidden.body(); got != hiddenBody {
 		t.Errorf("body() = %q, want the mask", got)
 	}
 
-	if got := hidden.line(); got != "laptop: hunter2" {
-		t.Errorf("line() = %q, want the text a copy should keep", got)
+	if got := hidden.copyText(); got != "hunter2" {
+		t.Errorf("copyText() = %q, want the text a copy should keep", got)
 	}
 
 	revealed := hidden
