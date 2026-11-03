@@ -230,7 +230,8 @@ docker-compose.yml   the dev sandbox and a local NATS server
   through an additive header flag. A received file waits in app storage and says
   **not saved** until **Save as…**, unless **Save received files automatically**
   is on; the **Files** dialog lists the conversation's files and where each one
-  is. All of it is local. Android **Open** stays deferred (#470).
+  is. All of it is local. Android **Open** serves the file to the device's
+  browser over a loopback link (#470); a phone test is still owed.
 - **Done**: the websocket transport (host, connect, scan), the NATS transport, the terminal chat loop, the `ct` short alias, the version flag, device identity/discovery, a session hub, an allowlist and audit log for remote execution whose transport is not written yet (#275), end-to-end encryption of every session (`internal/e2e`), transport encryption by default with the host certificate pinned on first contact, CLI release archives for Windows, Linux, Android and macOS, a Fyne GUI archive for the three desktop platforms, a debug-signed Android APK built from the same GUI, a draft-release workflow that builds and attaches them all, pairing by device key with a six-digit first-contact code and a pin on first contact (`cthrone peers`), buttons and tab labels that copy on a long press, a send order that is serialized end to end and a websocket keepalive that notices a silent link instead of waiting for the next write (#192, #193), and the device name shown beside its address in the Devices list, in chat and in `cthrone scan` (#194), a host that is a room rather than a pair: every device that joins sees every other device's messages and files, relayed with the sender named (#199), `cthrone scan --subnet`/`--all-subnets`, which walks a segment the default route does not cover when the router routes between them (#200), and a Bluetooth transport (`--bluetooth`) that carries the same sealed session over a BLE link, one device at a time, with framing, reassembly and a keepalive tested without a radio (#202). The Linux GATT layer speaks BlueZ and the Windows one WinRT, which has never been run (#224); the Android binding is separate work (#206), and a phone build refuses the transport and leaves the option out of the GUI. `v0.11.0` brought a messenger that shows what it
 sends: a sent file draws the same preview as a received one, a text file is drawn
 in its row, a PDF or an audio clip opens in the device's own app, and a transfer
@@ -527,7 +528,7 @@ and the **Windows radio**, the **phone build** and the **APK** are still unrun
 1. Install the APK on a device and record the result — nothing in CI runs it, so "builds for Android" is still a build claim.
 2. Prove the Bluetooth transport on two real devices — Linux to Linux, and then a phone once #206 binds the Android stack; no gate in this repository opens a radio.
 3. An iOS build of the same code needs macOS and Xcode; it is a follow-up to issue #84, not a rewrite.
-4. Open a received file on Android (#470) — needs a FileProvider/content provider, a manifest change and JNI/Java; unbuildable and unrunnable here.
+4. Prove Android **Open** on a phone (#470) — implemented as a loopback link to the device's browser, because the APK has no Java/content-provider step; a real phone test is owed.
 
 ## Notes
 

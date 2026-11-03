@@ -1066,8 +1066,9 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	case m.file.state == transferSaved || m.file.state == transferSent || m.file.state == transferPending:
 		// A pending file is in the app's storage, which is still a path this
 		// desktop can hand to the system opener: a received PDF does not have
-		// to be saved before it can be read (#469).
-		open.SetOnTapped(func() { g.openFile(path) })
+		// to be saved before it can be read (#469). On a phone the same path is
+		// served to the browser over loopback (#470).
+		open.SetOnTapped(func() { g.openFile(path, m.file.name) })
 		open.Show()
 	default:
 		open.Hide()
@@ -1115,15 +1116,6 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	default:
 		save.Hide()
 	}
-}
-
-// openFile hands a file to whatever this device uses for that kind of file.
-//
-// It is the answer for the kinds this program has no engine for — a PDF, an
-// audio clip — and it goes through the same opener the About tab's links use,
-// so there is one place that reports "no handler for this" instead of two.
-func (g *gui) openFile(path string) {
-	g.openPage(storage.NewFileURI(path).String())
 }
 
 // decodableImage reports whether the file is an image the toolkit can actually

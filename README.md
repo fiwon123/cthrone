@@ -120,6 +120,8 @@ This project says what it verified.
 
 - **The Windows Bluetooth transport compiles and has never run.**
 - **The Android app has never been installed**, and its radio is not written.
+- **The phone's Open** serves a file to the browser over a loopback link; it has
+  not been tried on a device yet ([#470](https://github.com/fiwon123/cthrone/issues/470)).
 - The GUI is tested **headless**; no native rendered frame has been checked.
 
 Running the app and reporting what happened is the most useful contribution
