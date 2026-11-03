@@ -37,11 +37,20 @@ func senderColour(name string) color.Color {
 
 // setSenderLine writes a row's sender line: the name in its colour, or hidden
 // when the row has no sender to show.
-func (g *gui) setSenderLine(line *canvas.Text, m *chatMessage) {
+//
+// selected prefixes a check and takes the primary colour, which is how a reader
+// sees which rows a range covers without a second widget in every row (#469).
+func (g *gui) setSenderLine(line *canvas.Text, m *chatMessage, selected bool) {
 	name := m.senderDisplay()
 
+	if selected {
+		name = "✓ " + name
+		line.Color = theme.Color(theme.ColorNamePrimary)
+	} else {
+		line.Color = senderColour(name)
+	}
+
 	line.Text = name
-	line.Color = senderColour(name)
 	line.Show()
 	line.Refresh()
 }

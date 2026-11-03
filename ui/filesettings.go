@@ -17,23 +17,31 @@ const maxSuffixes = 1000
 
 // The preference keys. They are namespaced because the store is the toolkit's,
 // shared with any other setting the window ever needs.
+//
+// prefsDownloadAuto is the only save policy stored. The previous version's
+// prefsDownloadAsk is gone on purpose: its two states were "ask per file" and
+// an auto-save default, and this version's default is manual — so an old key
+// decides nothing, and reading it would bring back a behaviour the user did not
+// choose (#469).
 const (
 	prefsDownloadFolder = "download.folder"
-	prefsDownloadAsk    = "download.ask"
+	prefsDownloadAuto   = "download.auto"
 )
 
 // savePolicy is what happens to a file when it has finished arriving.
 type savePolicy int
 
 const (
-	// saveAuto writes the file into the download folder without asking. It is
-	// the default, because a queue of files should not become a queue of
-	// dialogs.
-	saveAuto savePolicy = iota
+	// saveManual leaves the file in the staging folder until the user has
+	// chosen where it goes, with the row's Save as… action. It is the default:
+	// an arriving picture is not put in Downloads unless the user asked for it
+	// (#469).
+	saveManual savePolicy = iota
 
-	// saveAsk leaves the file in the staging folder until the user has chosen
-	// where it goes. A transfer the user declines leaves nothing behind.
-	saveAsk
+	// saveAuto writes the file into the download folder as soon as it arrives,
+	// and the row says where it landed. It is the opt-in for a conversation
+	// that expects a queue of files.
+	saveAuto
 )
 
 // preferenceStore is the slice of fyne.Preferences the file settings use.
@@ -47,7 +55,8 @@ type preferenceStore interface {
 	SetBool(key string, value bool)
 }
 
-// fileSettings is where received files go, and whether the user is asked first.
+// fileSettings is where received files go, and whether they go there on
+// arrival or wait for the row's Save as… action.
 type fileSettings struct {
 	folder string
 	policy savePolicy
@@ -61,7 +70,7 @@ type fileSettings struct {
 // a file from being saved. The fallback is used instead, and the dialog shows
 // which folder is really in force.
 func readFileSettings(store preferenceStore, fallback string) fileSettings {
-	settings := fileSettings{folder: fallback, policy: saveAuto}
+	settings := fileSettings{folder: fallback, policy: saveManual}
 	if store == nil {
 		return settings
 	}
@@ -70,8 +79,8 @@ func readFileSettings(store preferenceStore, fallback string) fileSettings {
 		settings.folder = folder
 	}
 
-	if store.Bool(prefsDownloadAsk) {
-		settings.policy = saveAsk
+	if store.Bool(prefsDownloadAuto) {
+		settings.policy = saveAuto
 	}
 
 	return settings
@@ -84,7 +93,7 @@ func writeFileSettings(store preferenceStore, settings fileSettings) {
 	}
 
 	store.SetString(prefsDownloadFolder, settings.folder)
-	store.SetBool(prefsDownloadAsk, settings.policy == saveAsk)
+	store.SetBool(prefsDownloadAuto, settings.policy == saveAuto)
 }
 
 // expandFolder turns what a user typed into a path.

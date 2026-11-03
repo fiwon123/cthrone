@@ -66,14 +66,28 @@ Known, and being worked on
 before it is shown, so anything slow in the build is time the user spends looking
 at nothing.
 
-## A PDF or an audio file will not open on the phone
+## A PDF or an audio file does not open on the phone
 
-Android does not let an app pass a private `file://` path to another app, and
-this build ships no `content://` provider, so **Open** is not offered on a phone
-([#305](https://github.com/fiwon123/cthrone/issues/305)). Press **Save as…** and
-pick a folder the file manager can see, then open the file from there.
+On a phone **Open** serves the file to the device's **browser** from a loopback
+link, because Android will not let an app pass a private `file://` path to
+another app and this APK has no `content://` provider
+([#470](https://github.com/fiwon123/cthrone/issues/470)). A PDF, a picture, an
+audio or video clip the browser can show is shown there; a type it cannot show
+is downloaded. If the browser shows a blank page, keep the app open for the
+fetch; if it still fails, press **Save as…** and open the file from the file
+manager.
 
 A desktop opens these with the system's own app, as before.
+
+## A received file is not in Downloads
+
+By default a received file waits in the app's own storage: the row says **not
+saved** and offers **Save as…**. That is deliberate — an arriving picture is not
+written into Downloads unless you ask ([#469](https://github.com/fiwon123/cthrone/issues/469)).
+Turn on **Save received files automatically** in the **Files** dialog if you
+want arrivals to land in the chosen folder on their own; the row then says
+**saved to <path>**. The Files dialog also lists the files this conversation
+received, and each row copies its path.
 
 ## Play does nothing, or the row says the clip cannot be played
 

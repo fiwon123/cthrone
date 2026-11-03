@@ -88,6 +88,24 @@ away — rather than ship an option that does not work.
 tab, the SHA-256 of each file that crossed, what worked, what did not, and
 screenshots of both first-contact screens.
 
+## Opening a file on a phone — [#470](https://github.com/fiwon123/cthrone/issues/470)
+
+**You need:** the APK on a phone, and a desktop that can send it a file.
+
+1. Send a **PDF**, a **picture** and an **MP3** from the desktop to the phone.
+2. On the phone, press **Open** on each row.
+3. Expected: the device's browser opens a `127.0.0.1` link and shows the PDF or
+   the picture, or plays the clip. A type the browser cannot show is downloaded.
+   The row is still in the transcript after the browser opens.
+4. Press **Open** on a second file: the first link should stop answering (only
+   one file is served at a time).
+5. Close the app and try the last link again: it should not answer (the server
+   stops with the window).
+
+**Write down:** phone model and Android version, which browser opened, what was
+shown or downloaded, and the exact wording of any failure. Report it on
+[#470](https://github.com/fiwon123/cthrone/issues/470).
+
 ## The in-app player — [v0.12.0](https://github.com/fiwon123/cthrone/releases/tag/v0.12.0), tracked in [#155](https://github.com/fiwon123/cthrone/issues/155)
 
 **You need:** a desktop with a working sound server (PulseAudio or ALSA on
@@ -97,8 +115,9 @@ Linux) and the GUI archive, plus the APK if you want to test the phone.
 2. Press it: does the sound match the file, does the button become **Stop**, and
    does the clock move from `0:00` to the length?
 3. Press Play on a *second* clip: does the first row go back to Play?
-4. Try an **Ogg** or **M4A** file: there is no Play button, and **Open** (on a
-   desktop) or **Save as…** (on a phone) is still offered.
+4. Try an **Ogg** or **M4A** file: there is no Play button, and **Open** (the
+   system app on a desktop, the browser on a phone) or **Save as…** is still
+   offered.
 5. A clip longer than about three minutes is refused with a sentence instead of
    being loaded.
 6. Stop the sound server (`pulseaudio -k` on Linux), **start the app fresh**, then

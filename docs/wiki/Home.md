@@ -56,6 +56,7 @@ chat behaves the same whichever you pick.
 | I want to… | Go here |
 |---|---|
 | 💬 **chat right now** | [Host and connect](Host-and-connect) — two commands |
+| ✂️ **copy, delete or hide a message** | [Working with messages](Working-with-messages) |
 | 🔑 **understand the code both screens show** | [Pairing and peers](Pairing-and-peers) |
 | 📎 **send a picture, a file or a voice note** | [Send a file](Send-a-file) |
 | 🎞️ **play a GIF or a video** | [Video in the app](Video-in-the-app) |

@@ -17,16 +17,34 @@ a row of its own. The terminal has no file command — text only.
 
 ## Receiving
 
-The row reports the transfer, then offers **Save as…** once it is complete. A
-picture the toolkit can decode is drawn inline under the caption, so a
+Nothing is written into Downloads unless you ask for it. The row reports the
+transfer, then says **not saved** and offers **Save as…**: the verified file
+waits in the app's own storage until you choose where it goes.
+
+Turn on **Save received files automatically** in the **Files** dialog if you
+want arrivals to land in a folder on their own; each row then says **saved to
+<path>**. The same dialog lists the files this conversation received and where
+each one is: tap a row to copy its path, and on a desktop **Open folder** opens
+the folder.
+
+A picture the toolkit can decode is drawn inline under the caption, so a
 screenshot arrives as a picture rather than a filename. A file the app cannot
 draw — a PDF, an audio clip, an archive — shows an icon for its kind beside the
 caption, so two different files do not read as the same line.
 
 **Open** hands a file to whatever the device uses for that type. It is offered on
-a desktop only: Android will not let an app pass a private `file://` path to
-another app, so on a phone the row offers **Save as…** instead — save it
-somewhere the file manager can see, then open it from there.
+a desktop, including for a file still waiting to be saved — the app's copy is on
+the disk.
+
+On Android, **Open** serves the file to the device's **browser** from a
+one-file server on loopback: a PDF, a picture, an audio or video clip the browser
+can show is shown there, and a type it cannot show is downloaded. The listener
+is bound to `127.0.0.1`, the link carries a random token, and it closes after ten
+minutes, on the next Open, or when the app closes. It is not the phone's own PDF
+app — that needs a content provider this APK cannot carry yet
+([#470](https://github.com/fiwon123/cthrone/issues/470)). If the browser shows a
+blank page, keep the app open for the fetch; if it still fails, press **Save
+as…** and open the file from the file manager.
 
 ## Playing an audio clip
 
@@ -74,10 +92,11 @@ the decoder, not the player (see [Video in the app](Video-in-the-app)).
 ## Known gaps
 
 - **A GIF plays; a video does not.** MP4, H.264 and WebM need a codec this build
-  does not carry, so those rows keep **Open** (desktop) or **Save as…** (phone).
-  The decision and the plan are on [Video in the app](Video-in-the-app)
+  does not carry, so those rows keep **Open** (desktop, or the browser on a
+  phone). The decision and the plan are on [Video in the app](Video-in-the-app)
   ([#389](https://github.com/fiwon123/cthrone/issues/389)).
-- A **PDF is not drawn**: it opens in the device's reader, by design.
+- A **PDF is not drawn in the app**: it opens in the device's reader on a
+  desktop, and in the browser on a phone, by design.
 - **Audio plays only as WAV or MP3.** Ogg, AAC/M4A and FLAC have no decoder in
   this build; those rows offer Open or Save as…, as before.
 

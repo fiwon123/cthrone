@@ -2,6 +2,7 @@
 
 - 🏠 [Home](Home)
 - 🚀 [Host and connect](Host-and-connect)
+- ✂️ [Working with messages](Working-with-messages)
 - 🔑 [Pairing and peers](Pairing-and-peers)
 - 📎 [Send a file](Send-a-file)
 - 🎵 [Video in the app](Video-in-the-app)
