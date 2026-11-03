@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -83,13 +82,10 @@ func TestTheRowShowsTheSenderApartFromTheMessage(t *testing.T) {
 		t.Errorf("the caption reads %q, want the message alone", got)
 	}
 
-	// The clipboard keeps the sender: a copied line with no name is useless.
-	if got, want := g.messages[0].line(), "laptop (192.168.1.20:8080): hello there"; got != want {
-		t.Errorf("line() = %q, want %q", got, want)
-	}
-
-	if !strings.Contains(g.messages[0].line(), g.messages[0].senderDisplay()) {
-		t.Error("the copied line does not name the sender")
+	// The clipboard keeps the text alone: the sender is the row's business
+	// (#474).
+	if got, want := g.messages[0].copyText(), "hello there"; got != want {
+		t.Errorf("copyText() = %q, want %q", got, want)
 	}
 }
 

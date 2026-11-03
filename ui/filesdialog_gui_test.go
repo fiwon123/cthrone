@@ -10,6 +10,24 @@ import (
 	"fyne.io/fyne/v2/test"
 )
 
+// A folder cannot leave a phone for the same reason a file cannot, and a folder
+// has no browser route, so the Files dialog offers no Open folder there (#474).
+func TestCanOpenFolderOn(t *testing.T) {
+	tests := map[string]bool{
+		"linux":   true,
+		"windows": true,
+		"darwin":  true,
+		"android": false,
+		"ios":     false,
+	}
+
+	for goos, want := range tests {
+		if got := canOpenFolderOn(goos); got != want {
+			t.Errorf("canOpenFolderOn(%q) = %v, want %v", goos, got, want)
+		}
+	}
+}
+
 // The Files dialog lists what arrived in this conversation, and says where each
 // file is: a saved one names its folder, an unsaved one says it is still in the
 // app (#469).

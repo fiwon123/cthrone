@@ -13,10 +13,6 @@ type screenLayout struct {
 	// Stack puts the controls of a row on separate lines when the row is too
 	// narrow to hold them side by side.
 	Stack bool
-	// ActionColumns is how many buttons share one line in the chat action
-	// grid. Zero keeps the desktop arrangement, with the buttons beside the
-	// message field instead of under it.
-	ActionColumns int
 	// ChatMinWidth is the smallest width the transcript is allowed to take.
 	// Zero leaves the width to the screen, so a narrow page is never wider
 	// than the window it is drawn in.
@@ -36,13 +32,8 @@ func layoutFor(mobile bool, width int) screenLayout {
 	narrow := mobile || (width > 0 && width < narrowWidth)
 
 	if !narrow {
-		return screenLayout{Stack: false, ActionColumns: 0, ChatMinWidth: 320}
+		return screenLayout{Stack: false, ChatMinWidth: 320}
 	}
 
-	columns := 2
-	if width > 0 && width < 300 {
-		columns = 1
-	}
-
-	return screenLayout{Stack: true, ActionColumns: columns}
+	return screenLayout{Stack: true}
 }

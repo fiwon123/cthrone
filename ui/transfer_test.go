@@ -414,11 +414,12 @@ func TestFileNoteLines(t *testing.T) {
 	}
 }
 
-// TestChatMessageWithAFile checks the sender prefix is kept for a transfer row.
+// TestChatMessageWithAFile checks a file row's copy text: the file's own line,
+// with no sender in front of it (#474).
 func TestChatMessageWithAFile(t *testing.T) {
 	m := chatMessage{from: "phone", file: &fileNote{name: "a.png", size: 1024, state: transferSent}}
-	if got, want := m.line(), "phone: a.png (1.0 KB) — sent"; got != want {
-		t.Errorf("line() = %q, want %q", got, want)
+	if got, want := m.copyText(), "a.png (1.0 KB) — sent"; got != want {
+		t.Errorf("copyText() = %q, want %q", got, want)
 	}
 }
 
@@ -481,8 +482,8 @@ func TestDropFile(t *testing.T) {
 		t.Fatalf("left %d rows, want 2", len(got))
 	}
 
-	if got[0].line() != "peer: before" || got[1].line() != "You: after" {
-		t.Errorf("rows = %q, %q, want the lines around the dropped row", got[0].line(), got[1].line())
+	if got[0].copyText() != "before" || got[1].copyText() != "after" {
+		t.Errorf("rows = %q, %q, want the messages around the dropped row", got[0].copyText(), got[1].copyText())
 	}
 
 	if _, found := dropFile(got, note); found {

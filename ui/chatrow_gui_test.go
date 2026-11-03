@@ -34,8 +34,9 @@ func chatRowWithMessage(t *testing.T, mobile bool) (*gui, fyne.CanvasObject) {
 	return g, row
 }
 
-// Tapping a chat row copies the line: the gesture the transcript teaches, and
-// the reason the row carries a tap at all (#231).
+// Tapping a chat row copies the message: the gesture the transcript teaches,
+// and the reason the row carries a tap at all (#231). The sender is not part of
+// the copy (#474).
 //
 // The click is delivered the way the toolkit delivers one. On a desktop the
 // row's selectable label keeps a child deeper than the widget that binds the
@@ -43,7 +44,7 @@ func chatRowWithMessage(t *testing.T, mobile bool) (*gui, fyne.CanvasObject) {
 func TestChatRowCopiesWhenClickedOnADesktop(t *testing.T) {
 	g, row := chatRowWithMessage(t, false)
 
-	want := g.messages[0].line()
+	want := g.messages[0].copyText()
 	g.app.Clipboard().SetContent("")
 
 	tapFromTheToolkit(t, g.win.Content(), row)
