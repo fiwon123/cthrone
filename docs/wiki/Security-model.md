@@ -57,6 +57,15 @@ both screens at once.
 - With `--no-tls`: the websocket's shape goes back onto the wire, but the
   payload stays sealed.
 
+## Hidden messages are not encryption
+
+The eye in the composer masks a message while it is typed and draws it masked in
+the transcript on both devices. That is a screen-privacy feature, and nothing
+more: the payload is already sealed like every other, and the peer — or a
+websocket host — can read it. It is the right tool for a password on a screen
+someone else can see; it is not a second lock on the wire
+([Working with messages](Working-with-messages)).
+
 ## Things this program will not do
 
 - Store or print a secret or a key.

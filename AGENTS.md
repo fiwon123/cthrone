@@ -368,6 +368,9 @@ The rules that come with it:
   in the process list. Use an environment variable or a file;
 - the secret and the device key are keys, not passwords: never log them, print
   them, or put them in a status line;
+- **hidden is presentation, not encryption** — the composer's eye and the masked
+  row (#469) decide how a message is drawn, not whether it travels sealed. The
+  peer and a websocket host can read it, exactly as they can read any message;
 - the broker reads its password through its own configuration parser, so a
   password with a `#` or a quote in it does not survive the trip;
 - if you touch the transport, read issues #11, #109, #125 and #202 first: the

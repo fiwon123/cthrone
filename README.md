@@ -30,6 +30,9 @@ needs none of those.
   others, with the sender named.
 - **Terminal and app, one codebase.** A CLI everywhere, and a Fyne GUI for Linux,
   Windows, macOS and Android.
+- **A chat you can tidy.** Copy all, select a range with two taps, delete a
+  message or clear the transcript — on this device only — and a hidden mode
+  masks a secret until it is revealed.
 
 ## 🚀 Quick start
 
@@ -102,6 +105,7 @@ Full model, with the issues that decided it:
 | I want to… | Read |
 |---|---|
 | host, connect, and find a device | [Host and connect](https://github.com/fiwon123/cthrone/wiki/Host-and-connect) |
+| copy, delete, hide or clear messages | [Working with messages](https://github.com/fiwon123/cthrone/wiki/Working-with-messages) |
 | understand the six-digit code | [Pairing and peers](https://github.com/fiwon123/cthrone/wiki/Pairing-and-peers) |
 | send a file | [Send a file](https://github.com/fiwon123/cthrone/wiki/Send-a-file) |
 | run it without any network | [Bluetooth](https://github.com/fiwon123/cthrone/wiki/Bluetooth) |
