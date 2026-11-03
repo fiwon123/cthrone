@@ -651,7 +651,7 @@ func (g *gui) showFiles() {
 	scroll.SetMinSize(fyne.NewSize(0, 160))
 
 	body := container.NewVBox(
-		g.label("A received file waits in the app until you press Save as… on its row, unless automatic saving is on."),
+		g.label("A received file waits in the app until you press Save as… on its row, unless automatic saving is on. Tap a file below to copy its path."),
 		folderRow,
 		auto,
 		widget.NewSeparator(),
@@ -729,17 +729,20 @@ func receivedFileLine(note *fileNote) string {
 
 // receivedFileRow is one Files-dialog entry. Tapping it copies the path, which
 // is the part a user needs to find the file again.
+//
+// The row is text rather than a button: a path can be longer than a phone, and
+// a button does not wrap while a label does (#469).
 func (g *gui) receivedFileRow(file receivedFile) fyne.CanvasObject {
 	if file.path == "" {
 		return g.label(file.line)
 	}
 
-	button := widget.NewButton(file.line, func() {
+	row := g.text(file.line)
+	row.SetOnTapped(func() {
 		g.copyToClipboard(file.path)
 	})
-	button.Alignment = widget.ButtonAlignLeading
 
-	return button
+	return row
 }
 
 // storeFileSettings validates and remembers the choice, so it survives a
