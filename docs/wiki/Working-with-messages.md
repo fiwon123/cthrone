@@ -10,7 +10,7 @@
 | 🗑️ **delete a message** | **Select** it, then **Delete** |
 | 🧹 **start clean** | **Select**, then **Clear all** |
 | 🙈 **send a secret** | press the eye in the composer before typing |
-| 🙈 **show a hidden message** | press the eye on its row |
+| 🙈 **show or hide it again** | press the eye on its row |
 
 Every one of those acts on **this device's transcript only**. Nothing is
 recalled from the other device, and nothing is sent to it.
@@ -60,11 +60,14 @@ written to disk or sent to a peer.
 
 ## Hidden messages
 
-A **masked** text row — one sent with the composer's eye, or received with the
-flag set — carries an **eye**: press it to show the message on this screen. A
-message you can already read has no mask control, because there is nothing left
-to uncover; masking a message after the fact is not offered. A file row has no
-eye either.
+A message that **is hidden** — sent with the composer's eye, or received with
+the flag set — carries an **eye**, and it toggles: press it to show the message
+on this screen, press it again to hide it. A message that was never hidden has
+no mask control, because there is nothing to uncover. A file row has no eye
+either.
+
+The eye and the row's copy button are the same square, side by side at the end of
+the sender's line.
 
 To send a message **as a password**, press the eye in the composer before
 typing:

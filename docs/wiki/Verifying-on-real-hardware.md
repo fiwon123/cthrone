@@ -125,19 +125,21 @@ shown or downloaded, and the exact wording of any failure. Report it on
    the transcript after asking.
 5. Press the eye **in the composer** before typing, then send. The message is
    masked on both screens. Press the eye on **its row** on the phone: it is
-   revealed here and stays masked on the desktop, and the eye then disappears —
-   there is nothing left to toggle. A message you can already read shows no mask
-   control at all. Hidden is presentation, not encryption: the peer and a
-   websocket host can read it.
-6. Send a **PDF** and a **picture**. Each row reads *not saved*. Open **Files**:
+   revealed here and stays masked on the desktop. Press it again: it is hidden,
+   and the icon changes with the state. A message that was never hidden has no
+   mask control at all. The eye and the copy button are the same square. Hidden
+   is presentation, not encryption: the peer and a websocket host can read it.
+6. **Try to copy the sender's name**: drag across it on a desktop, long press it
+   on a phone, and use Copy. It is text like any other, not part of the message.
+7. Send a **PDF** and a **picture**. Each row reads *not saved*. Open **Files**:
    the conversation lists both, with where each one is. **Save as…** asks where
    to put it, and the row stops saying *not saved*.
-7. Turn on **Save received files automatically**, then send another file: no
+8. Turn on **Save received files automatically**, then send another file: no
    dialog, and the row is saved when the transfer finishes. On a phone the
    dialog's folder line and **Choose…** sit under one another; **Open folder**
    is the desktop button, because a phone will not hand a private folder to the
    file manager.
-8. With the keyboard up, type several lines: the **field** grows and then
+9. With the keyboard up, type several lines: the **field** grows and then
    scrolls, the buttons do not. **Attach** and the eye are on the left, **Send**
    fills the rest of the row.
 
