@@ -223,6 +223,20 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
+- **The transcript's repaint stops re-parsing an icon** (v0.17.2, #491): a
+  repainted row set its eye's icon every time, and Fyne re-themes a resource by
+  parsing and rasterising its SVG — 73 % of the transcript's refresh, measured.
+  The icon is now set only when it changes, so `chatList.Refresh()` at the
+  500-row cap falls from 1.05 ms to 0.095 ms and one message's append-and-repaint
+  from 1.1 ms and 465 KB of garbage to 0.11 ms and 19 KB. The rest of the patch
+  is what the tests produced: the verification page gains **The phone's
+  transcript** (#488, live on the wiki), four tests prove the phone's Open link
+  is one at a time, expires and dies with the window (#486), the fuzz gate
+  bounds the minimizer so its 20 s window is spent fuzzing (#484), and the
+  benchmarks that produced these numbers are in the tree (#490, #489). No
+  transport, no wire format and no security rule changed. Not verified: a
+  rendered window (the numbers are Fyne's own work, on the software driver) and
+  any of it on a phone (#155, #470).
 - **The phone layout catches up with the transcript** (v0.17.1, #474): the
   composer's actions are one row — attach and the password eye on the left,
   **Send** filling the rest — and a multi-line message grows the field, not the
