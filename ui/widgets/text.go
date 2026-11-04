@@ -179,6 +179,22 @@ func (t *Text) SetOnTapped(tapped func()) {
 	t.catcher.Show()
 }
 
+// AllowSelection makes the line copyable on a touch screen without giving it a
+// tap action: a long press starts Fyne's selection and offers Copy, and a tap
+// still does nothing.
+//
+// A touch build starts unselectable, and only the press that reaches the gesture
+// layer through TappedSecondary turns the label's selection on. A line with no
+// tap action has no layer, so its long press never arrives and the text stays
+// inert — which is what the About tab's version line was (#497).
+func (t *Text) AllowSelection() {
+	if !t.touch || t.onTapped != nil {
+		return
+	}
+
+	t.catcher.Show()
+}
+
 // Tapped is a plain tap. On a text with an action the driver hands it here
 // because the gesture layer above the label is the deepest object that takes
 // one; a text with nothing to do puts no layer up and is not the tap target at
