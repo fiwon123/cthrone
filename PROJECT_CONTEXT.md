@@ -223,6 +223,23 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
+- **Pictures load in the background and can be copied** (v0.19.0, #510, with the
+  controls of #508 that were never tagged on their own): a picture's thumbnail is
+  decoded **off the interface thread** — the row says *picture — loading…* and
+  fills in — so scrolling onto a photo no longer stalls the window, and the cache
+  is a bounded LRU that drops the oldest rather than clearing itself, so scrolling
+  back is free. A drawn picture gains **Copy**, which puts the picture itself on
+  the system clipboard: the toolkit has no image clipboard, so `wl-copy`/`xclip`
+  on Linux, PowerShell on Windows and `osascript` on macOS do it, and a platform
+  with none (Android, for now) says so and points at **Save as…**. Alongside it:
+  **Stop** moved from the chat header to Setup under Host/Connect, **Clear all**
+  is a header button and the selection header keeps Copy/Delete/Cancel, the way
+  back down is its own row above the composer shown whenever the reader is above
+  the end, and the end is tracked honestly so a message arriving at the bottom is
+  followed. No transport, no wire format and no security rule changed. Not
+  verified: Windows, macOS and Android clipboard branches are compiled and never
+  run; the 512 px thumbnail's sharpness and "smooth" itself need a screen and a
+  phone (#155, #470).
 - **The transcript's controls settle after the first device test** (v0.18.1,
   #503): a hidden message's **eye toggles both ways** — reveal it, then press
   again to hide it — instead of vanishing once revealed, and it shares the
