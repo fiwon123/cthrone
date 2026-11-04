@@ -146,20 +146,69 @@ func TestBeingAtTheEndHidesTheWayDown(t *testing.T) {
 	}
 }
 
-// A scroll further down is the new end, so a message arriving after it follows
-// (#508).
-func TestAReaderWhoScrolledDownIsAtTheEnd(t *testing.T) {
+// A deeper offset does not redefine the end: treating any offset the reader
+// reaches as "the end" is what kept the way down on screen forever, because the
+// list's real maximum is never larger than the recorded one (#517).
+func TestAScrollFurtherDownDoesNotRedefineTheEnd(t *testing.T) {
 	g := newScreenGUI(t, false)
 	g.lastBottom = 100
 
 	withOffset(t, 400)
 	g.trackScroll()
 
-	if g.lastBottom != 400 {
-		t.Fatalf("the end is recorded at %v, want the offset the reader reached", g.lastBottom)
+	if g.lastBottom != 100 {
+		t.Errorf("the recorded end moved to %v, want it left where the view was taken", g.lastBottom)
 	}
 
 	if !g.atBottom() {
-		t.Error("a reader who reached the bottom is not treated as being there")
+		t.Error("a reader below the recorded end is not treated as being there")
+	}
+
+	if g.jumpBtn.Visible() {
+		t.Error("the way down is offered to a reader who is at the end")
+	}
+}
+
+// Reaching the end hides the way down, whoever took the reader there: a click on
+// the button, or scrolling back by hand (#517).
+func TestTheWayDownHidesWhenTheReaderReachesTheEnd(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.lastBottom = 400
+
+	withOffset(t, 0)
+	g.trackScroll()
+
+	if !g.jumpBtn.Visible() {
+		t.Fatal("the way down is not offered to a reader who scrolled up")
+	}
+
+	// Scrolled back by hand.
+	withOffset(t, 400)
+	g.trackScroll()
+
+	if g.jumpBtn.Visible() {
+		t.Error("the way down is still offered at the end, so it never goes away")
+	}
+}
+
+// The way down keeps its space while the button is hidden: a row that collapses
+// resizes the transcript and pushes the last line out of reach (#517).
+func TestTheWayDownKeepsItsSpaceWhenHidden(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	if g.jumpBtn.Visible() {
+		t.Fatal("the way down is offered on a fresh transcript")
+	}
+
+	hidden := g.jumpRow.MinSize()
+	if hidden.Height <= 0 {
+		t.Fatalf("the row collapses to %v while the button is hidden", hidden)
+	}
+
+	g.jumpBtn.Show()
+	shown := g.jumpRow.MinSize()
+
+	if hidden != shown {
+		t.Errorf("the row measures %v hidden and %v shown, so it moves the transcript", hidden, shown)
 	}
 }
