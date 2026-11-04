@@ -16,45 +16,143 @@ const previewCacheMax = 64
 // and a test that cannot count them cannot see it (#321).
 var (
 	loadPicture   = fyne.LoadResourceFromPath
+	decodeThumb   = decodeThumbnailFile
 	readText      = textPreview
 	canDecodeFile = decodableImage
 )
 
-// previewPicture is the decoded picture for path, decoded once.
+// previewPicture returns the thumbnail for path when it is ready, and starts
+// decoding it when it is not.
 //
-// The list is virtualized, but painting a row is not free: before this cache, a
-// visible picture row decoded the whole image on every repaint, and every
-// incoming message repainted the visible rows. A transcript with a few pictures
-// therefore grew slower with each message, which is what "slow after a while"
-// was (#321).
-func (g *gui) previewPicture(path string) fyne.Resource {
+// Decoding used to happen here, on the UI goroutine, at full size: a photo is
+// tens of milliseconds of work and Fyne asks for a row's height while scrolling,
+// so the window stalled on the picture it was scrolling onto (#510). Now the
+// first paint says "not ready", one worker per path decodes a thumbnail, and the
+// transcript repaints when it lands. ready=false means "draw the note, not the
+// picture".
+func (g *gui) previewPicture(path string) (fyne.Resource, bool) {
 	g.cacheMu.Lock()
-	res, ok := g.pictures[path]
+	if res, ok := g.pictures[path]; ok {
+		g.touchPicture(path)
+		g.cacheMu.Unlock()
+
+		return res, true
+	}
+
+	if g.picturePending[path] {
+		g.cacheMu.Unlock()
+
+		return nil, false
+	}
+
+	if g.picturePending == nil {
+		g.picturePending = make(map[string]bool)
+	}
+
+	g.picturePending[path] = true
 	g.cacheMu.Unlock()
 
-	if ok {
-		return res
+	// A test paints a row and expects the picture in the same call: the worker
+	// is the point of this function in a window, and noise in a test about what
+	// a row draws (#510).
+	if inlinePictureDecode {
+		return g.decodeNow(path)
 	}
 
-	res, err := loadPicture(path)
-	if err != nil {
-		return nil
-	}
+	go g.decodePreview(path)
+
+	return nil, false
+}
+
+// inlinePictureDecode makes previewPicture decode on the calling goroutine. It
+// is set by tests that paint a row once and look at it, and never by the window.
+var inlinePictureDecode = false
+
+// decodeNow is the body of the worker, run in the caller.
+func (g *gui) decodeNow(path string) (fyne.Resource, bool) {
+	res, err := decodeThumbnail(path)
 
 	g.cacheMu.Lock()
-	defer g.cacheMu.Unlock()
+	delete(g.picturePending, path)
 
+	if err == nil {
+		g.putPicture(path, res)
+	}
+	g.cacheMu.Unlock()
+
+	if err != nil {
+		return nil, false
+	}
+
+	return res, true
+}
+
+// thumbnailMax is the longest edge a transcript thumbnail keeps. The file on
+// disk is untouched: this only bounds what a row holds in memory, so a
+// conversation of photos does not cost a conversation of full-size images.
+const thumbnailMax = 512
+
+// decodePreview decodes one path into a thumbnail and puts it in the cache.
+func (g *gui) decodePreview(path string) {
+	res, err := decodeThumbnail(path)
+
+	g.cacheMu.Lock()
+	delete(g.picturePending, path)
+
+	if err == nil {
+		g.putPicture(path, res)
+	}
+	g.cacheMu.Unlock()
+
+	if err != nil {
+		return
+	}
+
+	// One repaint for the whole transcript: the rows that were waiting are the
+	// reason, and a row that has scrolled away simply paints again.
+	fyne.Do(g.repaintPictures)
+}
+
+// putPicture stores a thumbnail, dropping the least recently used one when the
+// cache is full. It is called with cacheMu held.
+func (g *gui) putPicture(path string, res fyne.Resource) {
 	if g.pictures == nil {
 		g.pictures = make(map[string]fyne.Resource)
 	}
 
-	if len(g.pictures) >= previewCacheMax {
-		clear(g.pictures)
+	for len(g.pictureOrder) >= previewCacheMax {
+		oldest := g.pictureOrder[0]
+		g.pictureOrder = g.pictureOrder[1:]
+		delete(g.pictures, oldest)
 	}
 
 	g.pictures[path] = res
+	g.pictureOrder = append(g.pictureOrder, path)
+}
 
-	return res
+// touchPicture marks a path as the most recently used. It is called with
+// cacheMu held.
+func (g *gui) touchPicture(path string) {
+	for i, known := range g.pictureOrder {
+		if known != path {
+			continue
+		}
+
+		g.pictureOrder = append(g.pictureOrder[:i], g.pictureOrder[i+1:]...)
+		g.pictureOrder = append(g.pictureOrder, path)
+
+		return
+	}
+}
+
+// repaintPictures asks for the transcript to be painted again once a thumbnail
+// has landed.
+func (g *gui) repaintPictures() {
+	if g.chatList == nil {
+		return
+	}
+
+	g.chatList.Refresh()
 }
 
 // decodable is whether the picture at path can be decoded, asked once per path.

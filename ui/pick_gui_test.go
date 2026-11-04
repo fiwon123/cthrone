@@ -167,7 +167,7 @@ func TestAFileRowDrawsItsThumbnailWhenItHasNoPath(t *testing.T) {
 
 	note := &fileNote{id: "id-1", name: "photo.jpg", size: 1000, state: transferSent, thumb: thumb, inline: true}
 
-	g.fillFileRow(chatMessage{from: "me", file: note}, pic, preview, icon, save, open)
+	g.fillFileRow(chatMessage{from: "me", file: note}, pic, preview, icon, save, open, nil)
 
 	if !pic.Visible() {
 		t.Error("the row hid the picture although it holds a thumbnail")
