@@ -100,8 +100,26 @@ func TestTextLongPressSelectsAndOffersCopy(t *testing.T) {
 		t.Error("the long press did not make the text selectable, so there is nothing to select")
 	}
 
+	// The long press turns selection on; the selection itself is the one the
+	// next gesture makes, on the widget Fyne draws (#503).
+	if !text.Selectable() {
+		t.Fatal("the label is not selectable after the press")
+	}
+
+	live := test.WidgetRenderer(text.label).Objects()
+	if len(live) == 0 {
+		t.Fatal("the label draws no selection child")
+	}
+
+	double, ok := live[0].(fyne.DoubleTappable)
+	if !ok {
+		t.Fatalf("the drawn child %T does not take a double tap", live[0])
+	}
+
+	double.DoubleTapped(&fyne.PointEvent{AbsolutePosition: fyne.NewPos(40, 12), Position: fyne.NewPos(40, 12)})
+
 	if got := text.label.SelectedText(); got == "" {
-		t.Error("the long press selected nothing")
+		t.Error("the word under the finger could not be selected after the press")
 	}
 
 	top := win.Canvas().Overlays().Top()

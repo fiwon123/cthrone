@@ -724,18 +724,20 @@ func (g *gui) build() {
 			video := newVideoRow(g)
 
 			// The sender has a line of its own, in a colour of its own, so a room
-			// of three is readable at a glance (#346). It is a canvas.Text
-			// because that carries any colour; a themed label takes a colour
-			// name.
-			sender := canvas.NewText("", theme.Color(theme.ColorNameForeground))
-			sender.TextStyle = fyne.TextStyle{Bold: true}
+			// of three is readable at a glance (#346). It is a selectable text
+			// rather than a canvas.Text: the name is text a reader may want to
+			// copy, and a canvas.Text cannot be selected at all (#503). The
+			// colour comes from the same name hash, through the label's
+			// importance, so the palette is the one it had.
+			sender := g.text("")
+			sender.SetTextStyle(fyne.TextStyle{Bold: true})
+			sender.AllowSelection()
 
-			// A text row carries its own hide/show eye: the direct control a
-			// message needs, instead of a gesture the row also uses for copy
-			// (#474). It is shown only on a row that is masked — where it means
-			// "show me" — because a message the reader can already see has
-			// nothing to uncover (#496). A file row has nothing to mask, so it
-			// stays hidden.
+			// A hidden message carries its eye: press it to reveal, and again to
+			// hide. A message that was never hidden has no control, because there
+			// is nothing to uncover (#496, #503). It shares the sender line with
+			// the copy button so the two are the same square — in the caption's
+			// border the eye was stretched to the row's height.
 			reveal := widgets.NewButtonWithIcon("", theme.VisibilityOffIcon(), nil, g.copyLabel)
 			reveal.SetCopyText("")
 			reveal.Hide()
@@ -746,9 +748,9 @@ func (g *gui) build() {
 			copyMessage := widgets.NewButtonWithIcon("", theme.ContentCopyIcon(), nil, g.copyLabel)
 			copyMessage.SetCopyText("Copy the message")
 
-			caption := container.NewVBox(container.NewHBox(sender, layout.NewSpacer(), copyMessage), row)
+			caption := container.NewVBox(container.NewHBox(sender, layout.NewSpacer(), reveal, copyMessage), row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, reveal, caption), pic, preview, save, open, audio.box, video.box)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box, video.box)
 		},
 		g.updateChatRow,
 	)
@@ -2579,41 +2581,40 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 	var label *widgets.Text
 	var icon *widget.Icon
-	var sender *canvas.Text
+	var sender *widgets.Text
 	var reveal *widgets.CopyButton
 	var copyMessage *widgets.CopyButton
 
-	// The caption cell holds the file-type icon and the row's eye on its border,
-	// and, in the middle, a box of the sender line (with the copy button) over
-	// the message. The eye is therefore a direct child and the copy button is
-	// inside the box: the two are told apart by where the template puts them,
-	// not by the order a border happens to list its children (#496).
+	// The caption cell holds the file-type icon on its border and, in the middle,
+	// a box of the sender's line over the message. That line is itself a box:
+	// the name, a spacer, then the eye and the copy button, in that order. The
+	// eye and the copy button are told apart by where the template puts them,
+	// which a horizontal box keeps; a border does not (#496, #503).
 	if caption != nil {
-		var walk func(object fyne.CanvasObject)
-
-		walk = func(object fyne.CanvasObject) {
-			switch part := object.(type) {
-			case *widgets.Text:
-				label = part
-			case *canvas.Text:
-				sender = part
-			case *widgets.CopyButton:
-				copyMessage = part
-			case *fyne.Container:
-				for _, inner := range part.Objects {
-					walk(inner)
-				}
-			}
-		}
-
 		for _, object := range caption.Objects {
 			switch part := object.(type) {
 			case *widget.Icon:
 				icon = part
-			case *widgets.CopyButton:
-				reveal = part
 			case *fyne.Container:
-				walk(part)
+				for _, inner := range part.Objects {
+					switch piece := inner.(type) {
+					case *widgets.Text:
+						label = piece
+					case *fyne.Container:
+						for _, item := range piece.Objects {
+							switch child := item.(type) {
+							case *widgets.Text:
+								sender = child
+							case *widgets.CopyButton:
+								if reveal == nil {
+									reveal = child
+								} else {
+									copyMessage = child
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -2641,10 +2642,10 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	g.chatList.SetItemHeight(id, row.MinSize().Height)
 }
 
-// setReveal binds a text row's eye. It is shown only on a row that is masked —
-// sent hidden, or received hidden — where it means "show me": a message the
-// reader can already read has nothing to uncover, and masking one after the
-// fact is no longer offered (#496).
+// setReveal binds the eye on a hidden message's row: reveal it while masked,
+// hide it again once revealed. A message that was never hidden has no control —
+// there is nothing to uncover, and masking after the fact is not offered (#496,
+// #503).
 //
 // The icon is set only when it changes. `SetIcon` re-themes the resource, and
 // theming an SVG parses and rasterises it, so calling it on every repaint of
@@ -2660,7 +2661,7 @@ func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chat
 		return
 	}
 
-	if !m.masked() {
+	if !m.hidden {
 		button.Hide()
 
 		return
@@ -2669,12 +2670,38 @@ func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chat
 	button.Show()
 	button.SetCopyText("")
 
-	icon := theme.VisibilityIcon()
+	icon := theme.VisibilityOffIcon()
+	if m.masked() {
+		icon = theme.VisibilityIcon()
+	}
+
 	if current := button.Icon(); current != icon {
 		button.SetIcon(icon)
 	}
 
-	button.SetOnTapped(func() { g.revealMessage(id) })
+	if m.masked() {
+		button.SetOnTapped(func() { g.revealMessage(id) })
+
+		return
+	}
+
+	button.SetOnTapped(func() { g.hideMessage(id) })
+}
+
+// hideMessage masks one row on this device. It is local: a received message is
+// not recalled from the sender, and the other device is unchanged (#474).
+func (g *gui) hideMessage(id widget.ListItemID) {
+	g.mu.Lock()
+	if id < 0 || id >= len(g.messages) {
+		g.mu.Unlock()
+
+		return
+	}
+
+	g.messages[id].revealed = false
+	g.mu.Unlock()
+
+	g.chatList.RefreshItem(id)
 }
 
 // copyRow puts one message on the clipboard, from the copy button on its row.

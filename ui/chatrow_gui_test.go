@@ -256,3 +256,43 @@ func TestAClickOnARowCopiesNothingEvenWithTheComposerFocused(t *testing.T) {
 		t.Errorf("a click on a row copied %q with the composer focused, want nothing", got)
 	}
 }
+
+// The eye and the copy button are the same square. They used to differ because
+// the eye sat in the caption's border, which stretches a child to the row's
+// height, while the copy button sat in a horizontal box (#503).
+func TestTheRowControlsAreTheSameSquare(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{from: "laptop", text: "hello", hidden: true}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	eye, copyButton := rowButtons(t, row)
+
+	if eye.MinSize() != copyButton.MinSize() {
+		t.Errorf("the eye measures %v and the copy button %v, want the same square", eye.MinSize(), copyButton.MinSize())
+	}
+}
+
+// The sender's name is text a reader may copy, so on a phone a long press has to
+// reach it: that needs the gesture layer, since a touch build starts
+// unselectable (#503).
+func TestTheSendersNameCanBeSelectedOnAPhone(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{from: "laptop", text: "hello"}}
+	g.mu.Unlock()
+
+	row := g.chatList.CreateItem()
+	g.updateChatRow(0, row)
+
+	sender := senderLine(t, row)
+
+	if !hasGestureLayer(sender) {
+		t.Error("the sender's name has no gesture layer, so a long press never reaches it")
+	}
+}
