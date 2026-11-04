@@ -229,41 +229,17 @@ func (t *Text) TappedSecondary(ev *fyne.PointEvent) {
 	t.showCopyMenu(ev)
 }
 
-// selectAt starts a selection at the pressed point: Fyne's selection machinery
-// with its handles, and the word under the finger selected, exactly as a
-// double-tap selects it on a desktop.
+// selectAt starts a selection at the pressed point.
+//
+// It only turns selection on: Fyne's own selection widget — the one the label's
+// renderer draws — is what the next press reaches, so dragging selects the text
+// and a double tap selects the word, the gestures a phone has. Building a second
+// selection widget here (as this used to) replaced the label's own with an
+// object nobody draws, which left the selection invisible and the copy reading a
+// different widget than the reader's finger (#503).
 func (t *Text) selectAt(ev *fyne.PointEvent) {
 	t.setSelectable(true)
-
-	// The selection lives in a child widget the label's renderer owns. There is
-	// no exporting API to say "select the word at this point", but the child is
-	// reachable through the renderer and it does implement Fyne's own gesture.
-	if double, ok := t.selectionChild().(fyne.DoubleTappable); ok {
-		double.DoubleTapped(ev)
-	}
-
 	t.armSelectionWindow()
-}
-
-// selectionChild is the label's selection widget, once it has one.
-//
-// The renderer is built here rather than fetched from the canvas cache because
-// a driver exposes no such lookup, and because it does not need to be the same
-// renderer: the selection widget is a field of the label itself, so this one
-// and the one the canvas draws are the same object.
-func (t *Text) selectionChild() fyne.CanvasObject {
-	renderer := t.label.CreateRenderer()
-	if renderer == nil {
-		return nil
-	}
-
-	objects := renderer.Objects()
-	if len(objects) == 0 {
-		return nil
-	}
-
-	// Objects() is [selection, text] while the label is selectable.
-	return objects[0]
 }
 
 // armSelectionWindow ends selection after selectionWindow, so the pane scrolls

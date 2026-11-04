@@ -18,6 +18,16 @@ import (
 func rowReveal(t *testing.T, row fyne.CanvasObject) *widgets.CopyButton {
 	t.Helper()
 
+	eye, _ := rowButtons(t, row)
+
+	return eye
+}
+
+// rowButtons finds the two controls a row carries, in the order the sender line
+// puts them: the eye, then the copy button (#503).
+func rowButtons(t *testing.T, row fyne.CanvasObject) (*widgets.CopyButton, *widgets.CopyButton) {
+	t.Helper()
+
 	box, ok := row.(*fyne.Container)
 	if !ok {
 		t.Fatalf("row is %T, want a container", row)
@@ -28,15 +38,30 @@ func rowReveal(t *testing.T, row fyne.CanvasObject) *widgets.CopyButton {
 		t.Fatalf("row[0] is %T, want the caption cell", box.Objects[0])
 	}
 
+	var buttons []*widgets.CopyButton
+
 	for _, object := range caption.Objects {
-		if button, ok := object.(*widgets.CopyButton); ok {
-			return button
+		part, ok := object.(*fyne.Container)
+		if !ok {
+			continue
+		}
+
+		for _, child := range part.Objects {
+			if inner, ok := child.(*fyne.Container); ok {
+				for _, item := range inner.Objects {
+					if button, ok := item.(*widgets.CopyButton); ok {
+						buttons = append(buttons, button)
+					}
+				}
+			}
 		}
 	}
 
-	t.Fatal("the row carries no reveal control")
+	if len(buttons) < 2 {
+		t.Fatalf("the row carries %d control(s), want the eye and the copy button", len(buttons))
+	}
 
-	return nil
+	return buttons[0], buttons[1]
 }
 
 // The Hide toggle masks the composer while a secret is typed, and the next press
@@ -102,10 +127,25 @@ func TestAHiddenRowHasItsOwnEye(t *testing.T) {
 		t.Errorf("the revealed row draws %q, want the text", got)
 	}
 
-	// Once revealed there is nothing left to toggle, so the control goes away
-	// rather than turning into its opposite (#496).
-	if eye.Visible() {
-		t.Error("a revealed row still offers the mask control")
+	// The control toggles both ways: a message revealed by mistake can be hidden
+	// again, and the icon is the control's state (#503).
+	if !eye.Visible() {
+		t.Fatal("a revealed row dropped its mask control, so it cannot be hidden again")
+	}
+
+	if got, want := eye.Icon(), theme.VisibilityOffIcon(); got == nil || got.Name() != want.Name() {
+		t.Errorf("a revealed row's eye shows %v, want the hide icon", got)
+	}
+
+	test.Tap(eye)
+	g.updateChatRow(0, row)
+
+	if !g.messages[0].masked() {
+		t.Error("the second press did not hide the message again")
+	}
+
+	if got := label.Text(); got != hiddenBody {
+		t.Errorf("the re-hidden row draws %q, want the mask", got)
 	}
 
 	// The copy is the row's button now, and it takes the text, not "You: ...".
@@ -159,8 +199,10 @@ func TestAVisibleRowHasNoEye(t *testing.T) {
 		t.Errorf("the revealed row draws %q, want the text", got)
 	}
 
-	if eye.Visible() {
-		t.Error("a revealed row still offers the control, though there is nothing left to toggle")
+	// A hidden message keeps its control in both states; a message that was
+	// never hidden never had one.
+	if !eye.Visible() {
+		t.Error("a revealed row lost the control that hides it again")
 	}
 }
 
