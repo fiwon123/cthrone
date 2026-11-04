@@ -282,6 +282,7 @@ type gui struct {
 	// scrollStop ends the scroll watcher when the window closes.
 	scrollStop chan struct{}
 	jumpBtn    *widgets.CopyButton
+	jumpRow    *fyne.Container
 
 	// video is the window's player for animated pictures (#421). Only one clip
 	// is kept: an animation is large, and a transcript that scrolled through ten
@@ -855,11 +856,23 @@ func (g *gui) build() {
 	// do I stand" with the state icon, and nothing else (#457).
 	// The way back down is a row of its own above the composer: centred, always
 	// in the same place, and away from the header's actions (#508).
-	jumpRow := container.NewHBox(layout.NewSpacer(), g.jumpBtn, layout.NewSpacer())
+	// The way down keeps its height when the button is hidden: a row that comes
+	// and goes resizes the transcript under the reader, which moved the last line
+	// out of reach as the button appeared (#517).
+	jumpSize := fyne.NewSize(240, 40)
+	if g.lay.Stack {
+		jumpSize = fyne.NewSize(56, 40)
+	}
+
+	g.jumpRow = container.NewHBox(
+		layout.NewSpacer(),
+		container.NewGridWrap(jumpSize, g.jumpBtn),
+		layout.NewSpacer(),
+	)
 
 	chat := container.NewBorder(
 		container.NewVBox(container.NewPadded(g.headerHolder), widget.NewSeparator()),
-		container.NewVBox(container.NewPadded(g.status), jumpRow, container.NewPadded(input)),
+		container.NewVBox(container.NewPadded(g.status), g.jumpRow, container.NewPadded(input)),
 		nil, nil,
 		g.chatList,
 	)
@@ -2593,9 +2606,6 @@ func (g *gui) trackScroll() {
 	}
 
 	offset := chatOffset(g.chatList)
-	if offset > g.lastBottom {
-		g.lastBottom = offset
-	}
 
 	if g.jumpBtn == nil {
 		return
