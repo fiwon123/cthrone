@@ -7,6 +7,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/theme"
 
 	"github.com/fiwon123/cthrone/internal/wire"
 	"github.com/fiwon123/cthrone/ui/widgets"
@@ -83,11 +84,22 @@ func TestAHiddenRowHasItsOwnEye(t *testing.T) {
 		t.Fatal("a text row offers no reveal control")
 	}
 
+	// The icon is the control's state, and it is only set when it changes: a
+	// row repainted in the same theme must not re-theme (and re-parse) an SVG
+	// (#491).
+	if got, want := eye.Icon(), theme.VisibilityIcon(); got == nil || got.Name() != want.Name() {
+		t.Fatalf("a masked row's eye shows %v, want the show icon", got)
+	}
+
 	test.Tap(eye)
 	g.updateChatRow(0, row)
 
 	if !g.messages[0].revealed {
 		t.Error("the eye did not reveal the message")
+	}
+
+	if got, want := eye.Icon(), theme.VisibilityOffIcon(); got == nil || got.Name() != want.Name() {
+		t.Errorf("a revealed row's eye shows %v, want the hide icon", got)
 	}
 
 	if got := label.Text(); got != "hunter2" {
