@@ -2621,6 +2621,16 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 
 // setReveal binds a text row's eye: a masked row offers Show, a visible one
 // offers Hide. A file row has nothing to mask, so its eye stays hidden (#474).
+//
+// The icon is set only when it changes. `SetIcon` re-themes the resource, and
+// theming an SVG parses and rasterises it, so calling it on every repaint of
+// every visible row cost more than the rest of the message path together —
+// 0.73 of 1.05 ms, measured (#432, #491).
+//
+// The comparison is by identity, not by name: a theme hands out one resource
+// per icon, so a theme that changes the eye's shape is a different resource and
+// is applied, while a repaint in the same theme is not. A theme that builds a
+// new resource on every call simply gets the old behaviour.
 func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chatMessage) {
 	if button == nil {
 		return
@@ -2635,14 +2645,22 @@ func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chat
 	button.Show()
 	button.SetCopyText("")
 
+	icon := theme.VisibilityOffIcon()
+
 	if m.masked() {
-		button.SetIcon(theme.VisibilityIcon())
+		icon = theme.VisibilityIcon()
+	}
+
+	if current := button.Icon(); current != icon {
+		button.SetIcon(icon)
+	}
+
+	if m.masked() {
 		button.SetOnTapped(func() { g.revealMessage(id) })
 
 		return
 	}
 
-	button.SetIcon(theme.VisibilityOffIcon())
 	button.SetOnTapped(func() { g.hideMessage(id) })
 }
 
