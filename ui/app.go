@@ -732,12 +732,21 @@ func (g *gui) build() {
 
 			// A text row carries its own hide/show eye: the direct control a
 			// message needs, instead of a gesture the row also uses for copy
-			// (#474). A file row has nothing to mask, so it stays hidden.
+			// (#474). It is shown only on a row that is masked — where it means
+			// "show me" — because a message the reader can already see has
+			// nothing to uncover (#496). A file row has nothing to mask, so it
+			// stays hidden.
 			reveal := widgets.NewButtonWithIcon("", theme.VisibilityOffIcon(), nil, g.copyLabel)
 			reveal.SetCopyText("")
 			reveal.Hide()
 
-			caption := container.NewVBox(sender, row)
+			// The copy action sits at the end of the sender's line, so every
+			// message can be copied without spending a line of its own and
+			// without the tap that used to do it (#496).
+			copyMessage := widgets.NewButtonWithIcon("", theme.ContentCopyIcon(), nil, g.copyLabel)
+			copyMessage.SetCopyText("Copy the message")
+
+			caption := container.NewVBox(container.NewHBox(sender, layout.NewSpacer(), copyMessage), row)
 
 			return container.NewVBox(container.NewBorder(nil, nil, icon, reveal, caption), pic, preview, save, open, audio.box, video.box)
 		},
@@ -2572,32 +2581,44 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	var icon *widget.Icon
 	var sender *canvas.Text
 	var reveal *widgets.CopyButton
+	var copyMessage *widgets.CopyButton
 
-	// The caption cell holds the icon, the row's eye and a box of the sender
-	// line over the message; the parts are found by type rather than by index.
+	// The caption cell holds the file-type icon and the row's eye on its border,
+	// and, in the middle, a box of the sender line (with the copy button) over
+	// the message. The eye is therefore a direct child and the copy button is
+	// inside the box: the two are told apart by where the template puts them,
+	// not by the order a border happens to list its children (#496).
 	if caption != nil {
-		for _, object := range caption.Objects {
+		var walk func(object fyne.CanvasObject)
+
+		walk = func(object fyne.CanvasObject) {
 			switch part := object.(type) {
 			case *widgets.Text:
 				label = part
+			case *canvas.Text:
+				sender = part
+			case *widgets.CopyButton:
+				copyMessage = part
+			case *fyne.Container:
+				for _, inner := range part.Objects {
+					walk(inner)
+				}
+			}
+		}
+
+		for _, object := range caption.Objects {
+			switch part := object.(type) {
 			case *widget.Icon:
 				icon = part
 			case *widgets.CopyButton:
 				reveal = part
 			case *fyne.Container:
-				for _, inner := range part.Objects {
-					switch piece := inner.(type) {
-					case *widgets.Text:
-						label = piece
-					case *canvas.Text:
-						sender = piece
-					}
-				}
+				walk(part)
 			}
 		}
 	}
 
-	if label == nil || icon == nil || sender == nil || reveal == nil || pic == nil || preview == nil || save == nil || open == nil {
+	if label == nil || icon == nil || sender == nil || reveal == nil || copyMessage == nil || pic == nil || preview == nil || save == nil || open == nil {
 		return
 	}
 
@@ -2605,6 +2626,7 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	g.setSenderLine(sender, &m, g.sel.contains(id))
 	label.SetText(m.body())
 	label.SetOnTapped(func() { g.selectChatRow(id) })
+	copyMessage.SetOnTapped(func() { g.copyRow(id) })
 	g.setReveal(reveal, id, m)
 	g.fillFileRow(m, pic, preview, icon, save, open)
 	g.fillAudioRow(m, audio)
@@ -2619,8 +2641,10 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	g.chatList.SetItemHeight(id, row.MinSize().Height)
 }
 
-// setReveal binds a text row's eye: a masked row offers Show, a visible one
-// offers Hide. A file row has nothing to mask, so its eye stays hidden (#474).
+// setReveal binds a text row's eye. It is shown only on a row that is masked —
+// sent hidden, or received hidden — where it means "show me": a message the
+// reader can already read has nothing to uncover, and masking one after the
+// fact is no longer offered (#496).
 //
 // The icon is set only when it changes. `SetIcon` re-themes the resource, and
 // theming an SVG parses and rasterises it, so calling it on every repaint of
@@ -2636,7 +2660,7 @@ func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chat
 		return
 	}
 
-	if m.file != nil {
+	if !m.masked() {
 		button.Hide()
 
 		return
@@ -2645,41 +2669,27 @@ func (g *gui) setReveal(button *widgets.CopyButton, id widget.ListItemID, m chat
 	button.Show()
 	button.SetCopyText("")
 
-	icon := theme.VisibilityOffIcon()
-
-	if m.masked() {
-		icon = theme.VisibilityIcon()
-	}
-
+	icon := theme.VisibilityIcon()
 	if current := button.Icon(); current != icon {
 		button.SetIcon(icon)
 	}
 
-	if m.masked() {
-		button.SetOnTapped(func() { g.revealMessage(id) })
-
-		return
-	}
-
-	button.SetOnTapped(func() { g.hideMessage(id) })
+	button.SetOnTapped(func() { g.revealMessage(id) })
 }
 
-// hideMessage masks one row on this device. It is local: a received message is
-// not recalled from the sender, and the other device is unchanged (#474).
-func (g *gui) hideMessage(id widget.ListItemID) {
-	g.mu.Lock()
+// copyRow puts one message on the clipboard, from the copy button on its row.
+// The tap on a row no longer copies: it is a selection gesture, and a copy is
+// something the reader asks for (#496).
+func (g *gui) copyRow(id widget.ListItemID) {
 	if id < 0 || id >= len(g.messages) {
-		g.mu.Unlock()
-
 		return
 	}
 
-	g.messages[id].hidden = true
-	g.messages[id].revealed = false
+	g.mu.Lock()
+	message := g.messages[id]
 	g.mu.Unlock()
 
-	g.chatList.RefreshItem(id)
-	g.setStatus("Message hidden on this device — the other device is unchanged")
+	g.copyToClipboard(message.copyText())
 }
 
 // revealMessage shows a masked row again, on this device only.
@@ -2699,32 +2709,26 @@ func (g *gui) revealMessage(id widget.ListItemID) {
 	g.setStatus("Message revealed")
 }
 
-// selectChatRow copies the message that was tapped, or opens a picture.
+// selectChatRow is the row's gesture: it marks a range while one is being
+// built, opens a picture, and otherwise does nothing but put the keyboard away.
 //
-// This is the copy gesture a chat app teaches: tap the line and the line is on
-// the clipboard, instead of asking a finger to drag a selection handle through
-// a tall, wrapping label. A picture row is the exception — tapping it opens the
-// file the way tapping an image everywhere else does.
-//
-// While a range is being built the tap marks an end instead (#469): the row is
-// the only target a thumb can hit, so it is the selection handle.
+// It used to copy the message (#469). A copy is now asked for — the row's copy
+// button, the header's Copy all, or selecting the text itself — so a tap on a
+// message is a place to start a selection and nothing else (#496).
 func (g *gui) selectChatRow(id widget.ListItemID) {
 	if id < 0 || id >= len(g.messages) {
 		return
 	}
 
 	// On a phone the keyboard covers the bottom of the screen and the window
-	// resizes under it, so the tap meant for Send can land on a row — and a row
-	// copies, so the message is copied instead of sent (#325). While the composer
-	// holds the keyboard, a tap on the transcript only puts it away: the next tap
-	// copies, deliberately.
+	// resizes under it, so the tap meant for Send can land on a row. While the
+	// composer holds the keyboard, a tap on the transcript only puts it away, as
+	// it has since #325.
 	if g.mobile && g.composerHasKeyboard() {
 		g.win.Canvas().Unfocus()
 
 		return
 	}
-
-	message := g.messages[id]
 
 	g.chatList.Unselect(id)
 
@@ -2734,13 +2738,10 @@ func (g *gui) selectChatRow(id widget.ListItemID) {
 		return
 	}
 
+	message := g.messages[id]
 	if message.file != nil && message.file.inline && message.file.path != "" {
 		g.showImage(message.file.path)
-
-		return
 	}
-
-	g.copyToClipboard(message.copyText())
 }
 
 // beginSelection enters the range-copy mode: the next transcript tap marks one
