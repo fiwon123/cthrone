@@ -62,8 +62,10 @@ type Text struct {
 	selMu sync.Mutex
 
 	// restore turns selection off again after selectionWindow. It is kept so a
-	// second long press extends the window instead of stacking timers.
+	// second long press extends the window instead of stacking timers, and arm is
+	// the serial number that makes a timer which already fired harmless (#510).
 	restore *time.Timer
+	arm     uint64
 }
 
 // NewText is a label with long-press selection on a touch screen. touch is
@@ -152,11 +154,16 @@ func (t *Text) Selectable() bool {
 
 // setSelectable is the only way the flag moves, so the read above has something
 // to synchronise with.
+//
+// The refresh happens under the same lock: two timers can fire at once — a long
+// press arms one, and a second press while the first is still ticking arms
+// another — and a widget refreshed on two goroutines at once is a data race, not
+// a redraw. The race detector found this in the selection window (#510).
 func (t *Text) setSelectable(selectable bool) {
 	t.selMu.Lock()
-	t.label.Selectable = selectable
-	t.selMu.Unlock()
+	defer t.selMu.Unlock()
 
+	t.label.Selectable = selectable
 	t.label.Refresh()
 }
 
@@ -244,11 +251,23 @@ func (t *Text) selectAt(ev *fyne.PointEvent) {
 
 // armSelectionWindow ends selection after selectionWindow, so the pane scrolls
 // by touch again.
+//
+// Each arming takes a serial number, and only the newest one acts. Stopping the
+// previous timer is not enough: a timer that has already fired runs its callback
+// on its own goroutine, so a second press could leave two callbacks restoring the
+// same label at once — a data race inside Fyne's text layout, which the detector
+// found (#510).
 func (t *Text) armSelectionWindow() {
+	t.selMu.Lock()
 	if t.restore != nil {
 		t.restore.Stop()
 	}
 
+	t.arm++
+	arm := t.arm
+	t.selMu.Unlock()
+
+	t.selMu.Lock()
 	t.restore = time.AfterFunc(selectionWindow, func() {
 		// A window can be closed while the window is still ticking. There is
 		// nothing left to restore then, and no application to restore it on.
@@ -256,10 +275,24 @@ func (t *Text) armSelectionWindow() {
 			return
 		}
 
-		fyne.Do(func() {
-			t.setSelectable(false)
-		})
+		fyne.Do(func() { t.endSelectionWindow(arm) })
 	})
+	t.selMu.Unlock()
+}
+
+// endSelectionWindow is the timer's work, and a test calls it instead of waiting
+// for a background goroutine: a timer firing while the test goroutine touches the
+// same window is a race in the harness, not in the program (#510).
+func (t *Text) endSelectionWindow(arm uint64) {
+	t.selMu.Lock()
+	newest := t.arm == arm
+	t.selMu.Unlock()
+
+	if !newest {
+		return
+	}
+
+	t.setSelectable(false)
 }
 
 // showCopyMenu offers the copy a phone has no keyboard shortcut for: the
