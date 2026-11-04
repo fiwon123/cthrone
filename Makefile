@@ -411,6 +411,18 @@ test-gui: ## test the gui-tagged widget tree headless (no toolkit needed)
 # testdata/fuzz by the tool itself, and that file is what a later run replays
 # before it starts exploring.
 FUZZTIME ?= 20s
+# The minimizer is bounded by executions rather than by time, and the bound is
+# the point: `go test -fuzz` minimizes every newly interesting input with a
+# `-fuzzminimizetime` budget, 60s by default — longer than the window above. On
+# the bluetooth reassembler the minimizer keeps finding more to cut in a long
+# packet stream, so the default spent the whole window minimizing: the run
+# logged 63,856 executions at 3s, then 0/sec until the timer expired, and
+# exited 0 anyway (#483). A gate that stops fuzzing after three seconds reports
+# success without having exercised anything. `100x` keeps the reduction — a
+# failing input is still minimized and still written to testdata/fuzz — and
+# leaves the window for exploration. Raise it by hand for a long run where the
+# smaller input is worth more than the coverage: `make fuzz FUZZMINIMIZE=60s`.
+FUZZMINIMIZE ?= 100x
 # The parsers of input this program did not write. `wire` is the envelope every
 # frame goes through; `discovery`'s beacon is the one message anybody on the
 # segment can send without a credential (#414); `e2e`'s handshake is the first
@@ -426,7 +438,8 @@ fuzz: ## fuzz the parsers of untrusted input (FUZZTIME=20s by default)
 	for target in $(FUZZ_TARGETS); do \
 	  pkg="$${target%%:*}"; name="$${target##*:}"; \
 	  echo "fuzzing $$name in $$pkg for $(FUZZTIME)"; \
-	  CGO_ENABLED=0 go test -run '^$$' -fuzz "^$$name$$" -fuzztime=$(FUZZTIME) "$$pkg"; \
+	  CGO_ENABLED=0 go test -run '^$$' -fuzz "^$$name$$" \
+	    -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZE) "$$pkg"; \
 	done
 
 race: ## test with the race detector (needs a C compiler)

@@ -100,6 +100,20 @@ Twenty seconds is not a proof of correctness; it is a check that a change did
 not reintroduce a panic on input nobody chose. Run it longer by hand when
 touching the parser: `make fuzz FUZZTIME=5m`.
 
+**The minimizer is bounded for a reason.** Go's fuzzer minimizes every newly
+interesting input before it carries on, with a `-fuzzminimizetime` budget that
+defaults to **60 s** — longer than the window above. On a long packet stream
+the minimizer keeps finding more to cut, so `bluetooth.FuzzReassemble` spent the
+whole window minimizing: the run logged ~64 k executions at 3 s, then `0/sec`
+until the timer expired, and still exited **0** (#483). The target therefore
+passes `-fuzzminimizetime=100x`, which bounds each minimization attempt by
+executions instead of wall clock and leaves the window for exploration. Raise
+it when the smaller input is worth more than the coverage — `make fuzz
+FUZZMINIMIZE=60s` — and expect a stall in the log if you do. A stall after the
+first "new interesting" line is the minimizer, not a hang in the target: check
+the worker's CPU before diagnosing one, and replay the input it wrote to be
+sure.
+
 ### Go conventions
 
 - Test file: `<file>_test.go`, next to the code it tests, same package (or
