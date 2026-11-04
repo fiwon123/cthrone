@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
 
 	updatepkg "github.com/fiwon123/cthrone/internal/update"
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // openRecorder collects the addresses a button asked the browser to open, so a
@@ -214,5 +216,67 @@ func TestAboutCheckNamesARateLimit(t *testing.T) {
 
 	if !strings.Contains(note, "try again") {
 		t.Errorf("the About note = %q, want it to say to try again later", note)
+	}
+}
+
+// aboutHeading finds the About tab's name-and-version line.
+func aboutHeading(t *testing.T, content fyne.CanvasObject) *widgets.Text {
+	t.Helper()
+
+	var found *widgets.Text
+
+	var walk func(object fyne.CanvasObject)
+
+	walk = func(object fyne.CanvasObject) {
+		switch part := object.(type) {
+		case *widgets.Text:
+			if found == nil && strings.HasPrefix(part.Text(), "cthrone") {
+				found = part
+			}
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				walk(child)
+			}
+		case *container.Scroll:
+			if part.Content != nil {
+				walk(part.Content)
+			}
+		}
+	}
+
+	walk(content)
+
+	if found == nil {
+		t.Fatal("the About tab carries no version line")
+	}
+
+	return found
+}
+
+// The version is text a user pastes into a report, so a long press on a phone
+// starts a selection; on a touch build a line with no tap action has no gesture
+// layer, and the press used to reach nothing at all (#497).
+func TestTheAboutVersionCanBeSelectedOnAPhone(t *testing.T) {
+	g := newScreenGUI(t, true)
+
+	heading := aboutHeading(t, g.buildAbout())
+
+	if heading.Selectable() {
+		t.Fatal("the heading is selectable before any press, so this proves nothing")
+	}
+
+	heading.TappedSecondary(&fyne.PointEvent{AbsolutePosition: fyne.NewPos(10, 10)})
+
+	if !heading.Selectable() {
+		t.Error("a long press on the About version started no selection")
+	}
+}
+
+// A desktop already has drag-to-select, and the layer must not take it away.
+func TestTheAboutVersionStaysSelectableOnADesktop(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	if !aboutHeading(t, g.buildAbout()).Selectable() {
+		t.Error("the About version is not selectable on a desktop")
 	}
 }

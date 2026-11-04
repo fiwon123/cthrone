@@ -3322,9 +3322,16 @@ func (g *gui) aboutHeader(version string) fyne.CanvasObject {
 	// The version is part of the name's own line rather than a second object
 	// beside it: a box of two texts can wrap or clip on a narrow phone, and the
 	// version was reported as sitting above the name (#343, #364).
+	//
+	// It is text a user pastes into a report, so it can be selected: on a phone
+	// that needs a long press, and a long press only reaches a text that has a
+	// gesture layer (#497).
+	name := g.textHeading("cthrone  " + version)
+	name.AllowSelection()
+
 	return container.NewHBox(
 		widget.NewIcon(appIcon()),
-		g.textHeading("cthrone  "+version),
+		name,
 	)
 }
 
