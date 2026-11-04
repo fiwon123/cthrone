@@ -223,6 +223,21 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
+- **A message's row asks before it acts** (v0.18.0, #496, #497): every message
+  carries a **copy** button of its own at the end of its sender line, and a tap
+  on a message no longer copies — copying is something the reader asks for, and
+  a tap is where a selection starts (drag a desktop, long press a phone). The
+  **eye** appears only on a message that is masked, where it means *show me*: a
+  message already in view has no mask control, and revealing one removes the
+  control instead of turning it into its opposite. Masking a message after it
+  was sent is therefore no longer offered — the composer's eye is how a message
+  is sent hidden. The transcript's tap still dismisses a phone keyboard, still
+  marks a range while **Select** is on, and still opens a picture. The About
+  tab's version can now be selected on a touch screen, where a line with no tap
+  action never received the long press that starts a selection. No transport, no
+  wire format and no security rule changed. Not verified: a rendered window —
+  the copy button's place at phone width is the thing to look at — and any of it
+  on a phone (#155, #470).
 - **The transcript's repaint stops re-parsing an icon** (v0.17.2, #491): a
   repainted row set its eye's icon every time, and Fyne re-themes a resource by
   parsing and rasterising its SVG — 73 % of the transcript's refresh, measured.
