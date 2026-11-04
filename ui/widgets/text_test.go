@@ -87,7 +87,7 @@ func TestTextLongPressSelectsAndOffersCopy(t *testing.T) {
 	app := test.NewApp()
 	t.Cleanup(app.Quit)
 
-	shortenSelectionWindow(t)
+	longSelectionWindow(t)
 
 	text := NewText("morning bob the network is down", true)
 	win := test.NewWindow(container.NewVBox(container.NewPadded(text)))
@@ -142,7 +142,7 @@ func TestTextSelectionEndsOnItsOwn(t *testing.T) {
 	app := test.NewApp()
 	t.Cleanup(app.Quit)
 
-	shortenSelectionWindow(t)
+	longSelectionWindow(t)
 
 	text := NewText("morning bob", true)
 	win := test.NewWindow(container.NewVBox(text))
@@ -155,16 +155,11 @@ func TestTextSelectionEndsOnItsOwn(t *testing.T) {
 		t.Fatal("the long press did not make the text selectable")
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !text.Selectable() {
-			return
-		}
+	endSelection(text)
 
-		time.Sleep(5 * time.Millisecond)
+	if text.Selectable() {
+		t.Error("the text stayed selectable, so the pane would never scroll by touch again")
 	}
-
-	t.Fatal("the text stayed selectable, so the pane would never scroll by touch again")
 }
 
 // The gesture layer carries exactly the two gestures Text takes, and neither of
@@ -311,12 +306,24 @@ func findPopup(object fyne.CanvasObject, depth int) *widget.PopUpMenu {
 }
 
 // shortenSelectionWindow makes the restore prompt for a test, and puts it back.
-func shortenSelectionWindow(t *testing.T) {
+// longSelectionWindow keeps the real timer out of a test: the restore is driven
+// by hand, because a timer running on its own goroutine while the test touches
+// the same window is a race in the harness, not in the program (#510).
+func longSelectionWindow(t *testing.T) {
 	t.Helper()
 
 	previous := selectionWindow
-	selectionWindow = 20 * time.Millisecond
+	selectionWindow = time.Hour
 	t.Cleanup(func() { selectionWindow = previous })
+}
+
+// endSelection is what the timer would do, once the window has elapsed.
+func endSelection(text *Text) {
+	text.selMu.Lock()
+	arm := text.arm
+	text.selMu.Unlock()
+
+	text.endSelectionWindow(arm)
 }
 
 // The label underneath is what a window keeps a handle to; a test that reads it
