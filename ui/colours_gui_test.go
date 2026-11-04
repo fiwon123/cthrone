@@ -6,28 +6,42 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // senderLine finds the coloured sender line of a chat row.
-func senderLine(t *testing.T, row fyne.CanvasObject) *canvas.Text {
+func senderLine(t *testing.T, row fyne.CanvasObject) *widgets.Text {
 	t.Helper()
 
-	var found *canvas.Text
+	box, ok := row.(*fyne.Container)
+	if !ok {
+		t.Fatalf("row is %T, want *fyne.Container", row)
+	}
 
-	var walk func(object fyne.CanvasObject)
-	walk = func(object fyne.CanvasObject) {
-		switch part := object.(type) {
-		case *canvas.Text:
-			found = part
-		case *fyne.Container:
-			for _, child := range part.Objects {
-				walk(child)
+	caption, ok := box.Objects[0].(*fyne.Container)
+	if !ok {
+		t.Fatalf("row[0] is %T, want the caption cell", box.Objects[0])
+	}
+
+	var found *widgets.Text
+
+	for _, object := range caption.Objects {
+		part, ok := object.(*fyne.Container)
+		if !ok {
+			continue
+		}
+
+		for _, child := range part.Objects {
+			if inner, ok := child.(*fyne.Container); ok {
+				for _, item := range inner.Objects {
+					if text, ok := item.(*widgets.Text); ok {
+						found = text
+					}
+				}
 			}
 		}
 	}
-
-	walk(row)
 
 	if found == nil {
 		t.Fatal("the row has no sender line")
@@ -69,12 +83,18 @@ func TestTheRowShowsTheSenderApartFromTheMessage(t *testing.T) {
 	g.updateChatRow(0, row)
 
 	sender := senderLine(t, row)
-	if sender.Text != "laptop (192.168.1.20:8080)" {
-		t.Errorf("the sender line reads %q, want the name and address", sender.Text)
+	if sender.Text() != "laptop (192.168.1.20:8080)" {
+		t.Errorf("the sender line reads %q, want the name and address", sender.Text())
 	}
 
-	if sender.Color != senderColour("laptop (192.168.1.20:8080)") {
+	if sender.Importance() != senderImportance("laptop (192.168.1.20:8080)", false) {
 		t.Error("the sender line is not the colour the name decides")
+	}
+
+	// The name is text a reader may copy, so it takes a selection: a desktop
+	// selects it directly, a phone by a long press (#503).
+	if !sender.Selectable() {
+		t.Error("the sender's name cannot be selected")
 	}
 
 	label, _, _, _, _ := chatRowObjects(t, row)
@@ -100,7 +120,7 @@ func TestOurOwnMessagesSayYou(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	if got := senderLine(t, row).Text; got != "You" {
+	if got := senderLine(t, row).Text(); got != "You" {
 		t.Errorf("our own sender line reads %q, want You", got)
 	}
 }

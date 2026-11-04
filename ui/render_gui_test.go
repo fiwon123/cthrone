@@ -74,19 +74,21 @@ func chatRowObjects(t *testing.T, row fyne.CanvasObject) (*widgets.Text, *canvas
 
 	var label *widgets.Text
 
-	var find func(object fyne.CanvasObject)
-	find = func(object fyne.CanvasObject) {
-		switch part := object.(type) {
-		case *widgets.Text:
-			label = part
-		case *fyne.Container:
-			for _, child := range part.Objects {
-				find(child)
+	// The caption cell is the sender's box over the message text. The sender is
+	// a text widget too now, so it is the one inside the box and the message is
+	// the one beside it (#503).
+	for _, object := range caption.Objects {
+		part, ok := object.(*fyne.Container)
+		if !ok {
+			continue
+		}
+
+		for _, child := range part.Objects {
+			if text, ok := child.(*widgets.Text); ok {
+				label = text
 			}
 		}
 	}
-
-	find(caption)
 
 	if label == nil {
 		t.Fatalf("the caption cell holds no *widgets.Text: %v", caption.Objects)

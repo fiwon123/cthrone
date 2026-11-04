@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // rowSender finds the sender line a painted row carries.
-func rowSender(t *testing.T, row fyne.CanvasObject) *canvas.Text {
+func rowSender(t *testing.T, row fyne.CanvasObject) *widgets.Text {
 	t.Helper()
 
 	box, ok := row.(*fyne.Container)
@@ -27,21 +28,24 @@ func rowSender(t *testing.T, row fyne.CanvasObject) *canvas.Text {
 		t.Fatalf("row[0] is %T, want the caption cell", box.Objects[0])
 	}
 
-	var sender *canvas.Text
+	var sender *widgets.Text
 
-	var walk func(fyne.CanvasObject)
-	walk = func(object fyne.CanvasObject) {
-		switch part := object.(type) {
-		case *canvas.Text:
-			sender = part
-		case *fyne.Container:
-			for _, child := range part.Objects {
-				walk(child)
+	for _, object := range caption.Objects {
+		part, ok := object.(*fyne.Container)
+		if !ok {
+			continue
+		}
+
+		for _, child := range part.Objects {
+			if inner, ok := child.(*fyne.Container); ok {
+				for _, item := range inner.Objects {
+					if text, ok := item.(*widgets.Text); ok {
+						sender = text
+					}
+				}
 			}
 		}
 	}
-
-	walk(caption)
 
 	if sender == nil {
 		t.Fatal("the caption cell holds no sender line")
@@ -85,8 +89,8 @@ func TestSelectionCopiesARangeAndMarksIt(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(1, row)
 
-	if sender := rowSender(t, row); !strings.HasPrefix(sender.Text, "✓ ") {
-		t.Errorf("a selected row's sender reads %q, want a check in front", sender.Text)
+	if sender := rowSender(t, row); !strings.HasPrefix(sender.Text(), "✓ ") {
+		t.Errorf("a selected row's sender reads %q, want a check in front", sender.Text())
 	}
 
 	g.app.Clipboard().SetContent("")

@@ -223,6 +223,18 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
+- **The transcript's controls settle after the first device test** (v0.18.1,
+  #503): a hidden message's **eye toggles both ways** — reveal it, then press
+  again to hide it — instead of vanishing once revealed, and it shares the
+  sender's line with the copy button so the two are the same square. The
+  **sender's name is selectable**: it was a `canvas.Text`, which cannot be
+  selected at all, and it is now a text a desktop drags over and a phone long
+  presses. A long press on a phone also stops replacing the label's drawn
+  selection with a second one nobody draws, which is why selecting part of a
+  message never showed anything. The copy button is unchanged: it copies the
+  message. No transport, no wire format and no security rule changed. Not
+  verified: a rendered window and a phone — the square's size, and the drag that
+  follows a long press, are what a device still decides (#155, #470).
 - **A message's row asks before it acts** (v0.18.0, #496, #497): every message
   carries a **copy** button of its own at the end of its sender line, and a tap
   on a message no longer copies — copying is something the reader asks for, and
