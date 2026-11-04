@@ -65,7 +65,7 @@ func fillRowOnScreen(t *testing.T, g *gui, note *fileNote) (*canvas.Image, *widg
 	save := widgets.NewButton("Save as…", nil, nil)
 	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
 
-	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open)
+	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open, nil)
 
 	return pic, preview, icon
 }
@@ -95,6 +95,8 @@ func TestAFileRowThatDrawsNothingShowsItsType(t *testing.T) {
 // A row that draws its own content does not need to say it is a picture: the
 // picture is the answer.
 func TestARowThatDrawsItsContentShowsNoIcon(t *testing.T) {
+	decodePicturesInline(t)
+
 	g := newScreenGUI(t, false)
 
 	path := writeTestPNG(t)
@@ -160,7 +162,7 @@ func TestAPhoneOffersNoOpenButton(t *testing.T) {
 	save := widgets.NewButton("Save as…", nil, nil)
 	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
 
-	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open)
+	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open, nil)
 
 	if open.Visible() {
 		t.Error("a phone offered an Open button that cannot work")
@@ -194,7 +196,7 @@ func TestADesktopKeepsTheOpenButton(t *testing.T) {
 	save := widgets.NewButton("Save as…", nil, nil)
 	open := widgets.NewButtonWithIcon("Open", nil, nil, nil)
 
-	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open)
+	g.fillFileRow(chatMessage{from: "laptop", file: note}, pic, preview, icon, save, open, nil)
 
 	if !open.Visible() {
 		t.Error("a desktop hid the Open button, which works there")
@@ -209,14 +211,18 @@ func TestARowDecodesItsPictureOnce(t *testing.T) {
 
 	path := writeTestPNG(t)
 
+	// The row's decode is the thumbnail worker now, so that is what is counted:
+	// one decode per path, however many times the row is painted (#321, #510).
+	decodePicturesInline(t)
+
 	loads := 0
-	previous := loadPicture
-	loadPicture = func(p string) (fyne.Resource, error) {
+	previous := decodeThumb
+	decodeThumb = func(p string) (fyne.Resource, error) {
 		loads++
 
 		return previous(p)
 	}
-	t.Cleanup(func() { loadPicture = previous })
+	t.Cleanup(func() { decodeThumb = previous })
 
 	checks := 0
 	previousCheck := canDecodeFile

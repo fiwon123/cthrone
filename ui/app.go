@@ -331,6 +331,8 @@ type gui struct {
 	// take cacheMu rather than trusting the thread (#435).
 	cacheMu        sync.Mutex
 	pictures       map[string]fyne.Resource
+	pictureOrder   []string
+	picturePending map[string]bool
 	decodableFiles map[string]bool
 	texts          map[string]string
 
@@ -716,6 +718,11 @@ func (g *gui) build() {
 			save := widgets.NewButtonWithIcon("Save as…", theme.DocumentSaveIcon(), nil, g.copyLabel)
 			save.Hide()
 
+			// A picture can go to the system clipboard as a picture: Fyne has no
+			// image clipboard, so the platform's own tool does it (#510).
+			copyPic := widgets.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), nil, g.copyLabel)
+			copyPic.Hide()
+
 			// A file neither drawn nor read here — a PDF, an audio clip — is
 			// opened by whatever the device uses for that kind of file. It is
 			// the one thing this program can offer without an audio or PDF
@@ -767,7 +774,7 @@ func (g *gui) build() {
 
 			caption := container.NewVBox(container.NewHBox(sender, layout.NewSpacer(), reveal, copyMessage), row)
 
-			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box, video.box)
+			return container.NewVBox(container.NewBorder(nil, nil, icon, nil, caption), pic, preview, save, open, audio.box, video.box, copyPic)
 		},
 		g.updateChatRow,
 	)
@@ -2672,6 +2679,13 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 		video, _ = videoRowOf(row.Objects[6])
 	}
 
+	// The picture's copy action is the last object, so the file actions above
+	// keep their positions (#510).
+	var copyPic *widgets.CopyButton
+	if len(row.Objects) > 7 {
+		copyPic, _ = row.Objects[7].(*widgets.CopyButton)
+	}
+
 	var label *widgets.Text
 	var icon *widget.Icon
 	var sender *widgets.Text
@@ -2722,7 +2736,11 @@ func (g *gui) updateChatRow(id widget.ListItemID, obj fyne.CanvasObject) {
 	label.SetOnTapped(func() { g.selectChatRow(id) })
 	copyMessage.SetOnTapped(func() { g.copyRow(id) })
 	g.setReveal(reveal, id, m)
-	g.fillFileRow(m, pic, preview, icon, save, open)
+	if copyPic != nil {
+		copyPic.SetOnTapped(func() { g.copyPicture(id) })
+	}
+
+	g.fillFileRow(m, pic, preview, icon, save, open, copyPic)
 	g.fillAudioRow(m, audio)
 	g.fillVideoRow(m, video)
 
@@ -2795,6 +2813,43 @@ func (g *gui) hideMessage(id widget.ListItemID) {
 	g.mu.Unlock()
 
 	g.chatList.RefreshItem(id)
+}
+
+// copyPicture puts a row's picture on the system clipboard, as a picture.
+//
+// The work is the platform's and may take a moment — encoding, then handing the
+// bytes to a tool — so it happens off the UI goroutine and the answer lands on
+// the status line (#510).
+func (g *gui) copyPicture(id widget.ListItemID) {
+	g.mu.Lock()
+	if id < 0 || id >= len(g.messages) {
+		g.mu.Unlock()
+
+		return
+	}
+
+	message := g.messages[id]
+	g.mu.Unlock()
+
+	if message.file == nil || message.file.path == "" {
+		return
+	}
+
+	path := message.file.path
+
+	go fyne.Do(func() { g.copyPictureNow(path) })
+}
+
+// copyPictureNow does the copy and says how it went. It is the body of
+// copyPicture, split out so a test can call it without a goroutine.
+func (g *gui) copyPictureNow(path string) {
+	if err := copyImageToOS(path); err != nil {
+		g.setStatus("Could not copy the picture: " + err.Error())
+
+		return
+	}
+
+	g.setStatus("Picture copied to the clipboard")
 }
 
 // copyRow puts one message on the clipboard, from the copy button on its row.

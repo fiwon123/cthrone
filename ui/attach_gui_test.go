@@ -31,6 +31,8 @@ func (f pickedFile) URI() fyne.URI { return f.uri }
 // showed the picture — two devices looking at one conversation, seeing
 // different conversations.
 func TestSentPictureDrawsTheSamePreviewAsAReceivedOne(t *testing.T) {
+	decodePicturesInline(t)
+
 	path := writeTestPNG(t)
 
 	g := newScreenGUI(t, false)
@@ -336,6 +338,8 @@ func TestUndrawableFileOffersOpen(t *testing.T) {
 // A row that already draws its content offers no Open: the picture is there, and
 // a button that opens it again in another window is noise.
 func TestDrawnFileOffersNoOpen(t *testing.T) {
+	decodePicturesInline(t)
+
 	path := writeTestPNG(t)
 
 	g := newScreenGUI(t, false)

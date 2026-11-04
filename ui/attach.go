@@ -999,7 +999,7 @@ func showPicture(pic *canvas.Image, res fyne.Resource) {
 	pic.Show()
 }
 
-func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, icon *widget.Icon, save *widgets.CopyButton, open *widgets.CopyButton) {
+func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Text, icon *widget.Icon, save *widgets.CopyButton, open *widgets.CopyButton, copyPic *widgets.CopyButton) {
 	if m.file == nil {
 		pic.Hide()
 		preview.Hide()
@@ -1007,7 +1007,15 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 		save.Hide()
 		open.Hide()
 
+		if copyPic != nil {
+			copyPic.Hide()
+		}
+
 		return
+	}
+
+	if copyPic != nil {
+		copyPic.Hide()
 	}
 
 	path := m.file.path
@@ -1017,15 +1025,29 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	// forever (#421).
 	animated := path != "" && g.animatable(path)
 
+	// A picture whose thumbnail is still decoding is drawn as that note, and the
+	// text branch below must leave it alone (#510).
+	loadingPicture := false
+
 	switch {
 	case animated:
 		pic.Hide()
 
 	case path != "" && m.file.inline && g.decodable(path):
-		if res := g.previewPicture(path); res != nil {
+		// The decode happens off the UI goroutine now, so the first paint of a
+		// photo says so and the row fills in when the thumbnail lands (#510).
+		if copyPic != nil {
+			copyPic.Show()
+		}
+
+		if res, ready := g.previewPicture(path); ready {
 			showPicture(pic, res)
+			preview.Hide()
 		} else {
 			pic.Hide()
+			preview.SetText("picture — loading…")
+			preview.Show()
+			loadingPicture = true
 		}
 
 	// A picture this device sent from a picker that gave no path: the row draws
@@ -1040,18 +1062,20 @@ func (g *gui) fillFileRow(m chatMessage, pic *canvas.Image, preview *widgets.Tex
 	// Text is the other thing a row can show: bounded by bytes and lines, so a
 	// long log is a row that ends in an ellipsis rather than a window with no
 	// conversation under it.
-	drawn := false
+	drawn := loadingPicture
 
-	if path != "" && showsText(mimeOf(m.file.name), m.file.size) {
-		if body := g.previewText(path); body != "" {
-			preview.SetText(body)
-			preview.Show()
-			drawn = true
+	if !loadingPicture {
+		if path != "" && showsText(mimeOf(m.file.name), m.file.size) {
+			if body := g.previewText(path); body != "" {
+				preview.SetText(body)
+				preview.Show()
+				drawn = true
+			} else {
+				preview.Hide()
+			}
 		} else {
 			preview.Hide()
 		}
-	} else {
-		preview.Hide()
 	}
 
 	// A row that draws nothing says what kind of file it is: the icon is the
