@@ -4,26 +4,27 @@
 
 | I want to… | Do this |
 |---|---|
-| 📋 **copy one message** | tap the row |
+| 📋 **copy one message** | press the copy button on its row |
 | 📋 **copy a part of the conversation** | **Select**, tap the first message, tap the last, **Copy** |
 | 📋 **copy everything** | **Copy all** in the chat header |
 | 🗑️ **delete a message** | **Select** it, then **Delete** |
 | 🧹 **start clean** | **Select**, then **Clear all** |
 | 🙈 **send a secret** | press the eye in the composer before typing |
-| 🙈 **hide a message on this screen** | press its own eye |
+| 🙈 **show a hidden message** | press the eye on its row |
 
 Every one of those acts on **this device's transcript only**. Nothing is
 recalled from the other device, and nothing is sent to it.
 
 ## Copy
 
-A tap on a row puts the **message text** on the clipboard — no `You:` and no
-`laptop:` in front of it. The sender stays on screen, where the row draws it.
-That is the fastest copy for one message, and it is the gesture a chat app
-teaches.
+Every message row carries a **copy button** at the end of its sender line. It
+puts that **message text** on the clipboard — no `You:` and no `laptop:` in
+front of it. The sender stays on screen, where the row draws it.
 
 **Copy all** in the header copies the conversation in order, one message text
 per line. It is off while the transcript is empty.
+
+A tap on a row copies nothing: it is where a selection starts.
 
 ## Select a range
 
@@ -59,10 +60,11 @@ written to disk or sent to a peer.
 
 ## Hidden messages
 
-Every **text** row carries an **eye**: press it to mask the message on this
-screen, and again to show it. It is a local mask — the other device is
-unchanged — and it is there for any message, sent or received. A file row has no
-eye.
+A **masked** text row — one sent with the composer's eye, or received with the
+flag set — carries an **eye**: press it to show the message on this screen. A
+message you can already read has no mask control, because there is nothing left
+to uncover; masking a message after the fact is not offered. A file row has no
+eye either.
 
 To send a message **as a password**, press the eye in the composer before
 typing:
@@ -73,8 +75,8 @@ typing:
   flag travels in the frame's header, and an older peer ignores it and shows the
   text. A terminal peer prints it as plain text, because the terminal has no
   masked row;
-- **a tap on a row copies its text**, masked or not; the eye is the control that
-  shows it.
+- **copying a masked row copies its text**, and the row's copy button does it
+  without revealing anything on screen.
 
 > ⚠️ **Hidden is presentation, not encryption.** Every payload is already sealed
 > end to end; hidden only decides how the row is drawn. The other device — and a

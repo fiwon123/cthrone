@@ -98,37 +98,29 @@ func TestAHiddenRowHasItsOwnEye(t *testing.T) {
 		t.Error("the eye did not reveal the message")
 	}
 
-	if got, want := eye.Icon(), theme.VisibilityOffIcon(); got == nil || got.Name() != want.Name() {
-		t.Errorf("a revealed row's eye shows %v, want the hide icon", got)
-	}
-
 	if got := label.Text(); got != "hunter2" {
 		t.Errorf("the revealed row draws %q, want the text", got)
 	}
 
-	// The same control hides it again.
-	test.Tap(eye)
-	g.updateChatRow(0, row)
-
-	if !g.messages[0].masked() {
-		t.Error("the second press did not hide the message")
+	// Once revealed there is nothing left to toggle, so the control goes away
+	// rather than turning into its opposite (#496).
+	if eye.Visible() {
+		t.Error("a revealed row still offers the mask control")
 	}
 
-	if got := label.Text(); got != hiddenBody {
-		t.Errorf("the hidden row draws %q, want the mask", got)
-	}
-
-	// A tap on the row is the copy, and it takes the text, not "You: ...".
+	// The copy is the row's button now, and it takes the text, not "You: ...".
 	g.app.Clipboard().SetContent("")
-	g.selectChatRow(0)
+	test.Tap(rowCopyButton(t, row))
 
 	if got := g.app.Clipboard().Content(); got != "hunter2" {
-		t.Errorf("a tap copied %q, want the message text", got)
+		t.Errorf("the row's copy button copied %q, want the message text", got)
 	}
 }
 
 // A normal message can be hidden from its own row too; the state is local.
-func TestAnyTextRowCanBeHidden(t *testing.T) {
+// A message the reader can already see has no mask control on it: the eye is for
+// a row that is masked, not for one that could be (#496).
+func TestAVisibleRowHasNoEye(t *testing.T) {
 	g := newScreenGUI(t, false)
 
 	g.mu.Lock()
@@ -138,18 +130,26 @@ func TestAnyTextRowCanBeHidden(t *testing.T) {
 	row := g.chatList.CreateItem()
 	g.updateChatRow(0, row)
 
-	label, _, _, _, _ := chatRowObjects(t, row)
-	eye := rowReveal(t, row)
-
-	test.Tap(eye)
-	g.updateChatRow(0, row)
-
-	if !g.messages[0].hidden || !g.messages[0].masked() {
-		t.Error("the eye did not hide a normal message")
+	if eye := rowReveal(t, row); eye.Visible() {
+		t.Error("a visible message offers a mask control")
 	}
 
+	// Sending with the composer's eye still masks it for the peer and here; it
+	// is the only way to hide a message now, and the row then offers the reveal.
+	g.mu.Lock()
+	g.messages[0].hidden = true
+	g.mu.Unlock()
+
+	g.updateChatRow(0, row)
+
+	label, _, _, _, _ := chatRowObjects(t, row)
 	if got := label.Text(); got != hiddenBody {
 		t.Errorf("the hidden row draws %q, want the mask", got)
+	}
+
+	eye := rowReveal(t, row)
+	if !eye.Visible() {
+		t.Fatal("a masked row offers no reveal control")
 	}
 
 	test.Tap(eye)
@@ -157,6 +157,10 @@ func TestAnyTextRowCanBeHidden(t *testing.T) {
 
 	if got := label.Text(); got != "hello" {
 		t.Errorf("the revealed row draws %q, want the text", got)
+	}
+
+	if eye.Visible() {
+		t.Error("a revealed row still offers the control, though there is nothing left to toggle")
 	}
 }
 

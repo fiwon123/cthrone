@@ -112,9 +112,11 @@ shown or downloaded, and the exact wording of any failure. Report it on
 
 1. From the desktop, send three messages: two ordinary ones, and one you will
    want to hide (`hunter2` will do).
-2. **Tap a message.** Paste it somewhere — the composer, or your notes app: the
-   text arrives **without** `laptop:` in front of it. The sender stays on the
-   row, where it belongs.
+2. **Press the copy button on a message** — the icon at the end of its sender
+   line. Paste it somewhere (the composer, or your notes app): the text arrives
+   **without** `laptop:` in front of it. A **tap on the message itself copies
+   nothing**; a long press starts a selection, and dragging on a desktop selects
+   the text.
 3. Scroll up, then have the desktop send another message. The view **stays**
    where you put it and a way down appears; tap it and you are at the end again.
 4. Tap **Select**, then the first message, then the last. The range is marked,
@@ -123,9 +125,10 @@ shown or downloaded, and the exact wording of any failure. Report it on
    the transcript after asking.
 5. Press the eye **in the composer** before typing, then send. The message is
    masked on both screens. Press the eye on **its row** on the phone: it is
-   revealed here and stays masked on the desktop. A **tap** on a masked row
-   still copies its text, and a copy never carries the sender. Hidden is
-   presentation, not encryption: the peer and a websocket host can read it.
+   revealed here and stays masked on the desktop, and the eye then disappears —
+   there is nothing left to toggle. A message you can already read shows no mask
+   control at all. Hidden is presentation, not encryption: the peer and a
+   websocket host can read it.
 6. Send a **PDF** and a **picture**. Each row reads *not saved*. Open **Files**:
    the conversation lists both, with where each one is. **Save as…** asks where
    to put it, and the row stops saying *not saved*.

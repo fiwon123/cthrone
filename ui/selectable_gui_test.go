@@ -4,7 +4,6 @@ package ui
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -84,7 +83,9 @@ func TestTouchTextSelectsOnALongPress(t *testing.T) {
 // The transcript's tap-to-copy is the gesture a phone already had, and wrapping
 // the text in a long-press widget must not take it away: tap still copies the
 // row, and a different tap copies a different row.
-func TestTouchRowStillCopiesOnATap(t *testing.T) {
+// A tap on a phone copies nothing either: the long press is the copy gesture,
+// and a tap is where a selection starts (#496).
+func TestATouchTapOnARowCopiesNothing(t *testing.T) {
 	g := newScreenGUI(t, true)
 
 	g.mu.Lock()
@@ -96,11 +97,11 @@ func TestTouchRowStillCopiesOnATap(t *testing.T) {
 
 	text, _, _, _, _ := chatRowObjects(t, row)
 
-	g.app.Clipboard().SetContent("")
+	g.app.Clipboard().SetContent("unchanged")
 	text.Tapped(&fyne.PointEvent{})
 
-	if got := g.app.Clipboard().Content(); !strings.Contains(got, "the first") {
-		t.Errorf("a tap copied %q, want the message", got)
+	if got := g.app.Clipboard().Content(); got != "unchanged" {
+		t.Errorf("a tap copied %q, want nothing", got)
 	}
 }
 

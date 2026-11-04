@@ -7,6 +7,9 @@ import (
 
 	"fyne.io/fyne/v2"
 	drivermobile "fyne.io/fyne/v2/driver/mobile"
+	"fyne.io/fyne/v2/test"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // chatRowWithMessage puts one line in the transcript and returns the text
@@ -34,23 +37,97 @@ func chatRowWithMessage(t *testing.T, mobile bool) (*gui, fyne.CanvasObject) {
 	return g, row
 }
 
-// Tapping a chat row copies the message: the gesture the transcript teaches,
-// and the reason the row carries a tap at all (#231). The sender is not part of
-// the copy (#474).
-//
-// The click is delivered the way the toolkit delivers one. On a desktop the
-// row's selectable label keeps a child deeper than the widget that binds the
-// tap, so the click used to die there and the clipboard stayed empty (#280).
-func TestChatRowCopiesWhenClickedOnADesktop(t *testing.T) {
+// Tapping a chat row no longer copies: a copy is asked for — the row's own
+// button, the header's Copy all, or by selecting the text — and a tap is a place
+// to start a selection instead (#496). The click is delivered the way the
+// toolkit delivers one, so this also proves the row is still the tap target
+// (#280).
+func TestTappingAChatRowCopiesNothing(t *testing.T) {
 	g, row := chatRowWithMessage(t, false)
 
-	want := g.messages[0].copyText()
-	g.app.Clipboard().SetContent("")
-
+	g.app.Clipboard().SetContent("unchanged")
 	tapFromTheToolkit(t, g.win.Content(), row)
 
-	if got := g.app.Clipboard().Content(); got != want {
-		t.Errorf("clicking a chat row copied %q, want %q", got, want)
+	if got := g.app.Clipboard().Content(); got != "unchanged" {
+		t.Errorf("a tap on a row copied %q, want nothing", got)
+	}
+}
+
+// The tap still marks a range: with Select on, the row is the handle a thumb can
+// hit, and removing the copy must not take that with it (#496).
+func TestATapStillMarksARangeWhileSelecting(t *testing.T) {
+	g, row := chatRowWithMessage(t, false)
+
+	g.beginSelection()
+	tapFromTheToolkit(t, g.win.Content(), row)
+
+	if g.sel.anchor != 0 {
+		t.Errorf("the tap marked anchor %d, want the first message", g.sel.anchor)
+	}
+}
+
+// rowCopyButton finds the copy button on a row: the button that is not the eye.
+func rowCopyButton(t *testing.T, row fyne.CanvasObject) *widgets.CopyButton {
+	t.Helper()
+
+	eye := rowReveal(t, row)
+
+	box, ok := row.(*fyne.Container)
+	if !ok {
+		t.Fatalf("row is %T, want a container", row)
+	}
+
+	caption, ok := box.Objects[0].(*fyne.Container)
+	if !ok {
+		t.Fatalf("row[0] is %T, want the caption cell", box.Objects[0])
+	}
+
+	var found *widgets.CopyButton
+
+	var walk func(object fyne.CanvasObject)
+
+	walk = func(object fyne.CanvasObject) {
+		switch part := object.(type) {
+		case *widgets.CopyButton:
+			if part != eye {
+				found = part
+			}
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				walk(child)
+			}
+		}
+	}
+
+	walk(caption)
+
+	if found == nil {
+		t.Fatal("the row carries no copy button")
+	}
+
+	return found
+}
+
+// Every row copies its own message, and only its own (#496).
+func TestEachRowCopiesItsOwnMessage(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{from: "laptop", text: "the first"}, {from: "laptop", text: "the second"}}
+	g.mu.Unlock()
+
+	for id := range g.messages {
+		want := g.messages[id].copyText()
+
+		row := g.chatList.CreateItem()
+		g.updateChatRow(id, row)
+
+		g.app.Clipboard().SetContent("")
+		test.Tap(rowCopyButton(t, row))
+
+		if got := g.app.Clipboard().Content(); got != want {
+			t.Errorf("row %d copied %q, want %q", id, got, want)
+		}
 	}
 }
 
@@ -167,15 +244,15 @@ func TestATapWithTheKeyboardUpDoesNotCopy(t *testing.T) {
 }
 
 // On a desktop there is no keyboard to put away: a click on a row still copies.
-func TestAClickOnADesktopCopiesEvenWithTheComposerFocused(t *testing.T) {
+func TestAClickOnARowCopiesNothingEvenWithTheComposerFocused(t *testing.T) {
 	g, _ := chatRowWithMessage(t, false)
 
 	g.win.Canvas().Focus(g.entry)
-	g.app.Clipboard().SetContent("")
+	g.app.Clipboard().SetContent("unchanged")
 
 	g.selectChatRow(0)
 
-	if got := g.app.Clipboard().Content(); got == "" {
-		t.Error("a desktop click copied nothing while the composer had focus")
+	if got := g.app.Clipboard().Content(); got != "unchanged" {
+		t.Errorf("a click on a row copied %q with the composer focused, want nothing", got)
 	}
 }
