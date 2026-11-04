@@ -106,6 +106,44 @@ screenshots of both first-contact screens.
 shown or downloaded, and the exact wording of any failure. Report it on
 [#470](https://github.com/fiwon123/cthrone/issues/470).
 
+## The phone's transcript — [#469](https://github.com/fiwon123/cthrone/issues/469), [#474](https://github.com/fiwon123/cthrone/issues/474)
+
+**You need:** the APK on a phone, and a desktop connected to it.
+
+1. From the desktop, send three messages: two ordinary ones, and one you will
+   want to hide (`hunter2` will do).
+2. **Tap a message.** Paste it somewhere — the composer, or your notes app: the
+   text arrives **without** `laptop:` in front of it. The sender stays on the
+   row, where it belongs.
+3. Scroll up, then have the desktop send another message. The view **stays**
+   where you put it and a way down appears; tap it and you are at the end again.
+4. Tap **Select**, then the first message, then the last. The range is marked,
+   and the header offers **Copy**, **Delete** and **Clear all**. Copy puts the
+   range on the clipboard, Delete removes it after asking, Clear all empties
+   the transcript after asking.
+5. Press the eye **in the composer** before typing, then send. The message is
+   masked on both screens. Press the eye on **its row** on the phone: it is
+   revealed here and stays masked on the desktop. A **tap** on a masked row
+   still copies its text, and a copy never carries the sender. Hidden is
+   presentation, not encryption: the peer and a websocket host can read it.
+6. Send a **PDF** and a **picture**. Each row reads *not saved*. Open **Files**:
+   the conversation lists both, with where each one is. **Save as…** asks where
+   to put it, and the row stops saying *not saved*.
+7. Turn on **Save received files automatically**, then send another file: no
+   dialog, and the row is saved when the transfer finishes. On a phone the
+   dialog's folder line and **Choose…** sit under one another; **Open folder**
+   is the desktop button, because a phone will not hand a private folder to the
+   file manager.
+8. With the keyboard up, type several lines: the **field** grows and then
+   scrolls, the buttons do not. **Attach** and the eye are on the left, **Send**
+   fills the rest of the row.
+
+**Write down:** phone model and Android version, the APK version from the About
+tab, which step went wrong and what it did instead, and a screenshot of the
+composer row with a multi-line draft in it. Report transcript behaviour on
+[#469](https://github.com/fiwon123/cthrone/issues/469) and the phone layout on
+[#474](https://github.com/fiwon123/cthrone/issues/474).
+
 ## The in-app player — [v0.12.0](https://github.com/fiwon123/cthrone/releases/tag/v0.12.0), tracked in [#155](https://github.com/fiwon123/cthrone/issues/155)
 
 **You need:** a desktop with a working sound server (PulseAudio or ALSA on

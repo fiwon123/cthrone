@@ -138,6 +138,14 @@ func (b *CopyButton) SetIcon(icon fyne.Resource) {
 	b.button.SetIcon(icon)
 }
 
+// Icon is the icon the button is showing, or nil when it has none. It lets a
+// caller ask before it sets: SetIcon re-themes the resource, and theming an SVG
+// parses it, which is far too much to pay on a row that is only being repainted
+// (#491).
+func (b *CopyButton) Icon() fyne.Resource {
+	return b.button.Icon
+}
+
 // SetCopyText changes what a long press copies, for a button whose label
 // changes with its state — "More options" and "Fewer options" are one button.
 func (b *CopyButton) SetCopyText(text string) {
