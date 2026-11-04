@@ -30,9 +30,27 @@ it, and **Open folder** is not offered — Android and iOS will not hand a priva
 folder to the file manager (#474).
 
 A picture the toolkit can decode is drawn inline under the caption, so a
-screenshot arrives as a picture rather than a filename. A file the app cannot
-draw — a PDF, an audio clip, an archive — shows an icon for its kind beside the
-caption, so two different files do not read as the same line.
+screenshot arrives as a picture rather than a filename. The drawing happens
+**off the interface thread**: the row first says *picture — loading…* and fills
+in a moment later, so scrolling onto a photo does not stall the window. A file
+the app cannot draw — a PDF, an audio clip, an archive — shows an icon for its
+kind beside the caption, so two different files do not read as the same line.
+
+A drawn picture also offers **Copy**: it puts the picture itself on the system
+clipboard, ready to paste into another app — no saving first. The toolkit this
+app is built on has no image clipboard, so the platform's own tool does it, and
+the row says so when that tool is missing:
+
+| Platform | What copies the picture |
+|---|---|
+| Linux (Wayland) | `wl-copy` |
+| Linux (X11) | `xclip` |
+| Windows | PowerShell, the .NET clipboard |
+| macOS | AppleScript, `osascript` |
+| Android | **not yet** — the app says so and points at **Save as…** |
+
+If nothing answers, the status line names the reason and **Save as…** still
+writes the file, which any other app can open.
 
 **Open** hands a file to whatever the device uses for that type. It is offered on
 a desktop, including for a file still waiting to be saved — the app's copy is on

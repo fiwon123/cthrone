@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+
+	"github.com/fiwon123/cthrone/ui/widgets"
 )
 
 // stopServer is a host the window can hold without listening on anything.
@@ -45,4 +48,127 @@ func TestTheChatHeaderDoesNotShowTheAppName(t *testing.T) {
 	if found := paintedText(g.win.Content(), "cthrone", 0); found != nil {
 		t.Error("the chat header still shows the app's name")
 	}
+}
+
+// inHeader reports whether the chat header paints obj.
+func inHeader(g *gui, obj fyne.CanvasObject) bool {
+	if g.headerHolder == nil || len(g.headerHolder.Objects) == 0 {
+		return false
+	}
+
+	var found bool
+
+	var walk func(fyne.CanvasObject)
+	walk = func(object fyne.CanvasObject) {
+		if object == obj {
+			found = true
+
+			return
+		}
+
+		if part, ok := object.(*fyne.Container); ok {
+			for _, child := range part.Objects {
+				walk(child)
+			}
+		}
+	}
+
+	walk(g.headerHolder.Objects[0])
+
+	return found
+}
+
+// The header holds transcript actions only: Stop moved to Setup, where ending a
+// session is as deliberate as starting one (#508).
+func TestTheHeaderHasNoStopAndOffersClearAll(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	if inHeader(g, g.stopBtn) {
+		t.Error("Stop is still in the chat header")
+	}
+
+	if g.stopBtn == nil || !g.stopBtn.Disabled() {
+		t.Error("Stop is not on Setup, disabled while nothing is running")
+	}
+
+	if !inHeader(g, g.clearAllBtn) {
+		t.Error("Clear all is not in the chat header")
+	}
+}
+
+// Clear all follows the transcript: off while there is nothing to clear.
+func TestClearAllIsOffOnAnEmptyTranscript(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	if !g.clearAllBtn.Disabled() {
+		t.Error("Clear all is enabled with an empty transcript")
+	}
+
+	g.mu.Lock()
+	g.messages = []chatMessage{{from: "laptop", text: "hello"}}
+	g.mu.Unlock()
+	g.updateButtons()
+
+	if g.clearAllBtn.Disabled() {
+		t.Error("Clear all is disabled although the transcript has a message")
+	}
+}
+
+// The selection header acts on the span only: Copy, Delete and Cancel. Clear all
+// is the header's own action now (#508).
+func TestTheSelectionHeaderKeepsThreeActions(t *testing.T) {
+	g := newScreenGUI(t, false)
+
+	if inHeader(g, g.clearAllBtn) == false {
+		t.Fatal("Clear all left the header")
+	}
+
+	var actions int
+
+	var walk func(fyne.CanvasObject)
+	walk = func(object fyne.CanvasObject) {
+		switch part := object.(type) {
+		case *widgets.CopyButton:
+			actions++
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				walk(child)
+			}
+		}
+	}
+
+	walk(g.selectHeader)
+
+	if actions != 3 {
+		t.Errorf("the selection header carries %d actions, want Copy, Delete and Cancel", actions)
+	}
+}
+
+// containsObject reports whether root paints obj, anywhere in its tree.
+func containsObject(root fyne.CanvasObject, obj fyne.CanvasObject) bool {
+	var found bool
+
+	var walk func(fyne.CanvasObject)
+	walk = func(object fyne.CanvasObject) {
+		if object == obj {
+			found = true
+
+			return
+		}
+
+		switch part := object.(type) {
+		case *fyne.Container:
+			for _, child := range part.Objects {
+				walk(child)
+			}
+		case *container.Scroll:
+			if part.Content != nil {
+				walk(part.Content)
+			}
+		}
+	}
+
+	walk(root)
+
+	return found
 }

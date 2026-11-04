@@ -42,7 +42,7 @@ func parentsOf(root fyne.CanvasObject) map[fyne.CanvasObject]fyne.CanvasObject {
 // Stop is a connection control, not a message action: a thumb aiming at Send
 // used to be able to end the session (#288). It sits in the chat header with the
 // other session controls, and Send keeps the composer row.
-func TestStopIsInTheHeaderAndNotBesideSend(t *testing.T) {
+func TestStopIsOnSetupAndNotBesideSend(t *testing.T) {
 	for _, mobile := range []bool{false, true} {
 		name := "desktop"
 		if mobile {
@@ -54,6 +54,12 @@ func TestStopIsInTheHeaderAndNotBesideSend(t *testing.T) {
 			g.win.Resize(fyne.NewSize(900, 640))
 			g.win.Content().Refresh()
 
+			// Stop ends a session, so it belongs with Host and Connect on Setup,
+			// not in the chat header a thumb reaches while reading (#508).
+			if inHeader(g, g.stopBtn) {
+				t.Fatal("Stop is in the chat header")
+			}
+
 			parents := parentsOf(g.win.Content())
 
 			header, ok := parents[g.stopBtn]
@@ -61,22 +67,19 @@ func TestStopIsInTheHeaderAndNotBesideSend(t *testing.T) {
 				t.Fatal("the Stop button is not in the painted tree")
 			}
 
-			// The state icon is the header's own object, which is what makes it
-			// a handle on the header without a new field (#453, #457).
-			if header != parents[g.stateGlyph] {
-				t.Errorf("Stop is in %T, not in the header with the state icon", header)
+			if header == parents[g.stateGlyph] {
+				t.Error("Stop is still in the state's row")
 			}
 
-			if parents[g.status] == header {
-				t.Error("the status line is still in the header; it belongs under the transcript")
+			if header == parents[g.sendBtn] {
+				t.Error("Stop is beside Send")
 			}
 
-			if parents[g.stopBtn] == parents[g.sendBtn] {
-				t.Error("Stop is still in the composer row beside Send")
-			}
-
-			if parents[g.attachBtn] == parents[g.stopBtn] {
-				t.Error("Stop is still beside Attach")
+			// It is inside the Setup tab, with the two buttons that start a
+			// session.
+			setup := g.tabs.Items[1].Content
+			if !containsObject(setup, g.stopBtn) {
+				t.Error("Stop is on no tab at all")
 			}
 		})
 	}

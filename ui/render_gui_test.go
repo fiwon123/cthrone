@@ -188,6 +188,8 @@ func TestChatRowReportsTransferProgress(t *testing.T) {
 // box. Aspect is what proves the decode happened — it stays zero when the
 // bytes are not an image.
 func TestChatRowDrawsADecodableImageInline(t *testing.T) {
+	decodePicturesInline(t)
+
 	path := writeTestPNG(t)
 
 	g := newTestGUI(t)
@@ -353,4 +355,42 @@ func TestStopLeavesNoDisconnectLine(t *testing.T) {
 	if after := len(g.messages); after != before {
 		t.Errorf("transcript grew from %d to %d messages after a user stop", before, after)
 	}
+}
+
+// decodePicturesInline makes a row paint its picture in the call that paints it,
+// with a stub thumbnail, and reports how many decodes happened. It is for tests
+// about what a row draws; the worker itself is tested in preview_gui_test.go.
+func decodePicturesInline(t *testing.T) *int {
+	t.Helper()
+
+	previousInline := inlinePictureDecode
+	inlinePictureDecode = true
+	t.Cleanup(func() { inlinePictureDecode = previousInline })
+
+	count := 0
+
+	previousDecode := decodeThumb
+	decodeThumb = func(string) (fyne.Resource, error) {
+		count++
+
+		return stubPicture(), nil
+	}
+	t.Cleanup(func() { decodeThumb = previousDecode })
+
+	return &count
+}
+
+// stubPicture is a one-pixel PNG: enough for a row to draw and to have a size.
+func stubPicture() fyne.Resource {
+	return fyne.NewStaticResource("stub.png", []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	})
 }
