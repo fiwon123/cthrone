@@ -8,7 +8,7 @@
 | 📋 **copy a part of the conversation** | **Select**, tap the first message, tap the last, **Copy** |
 | 📋 **copy everything** | **Copy all** in the chat header |
 | 🗑️ **delete a message** | **Select** it, then **Delete** |
-| 🧹 **start clean** | **Select**, then **Clear all** |
+| 🧹 **start clean** | **Clear all** in the chat header |
 | 🙈 **send a secret** | press the eye in the composer before typing |
 | 🙈 **show or hide it again** | press the eye on its row |
 
@@ -40,8 +40,11 @@ how many are selected, and it offers:
 
 - **Copy** — the selected messages' text, one per line;
 - **Delete** — remove it from this device;
-- **Clear all** — empty the transcript, after a confirmation;
 - **Cancel** — leave the selection without changing anything.
+
+**Clear all**, which empties the whole transcript, is a button in the chat
+header rather than one of these: selecting messages and emptying the conversation
+are different jobs.
 
 Either end can be tapped first. A single message is a range of one.
 
@@ -51,8 +54,9 @@ Either end can be tapped first. A single message is a range of one.
 saved takes the app's own staged copy with it; a file already saved, and a file
 this device sent, are never touched.
 
-**Clear all** is the "start clean" action: it empties the transcript after
-asking, cancels transfers still running, and removes the app's unsaved copies.
+**Clear all** in the chat header is the "start clean" action: it empties the
+transcript after asking, cancels transfers still running, and removes the app's
+unsaved copies.
 Saved files stay where they are.
 
 The transcript is held in memory. Closing the window ends it, and no history is

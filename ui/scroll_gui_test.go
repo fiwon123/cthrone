@@ -118,3 +118,48 @@ func TestThePerfLineSummarisesTheMessagePath(t *testing.T) {
 		t.Errorf("a line was written before the next block: %q", line)
 	}
 }
+
+// The way down is about where the reader is, not about whether a message
+// arrived: scrolling up shows it, and being at the end hides it (#508).
+func TestScrollingUpOffersTheWayDown(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.lastBottom = 400
+
+	withOffset(t, 0)
+	g.trackScroll()
+
+	if !g.jumpBtn.Visible() {
+		t.Error("a reader who scrolled up was offered no way back down")
+	}
+}
+
+func TestBeingAtTheEndHidesTheWayDown(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.lastBottom = 400
+	g.jumpBtn.Show()
+
+	withOffset(t, 400)
+	g.trackScroll()
+
+	if g.jumpBtn.Visible() {
+		t.Error("the way down is offered although the reader is at the end")
+	}
+}
+
+// A scroll further down is the new end, so a message arriving after it follows
+// (#508).
+func TestAReaderWhoScrolledDownIsAtTheEnd(t *testing.T) {
+	g := newScreenGUI(t, false)
+	g.lastBottom = 100
+
+	withOffset(t, 400)
+	g.trackScroll()
+
+	if g.lastBottom != 400 {
+		t.Fatalf("the end is recorded at %v, want the offset the reader reached", g.lastBottom)
+	}
+
+	if !g.atBottom() {
+		t.Error("a reader who reached the bottom is not treated as being there")
+	}
+}

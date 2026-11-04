@@ -194,10 +194,10 @@ type gui struct {
 	selectHeader *fyne.Container
 	selectBtn    *widgets.CopyButton
 	copyAllBtn   *widgets.CopyButton
+	clearAllBtn  *widgets.CopyButton
 	selCount     *widget.Label
 	selCopyBtn   *widgets.CopyButton
 	selDeleteBtn *widgets.CopyButton
-	selClearBtn  *widgets.CopyButton
 	selCancelBtn *widgets.CopyButton
 
 	// lastPick is the folder the last attached file came from: the picker opens
@@ -278,6 +278,9 @@ type gui struct {
 	// the end, and jumpBtn is the way back down when the reader is not there.
 	// A new message follows only if the reader was at the bottom (#434).
 	lastBottom float32
+
+	// scrollStop ends the scroll watcher when the window closes.
+	scrollStop chan struct{}
 	jumpBtn    *widgets.CopyButton
 
 	// video is the window's player for animated pictures (#421). Only one clip
@@ -440,6 +443,11 @@ func run() (err error) {
 	// A window that cannot be built has nothing to show, and a blank window is
 	// a worse answer than a report: the panic propagates to the recover above.
 	g.build()
+
+	// The way down follows the reader, not only the messages: Fyne's List keeps
+	// its own scroll callback, so the position is sampled (#508).
+	g.scrollStop = make(chan struct{})
+	go g.watchScroll()
 
 	// Closing the window is a stop. The desktop process exits anyway, but the
 	// phone can outlive its window: a listener left bound there makes the next
@@ -604,9 +612,9 @@ func (g *gui) build() {
 	filesBtn.SetText(filesLabel)
 
 	// Stop is a connection control, not a message action: it belongs with the
-	// session's state, not beside Send, where a thumb aiming at Send could end
-	// the connection (#288). It is built here, before the composer, so the
-	// header can hold it.
+	// session's own switches on Setup, where a thumb aiming at Send or at a row
+	// cannot reach it by mistake (#288, #508). The header still says whether a
+	// session is running, so stopping is not the only signal.
 	stopLabel := "Stop"
 	if g.lay.Stack {
 		stopLabel = ""
@@ -616,9 +624,14 @@ func (g *gui) build() {
 	g.stopBtn.SetText(stopLabel)
 	g.stopBtn.Disable()
 
-	// The way back to the end of the transcript: hidden while the reader is
-	// there, shown when a message arrives and the reader is not (#434).
-	g.jumpBtn = widgets.NewButtonWithIcon("", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
+	// The way back to the end of the transcript: it sits in a row of its own
+	// just above the composer, where the eye already is, and it is shown whenever
+	// the reader is somewhere up the history — not only when a message arrives
+	// (#434, #508).
+	g.jumpBtn = widgets.NewButtonWithIcon("Go to last message", theme.MoveDownIcon(), g.scrollToLatest, g.copyLabel)
+	if g.lay.Stack {
+		g.jumpBtn.SetText("")
+	}
 	g.jumpBtn.Hide()
 
 	// Copy all is the transcript action the older header dropped (#289): a
@@ -627,6 +640,12 @@ func (g *gui) build() {
 	g.copyAllBtn = widgets.NewButtonWithIcon("Copy all", theme.ContentCopyIcon(), g.copyAll, g.copyLabel)
 	g.copyAllBtn.Disable()
 
+	// Clear all is its own action, not a corner of the selection header: emptying
+	// the transcript is one press and one question, and selecting specific
+	// messages is a different job (#508).
+	g.clearAllBtn = widgets.NewButtonWithIcon("Clear all", theme.ContentClearIcon(), g.clearTranscript, g.copyLabel)
+	g.clearAllBtn.Disable()
+
 	// Select is the mobile-friendly copy gesture: two taps pick the ends of a
 	// span, and the header becomes the actions that span has (#469).
 	g.selectBtn = widgets.NewButtonWithIcon("Select", theme.ListIcon(), g.beginSelection, g.copyLabel)
@@ -634,15 +653,15 @@ func (g *gui) build() {
 
 	if g.lay.Stack {
 		g.copyAllBtn.SetText("")
+		g.clearAllBtn.SetText("")
 		g.selectBtn.SetText("")
 	}
 
 	header := container.NewHBox(g.stateGlyph, g.stateWord)
 	header.Add(layout.NewSpacer())
-	header.Add(g.jumpBtn)
 	header.Add(g.copyAllBtn)
+	header.Add(g.clearAllBtn)
 	header.Add(g.selectBtn)
-	header.Add(g.stopBtn)
 	header.Add(filesBtn)
 
 	// The selection header replaces the state row while a range is being built:
@@ -652,11 +671,10 @@ func (g *gui) build() {
 
 	g.selCopyBtn = widgets.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), g.copySelection, g.copyLabel)
 	g.selDeleteBtn = widgets.NewButtonWithIcon("Delete", theme.DeleteIcon(), g.deleteSelection, g.copyLabel)
-	g.selClearBtn = widgets.NewButtonWithIcon("Clear all", theme.ContentClearIcon(), g.clearTranscript, g.copyLabel)
 	g.selCancelBtn = widgets.NewButtonWithIcon("Cancel", theme.CancelIcon(), g.endSelection, g.copyLabel)
 
 	if g.lay.Stack {
-		for _, button := range []*widgets.CopyButton{g.selCopyBtn, g.selDeleteBtn, g.selClearBtn, g.selCancelBtn} {
+		for _, button := range []*widgets.CopyButton{g.selCopyBtn, g.selDeleteBtn, g.selCancelBtn} {
 			button.SetText("")
 		}
 	}
@@ -666,7 +684,6 @@ func (g *gui) build() {
 		layout.NewSpacer(),
 		g.selCopyBtn,
 		g.selDeleteBtn,
-		g.selClearBtn,
 		g.selCancelBtn,
 	)
 	g.selectHeader.Hide()
@@ -829,9 +846,13 @@ func (g *gui) build() {
 	// The status sits under the transcript, above the composer: it is a bar for
 	// what just happened, not a second header line. The header answers "where
 	// do I stand" with the state icon, and nothing else (#457).
+	// The way back down is a row of its own above the composer: centred, always
+	// in the same place, and away from the header's actions (#508).
+	jumpRow := container.NewHBox(layout.NewSpacer(), g.jumpBtn, layout.NewSpacer())
+
 	chat := container.NewBorder(
 		container.NewVBox(container.NewPadded(g.headerHolder), widget.NewSeparator()),
-		container.NewVBox(container.NewPadded(g.status), container.NewPadded(input)),
+		container.NewVBox(container.NewPadded(g.status), jumpRow, container.NewPadded(input)),
 		nil, nil,
 		g.chatList,
 	)
@@ -917,6 +938,9 @@ func (g *gui) build() {
 		g.forgetSecret,
 		widget.NewSeparator(),
 		actions,
+		// Stop lives here rather than in the chat header: ending a session is
+		// the same kind of decision as starting one (#508).
+		g.stopBtn,
 		g.thisDevice,
 		g.hint,
 	)))
@@ -1624,6 +1648,15 @@ func (g *gui) stop() {
 func (g *gui) shutdown() {
 	g.stopCopyHint()
 
+	g.mu.Lock()
+	stop := g.scrollStop
+	g.scrollStop = nil
+	g.mu.Unlock()
+
+	if stop != nil {
+		close(stop)
+	}
+
 	// The device goes back to the machine before the process does, and no
 	// widget is touched: there is no event loop left to return to.
 	g.stopAudio()
@@ -2310,6 +2343,18 @@ func (g *gui) updateButtons() {
 	// Copy all and Select act on the transcript, not on the connection: they
 	// work while offline, and only a conversation with something in it gives
 	// them something to act on (#469).
+	if g.clearAllBtn != nil {
+		g.mu.Lock()
+		empty := len(g.messages) == 0
+		g.mu.Unlock()
+
+		if empty {
+			g.clearAllBtn.Disable()
+		} else {
+			g.clearAllBtn.Enable()
+		}
+	}
+
 	if g.copyAllBtn != nil {
 		if hasMessages {
 			g.copyAllBtn.Enable()
@@ -2523,6 +2568,54 @@ func (g *gui) atBottom() bool {
 	}
 
 	return chatOffset(g.chatList) >= g.lastBottom-2
+}
+
+// scrollTick is how often the reader's position is looked at. It only decides
+// whether one button is visible, so it can be coarse.
+const scrollTick = 200 * time.Millisecond
+
+// trackScroll keeps the way down in step with where the reader is.
+//
+// Fyne's List keeps its own OnScrolled, so the position is sampled rather than
+// pushed: one comparison per tick decides whether the button is shown, and the
+// largest offset seen is remembered as the end, so atBottom is right after a
+// manual scroll too (#508).
+func (g *gui) trackScroll() {
+	if g.chatList == nil {
+		return
+	}
+
+	offset := chatOffset(g.chatList)
+	if offset > g.lastBottom {
+		g.lastBottom = offset
+	}
+
+	if g.jumpBtn == nil {
+		return
+	}
+
+	if offset < g.lastBottom-2 {
+		g.jumpBtn.Show()
+
+		return
+	}
+
+	g.jumpBtn.Hide()
+}
+
+// watchScroll samples the transcript's position until the window closes.
+func (g *gui) watchScroll() {
+	ticker := time.NewTicker(scrollTick)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-g.scrollStop:
+			return
+		case <-ticker.C:
+			fyne.Do(g.trackScroll)
+		}
+	}
 }
 
 // scrollToLatest takes the transcript to its end and remembers where that is.
