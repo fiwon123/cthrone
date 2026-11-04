@@ -253,6 +253,23 @@ func aboutHeading(t *testing.T, content fyne.CanvasObject) *widgets.Text {
 	return found
 }
 
+// hasGestureLayer reports whether a text is the object a press reaches: its
+// renderer stacks the label under a tap layer, and that layer is shown only when
+// the text takes a tap or allows selection.
+func hasGestureLayer(text *widgets.Text) bool {
+	objects := text.CreateRenderer().Objects()
+	if len(objects) == 0 {
+		return false
+	}
+
+	stack, ok := objects[0].(*fyne.Container)
+	if !ok || len(stack.Objects) < 2 {
+		return false
+	}
+
+	return stack.Objects[1].Visible()
+}
+
 // The version is text a user pastes into a report, so a long press on a phone
 // starts a selection; on a touch build a line with no tap action has no gesture
 // layer, and the press used to reach nothing at all (#497).
@@ -263,6 +280,10 @@ func TestTheAboutVersionCanBeSelectedOnAPhone(t *testing.T) {
 
 	if heading.Selectable() {
 		t.Fatal("the heading is selectable before any press, so this proves nothing")
+	}
+
+	if !hasGestureLayer(heading) {
+		t.Fatal("the version has no gesture layer, so a long press never reaches it")
 	}
 
 	heading.TappedSecondary(&fyne.PointEvent{AbsolutePosition: fyne.NewPos(10, 10)})
