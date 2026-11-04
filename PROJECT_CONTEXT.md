@@ -223,6 +223,18 @@ docker-compose.yml   the dev sandbox and a local NATS server
 
 ## Status
 
+- **The phone layout catches up with the transcript** (v0.17.1, #474): the
+  composer's actions are one row — attach and the password eye on the left,
+  **Send** filling the rest — and a multi-line message grows the field, not the
+  buttons. Every text row carries its own **eye**, so a message can be masked
+  on this screen alone, and a tap still copies it while masked. A copy takes the
+  message text alone: tap, selected range and **Copy all** no longer prefix the
+  sender. The **Files** dialog keeps **Open folder** for a desktop — Android and
+  iOS will not hand a private folder to the file manager — and on a phone puts
+  the full-width folder line and **Choose…** under one another. Hidden is still
+  presentation, not encryption. No transport, no wire format and no security
+  rule changed. The layout and the v0.17.1 APK are **not verified on a device**,
+  and #470's browser **Open** still owes a phone test.
 - **The transcript is the reader's to tidy** (v0.17.0, #469): **Copy all** is
   back, **Select** turns two taps (first and last) into a range that **Copy** or
   **Delete** acts on, and **Clear all** empties the transcript after asking. A
