@@ -113,8 +113,8 @@ func TestTheHeaderCarriesNoText(t *testing.T) {
 		t.Fatal("the state icon is not painted")
 	}
 
-	if parentsOf(g.win.Content())[g.stopBtn] != header {
-		t.Error("Stop is not in the same row as the state icon")
+	if inHeader(g, g.stopBtn) {
+		t.Error("Stop is in the header; it belongs on Setup (#508)")
 	}
 
 	if parentsOf(g.win.Content())[g.status] == header {
