@@ -91,7 +91,7 @@ WINDOWS_ARCHIVE_FILES := $(APP_NAME).exe $(APP_NAME_SHORT).exe $(SCRIPT_NAME).ba
 .PHONY: all windows linux android darwin zip_linux zip_windows zip_android clean release \
 	gui-linux gui-windows gui-darwin gui-android release-gui check assets winres-icon require-mingw \
 	help dev-up dev-down dev-shell dev-opencode dev-opencode-auto dev-log dev-build reset \
-	preflight require-agent prepare-agent-mounts check-identity opencode-version opencode-upgrade \
+	preflight prepare-agent-mounts check-identity \
 	shell opencode opencode-auto
 
 all: release
@@ -468,11 +468,6 @@ race: ## test with the race detector (needs a C compiler)
 # with a plain `docker compose up`, which needs no Make at all.
 # ---------------------------------------------------------------------------
 
-# Extra flags for the opencode invocation. `make opencode-auto` /
-# `make dev-opencode-auto` set this to --auto, which auto-approves permissions
-# that are not explicitly denied; the secret-file deny rules still apply.
-OPENCODE_ARGS ?=
-
 # --- Host identity -----------------------------------------------------------
 # Run bind-mounted dev services as the host developer instead of root. Derived
 # from the workspace OWNER, not the current process, so invoking make inside an
@@ -484,26 +479,64 @@ HOST_GID ?= $(shell stat -c '%g' . 2>/dev/null || stat -f '%g' . 2>/dev/null || 
 HOST_HOME ?= $(HOME)
 export HOST_UID HOST_GID HOST_HOME
 
-# --- Optional in-container agent ---------------------------------------------
-# Starting the sandbox never requires opencode. The agent layer is optional so
-# `make dev-up` works on macOS and Windows too, where the host binary cannot
-# execute inside the Linux container.
+# --- In-container AI agents --------------------------------------------------
+# opencode, Claude Code and Codex are installed in the dev image (pinned in
+# Dockerfile.template), so they run on every host OS and nothing here depends on
+# a host install. Each one asks for its own login on first run — an API key you
+# paste, or an account you sign in with — and keeps it in a named volume
+# (docker-compose.yml), so you sign in once per project, not once per start.
 #
-# NOTE: not named OPENCODE — the opencode runtime exports an OPENCODE env var
-# (=1), which would override a `?=` default through make's env import.
-OPENCODE_BIN ?= $(HOME)/.opencode/bin/opencode
+# Every agent has a plain target and an `-auto` target. The command lines are
+# variables so a project can change one without touching the recipe:
+#
+#   opencode --auto            approves what is not explicitly denied; the
+#                              secret-file deny rules in opencode.json still apply
+#   claude --permission-mode auto
+#                              approves what its safety review allows; the deny
+#                              rules in .claude/settings.json still apply
+#   codex --sandbox danger-full-access
+#                              Codex's own sandbox (bubblewrap) cannot create a
+#                              namespace inside an unprivileged container, so the
+#                              CONTAINER is the sandbox and Codex still asks first
+#   codex --dangerously-bypass-approvals-and-sandbox
+#                              no prompts at all — the flag Codex documents for an
+#                              externally sandboxed environment, which this is.
+#                              Codex has no file deny list: in this mode nothing
+#                              stops it reading `.env`. Use it where that is fine.
+#
+# Extra flags for one run: `make claude AGENT_ARGS="--model sonnet"`.
+OPENCODE_CMD      ?= opencode
+OPENCODE_AUTO_CMD ?= opencode --auto
+CLAUDE_CMD        ?= claude
+CLAUDE_AUTO_CMD   ?= claude --permission-mode auto
+CODEX_CMD         ?= codex --sandbox danger-full-access
+CODEX_AUTO_CMD    ?= codex --dangerously-bypass-approvals-and-sandbox
+AGENT_ARGS        ?=
 
-# The dev container is Linux, so only an ELF binary can execute inside it. A
-# macOS Mach-O or Windows PE install is detected here and skipped, instead of
-# being mounted and failing later with "exec format error".
-OPENCODE_MAGIC := $(shell head -c 4 "$(OPENCODE_BIN)" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
-AGENT_AVAILABLE := $(if $(filter 7f454c46,$(OPENCODE_MAGIC)),yes,no)
-
-ifeq ($(AGENT_AVAILABLE),yes)
+# The overlay carries only the host's gh config and ~/.gitconfig, and
+# `prepare-agent-mounts` creates both sources first, so it is always merged.
 COMPOSE_UP := docker compose -f docker-compose.yml -f docker-compose.agent.yml
-else
-COMPOSE_UP := docker compose
-endif
+
+# Python runs the agent-pin helper (`agents-upgrade`). Starting the sandbox
+# never needs it. Resolved with fallbacks: a Windows Python often provides only
+# `python` or the `py` launcher.
+PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null || command -v py 2>/dev/null)
+
+# --- Is the dev image current? -----------------------------------------------
+# `dev-up` does not rebuild, so an edited Dockerfile keeps running the old image
+# until someone remembers `make dev-build`. The image therefore carries a label
+# with a hash of the files it was built from, and the entry points refuse an
+# image whose label does not match the files on disk.
+#
+# IMAGE_INPUTS lists the Dockerfile and EVERY file it COPYs. Add a file here
+# when you add a COPY — `make check` compares the two. The hash is the first 16
+# hex digits of SHA-256 over the files in this order; scripts/dev-up.py computes
+# the same value, so both entry points agree on what "current" means.
+IMAGE_INPUTS ?= Dockerfile scripts/dev-sandbox-rc.sh
+IMAGE_INPUTS_HASH = $(shell cat $(IMAGE_INPUTS) 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)
+# Compose names a built image `<project>-<service>`; the project is `name:`.
+DEV_IMAGE ?= $(shell sed -n 's/^name:[[:space:]]*//p' docker-compose.yml | head -n 1)-dev
+
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -514,61 +547,96 @@ help: ## List the available targets
 # Refuses to start as root, and pre-creates the read-only mount sources the
 # agent overlay needs. Missing mount sources are fatal on Windows and create
 # root-owned directories on Linux, so they are created here rather than assumed.
-# This target NEVER fails on a missing or non-Linux agent binary: that is what
-# `require-agent` is for, and it is depended on only by the agent targets.
 preflight: check-identity prepare-agent-mounts
-	@if [ "$(AGENT_AVAILABLE)" = "yes" ]; then \
-	  echo "[sandbox] in-container agent available — merging docker-compose.agent.yml."; \
-	else \
-	  echo "[sandbox] in-container agent unavailable (no Linux binary at $(OPENCODE_BIN))." >&2; \
-	  echo "[sandbox]   Starting the sandbox without it." >&2; \
-	fi
 
 check-identity:
 	@test "$(HOST_UID)" != "0" || { echo "ERROR: refusing to run the dev sandbox as UID 0; repair workspace ownership or set HOST_UID to the host user." >&2; exit 1; }
 
 prepare-agent-mounts:
-	@if [ "$(AGENT_AVAILABLE)" = "yes" ]; then \
-	  mkdir -p "$(HOST_HOME)/.config/opencode" "$(HOST_HOME)/.config/gh" && touch "$(HOST_HOME)/.gitconfig"; fi
+	@mkdir -p "$(HOST_HOME)/.config/gh" && touch "$(HOST_HOME)/.gitconfig"
 
-# Only the agent-specific targets need the in-container binary.
-require-agent:
-	@test "$(AGENT_AVAILABLE)" = "yes" || { \
-	  echo "ERROR: the in-container AI agent needs a Linux opencode binary at $(OPENCODE_BIN)." >&2; \
-	  echo "  A macOS/Windows binary cannot execute inside the Linux dev container." >&2; \
-	  echo "  Recommended: use WSL2, where the host binary is Linux." >&2; \
-	  echo "  Alternative: run 'opencode' on the host against the running stack." >&2; \
-	  exit 1; }
-
-# The host owns the opencode binary; the dev sandbox mounts it read-only
-# (`~/.opencode/bin/opencode -> /usr/local/bin/opencode:ro`), so it can only be
-# upgraded here, on the host. A *file* bind mount pins the inode, so a running
-# sandbox keeps the old binary until it restarts — `opencode-upgrade` restarts
-# it for you. Override the install URL if your installer differs.
-OPENCODE_INSTALL_URL ?= https://opencode.ai/install
-
-opencode-version: ## Print the host opencode version
-	@command -v opencode >/dev/null 2>&1 || { echo "ERROR: opencode not on PATH — install it from $(OPENCODE_INSTALL_URL)" >&2; exit 1; }
-	@opencode --version
-
-opencode-upgrade: ## Upgrade host opencode and refresh the dev sandbox
-	@command -v opencode >/dev/null 2>&1 || { echo "ERROR: opencode not on PATH — install it from $(OPENCODE_INSTALL_URL)" >&2; exit 1; }
-	@echo "opencode before: $$(opencode --version 2>/dev/null || echo unknown)"
-	@opencode upgrade </dev/null || { echo "opencode upgrade unavailable — falling back to the install script"; curl -fsSL $(OPENCODE_INSTALL_URL) | bash; }
-	@echo "opencode after:  $$(opencode --version 2>/dev/null || echo unknown)"
-	@if [ -n "$$(docker compose ps -q dev 2>/dev/null)" ]; then \
-	  echo "restarting the dev sandbox so the bind-mounted binary refreshes..."; \
-	  docker compose restart dev; \
-	else \
-	  echo "dev sandbox not running — nothing to refresh"; \
+# Refuses a dev image that was built from different files than the ones on
+# disk (see IMAGE_INPUTS). A missing image is built — by `dev-build`, so it
+# carries the label. A mismatch is an error, not a rebuild: `dev-up` never
+# rebuilds behind your back, it tells you to.
+check-image:
+	@have="$$(docker image inspect --format '{{ index .Config.Labels "dev.image-inputs" }}' '$(DEV_IMAGE)' 2>/dev/null || true)"; \
+	if [ -z "$$have" ]; then \
+	  echo "[sandbox] no dev image yet — building it (this runs once)."; \
+	  $(MAKE) --no-print-directory dev-build; \
+	elif [ "$$have" != "$(IMAGE_INPUTS_HASH)" ]; then \
+	  echo "ERROR: the dev image is out of date: it was not built from the current $(IMAGE_INPUTS)." >&2; \
+	  echo "       (an edited Dockerfile, a bumped agent or toolchain pin, or an image built outside make dev-build)" >&2; \
+	  echo "       Rebuild it: make dev-build   — agent logins are kept, they live in volumes." >&2; \
+	  exit 1; \
 	fi
+
+# The value the image label is compared with. Printed for the launcher parity
+# check and for debugging a mismatch.
+image-inputs-hash:
+	@echo "$(IMAGE_INPUTS_HASH)"
+
+# What the RUNNING sandbox has: each agent's version and whether it is signed
+# in, then (with Python) each pin next to the vendor's latest release.
+agents-version: ## Show agent versions and logins in the sandbox, and the latest releases
+	@test -n "$$($(COMPOSE_UP) ps -q dev 2>/dev/null)" || { echo "ERROR: the dev sandbox is not running — start it with 'make dev-up'." >&2; exit 1; }
+	@$(COMPOSE_UP) exec -T dev bash /workspace/scripts/agents-status.sh
+	@if [ -n "$(PYTHON)" ]; then echo; $(PYTHON) scripts/agents-pin.py show; fi
+
+# Upgrading an agent = rewrite its pin in the Dockerfile to the vendor's latest
+# release (or AGENT_VERSION=X.Y.Z for one agent), rebuild, and re-create a
+# running sandbox on the new image. The pin change is an ordinary diff to
+# commit, so the whole project moves together. Logins live in volumes and
+# survive all of it.
+AGENTS_TO_UPGRADE ?=
+AGENT_VERSION ?=
+
+agents-upgrade: preflight ## Upgrade every agent to its latest release (keeps logins)
+	@test -n "$(PYTHON)" || { echo "ERROR: agents-upgrade needs python3 on the host to look up and rewrite the pins." >&2; exit 1; }
+	@$(PYTHON) scripts/agents-pin.py bump $(AGENTS_TO_UPGRADE) $(if $(AGENT_VERSION),--version $(AGENT_VERSION))
+	@$(MAKE) --no-print-directory dev-build
+	@if [ -n "$$($(COMPOSE_UP) ps -q dev 2>/dev/null)" ]; then \
+	  echo "[agents] re-creating the running sandbox on the new image (logins are kept)..."; \
+	  token="$$(scripts/resolve-gh-token.sh 2>/dev/null)"; \
+	  GH_TOKEN="$$token" GITHUB_TOKEN="$$token" $(COMPOSE_UP) up -d --force-recreate dev; \
+	  $(MAKE) --no-print-directory agents-version; \
+	fi
+	@echo "[agents] commit the Dockerfile pin change so the whole project upgrades with you."
+
+opencode-upgrade: AGENTS_TO_UPGRADE = opencode
+opencode-upgrade: agents-upgrade ## Upgrade opencode in the sandbox (AGENT_VERSION=X.Y.Z to pin one)
+claude-upgrade: AGENTS_TO_UPGRADE = claude
+claude-upgrade: agents-upgrade ## Upgrade Claude Code in the sandbox (AGENT_VERSION=X.Y.Z to pin one)
+codex-upgrade: AGENTS_TO_UPGRADE = codex
+codex-upgrade: agents-upgrade ## Upgrade Codex in the sandbox (AGENT_VERSION=X.Y.Z to pin one)
+
+# One look at everything the sandbox depends on. A failed item names its fix.
+# Logins are checked by each agent's own status command (exit code only) — no
+# credential is ever printed.
+doctor: ## Check Docker, the dev image, the sandbox, the GitHub token and each agent's login
+	@status=0; \
+	ok()   { printf '  ok    %s\n' "$$1"; }; \
+	bad()  { printf '  FAIL  %s\n' "$$1"; status=1; }; \
+	note() { printf '  --    %s\n' "$$1"; }; \
+	if docker info >/dev/null 2>&1; then ok "Docker is running"; else bad "Docker is not reachable — start Docker Desktop or the docker service"; fi; \
+	have="$$(docker image inspect --format '{{ index .Config.Labels "dev.image-inputs" }}' '$(DEV_IMAGE)' 2>/dev/null || true)"; \
+	if [ -z "$$have" ]; then note "no dev image yet — make dev-up builds it"; \
+	elif [ "$$have" = "$(IMAGE_INPUTS_HASH)" ]; then ok "dev image is current"; \
+	else bad "dev image is out of date — make dev-build"; fi; \
+	if [ -n "$$(scripts/resolve-gh-token.sh 2>/dev/null)" ]; then ok "GitHub token available (gh works in the sandbox)"; \
+	else note "no GitHub token — gh auth login on the host"; fi; \
+	if [ -n "$$($(COMPOSE_UP) ps -q dev 2>/dev/null)" ]; then \
+	  ok "sandbox is running"; \
+	  $(COMPOSE_UP) exec -T dev bash /workspace/scripts/agents-status.sh || status=1; \
+	else note "sandbox is not running — make dev-up (agent logins are checked while it runs)"; fi; \
+	exit $$status
 
 # --- Sandbox lifecycle -------------------------------------------------------
 # HOST_UID/HOST_GID need no explicit export here: docker-compose.yml defaults
 # them, and the exported values above supply the host's real identity when make
 # is running on the host. Only the GitHub token is resolved at up-time.
-dev-up: preflight ## Start the dev sandbox (foreground; Ctrl+C stops it)
-	@GH_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) GITHUB_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) $(COMPOSE_UP) up --build dev
+dev-up: preflight check-image ## Start the dev sandbox (foreground; Ctrl+C stops it)
+	@GH_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) GITHUB_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) $(COMPOSE_UP) up dev
 
 dev-down: ## Stop the dev sandbox (keeps volumes)
 	@docker compose down
@@ -577,7 +645,7 @@ dev-log: ## Tail dev sandbox logs
 	@docker compose logs -f dev
 
 dev-build: check-identity ## Rebuild the dev image after Dockerfile/dependency changes
-	@docker compose build dev
+	@docker compose build --build-arg DEV_IMAGE_INPUTS=$(IMAGE_INPUTS_HASH) dev
 
 reset: ## Stop everything and wipe volumes (clean slate)
 	@docker compose down -v
@@ -585,18 +653,48 @@ reset: ## Stop everything and wipe volumes (clean slate)
 shell: dev-shell
 opencode: dev-opencode
 opencode-auto: dev-opencode-auto
+claude: dev-claude
+claude-auto: dev-claude-auto
+codex: dev-codex
+codex-auto: dev-codex-auto
 
-dev-shell: preflight ## Open a shell inside the dev sandbox
+dev-shell: preflight check-image ## Open a shell inside the dev sandbox
 	@$(COMPOSE_UP) exec dev bash || $(COMPOSE_UP) run --rm dev bash
 
-dev-opencode: preflight require-agent ## Run the AI coding agent inside the dev sandbox
-	@if [ -z "$$(docker compose ps -q dev 2>/dev/null)" ]; then echo "[opencode] starting dev stack..."; GH_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) GITHUB_TOKEN=$$(scripts/resolve-gh-token.sh 2>/dev/null) $(COMPOSE_UP) up -d dev; fi
-	@if [ -t 0 ]; then $(COMPOSE_UP) exec -it dev zsh -lc "cd /workspace && opencode $(OPENCODE_ARGS)" || $(COMPOSE_UP) exec -it dev bash -lc "opencode $(OPENCODE_ARGS)"; else $(COMPOSE_UP) exec -T dev zsh -lc "cd /workspace && opencode $(OPENCODE_ARGS)" || $(COMPOSE_UP) exec -T dev bash -lc "opencode $(OPENCODE_ARGS)"; fi
+.PHONY: dev-agent dev-opencode dev-opencode-auto dev-claude dev-claude-auto dev-codex dev-codex-auto \
+        opencode opencode-auto claude claude-auto codex codex-auto agents-version agents-upgrade \
+        opencode-upgrade claude-upgrade codex-upgrade doctor check-image image-inputs-hash \
+        preflight check-identity prepare-agent-mounts
 
-# Same recipe, with --auto: auto-approve permissions that are not explicitly
-# denied (every secret-file deny rule still applies).
-dev-opencode-auto: OPENCODE_ARGS = --auto
-dev-opencode-auto: dev-opencode
+# One recipe for every agent; the targets below only choose AGENT_CMD (a
+# target-specific variable, which make passes down to this prerequisite).
+#
+# The sandbox is started if it is not running, WITHOUT --force-recreate: a
+# running sandbox is left alone, so an agent already working in it keeps its
+# session. The agent's exit status is the recipe's — no fallback re-runs it in
+# another shell when it exits non-zero.
+dev-agent: preflight check-image
+	@test -n "$(AGENT_CMD)" || { echo "ERROR: run an agent target (make opencode, make claude-auto, ...), not dev-agent." >&2; exit 1; }
+	@if [ -z "$$($(COMPOSE_UP) ps -q dev 2>/dev/null)" ]; then \
+	  echo "[agent] starting the dev sandbox..."; \
+	  token="$$(scripts/resolve-gh-token.sh 2>/dev/null)"; \
+	  GH_TOKEN="$$token" GITHUB_TOKEN="$$token" $(COMPOSE_UP) up -d dev; fi
+	@bin="$(firstword $(AGENT_CMD))"; \
+	 tty="-T"; if [ -t 0 ]; then tty="-it"; fi; \
+	 $(COMPOSE_UP) exec $$tty dev zsh -lc "cd /workspace && if ! command -v $$bin >/dev/null; then echo \"ERROR: $$bin is not installed in this image — add it to SANDBOX_AGENTS in the Dockerfile, then make dev-build.\" >&2; exit 127; fi; exec $(AGENT_CMD) $(AGENT_ARGS)"
+
+dev-opencode: AGENT_CMD = $(OPENCODE_CMD)
+dev-opencode: dev-agent ## Run opencode inside the dev sandbox
+dev-opencode-auto: AGENT_CMD = $(OPENCODE_AUTO_CMD)
+dev-opencode-auto: dev-agent ## Run opencode in auto mode inside the dev sandbox
+dev-claude: AGENT_CMD = $(CLAUDE_CMD)
+dev-claude: dev-agent ## Run Claude Code inside the dev sandbox
+dev-claude-auto: AGENT_CMD = $(CLAUDE_AUTO_CMD)
+dev-claude-auto: dev-agent ## Run Claude Code in auto mode inside the dev sandbox
+dev-codex: AGENT_CMD = $(CODEX_CMD)
+dev-codex: dev-agent ## Run Codex inside the dev sandbox (the container is its sandbox)
+dev-codex-auto: AGENT_CMD = $(CODEX_AUTO_CMD)
+dev-codex-auto: dev-agent ## Run Codex with no approval prompts inside the dev sandbox
 
 # Generate logo assets from SVG master
 #

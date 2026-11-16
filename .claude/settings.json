@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/.envrc)",
+      "Edit(**/.env)",
+      "Edit(**/.env.*)",
+      "Edit(**/.envrc)",
+      "Bash(printenv)",
+      "Bash(printenv *)",
+      "Bash(env)",
+      "Bash(env *)",
+      "Bash(docker compose config)",
+      "Bash(docker compose config *)",
+      "Bash(docker-compose config)",
+      "Bash(docker-compose config *)",
+      "Bash(docker inspect *)",
+      "Bash(docker compose exec * env)",
+      "Bash(docker compose run * env)",
+      "Bash(* .env)",
+      "Bash(* .env *)",
+      "Bash(* .env.*)",
+      "Bash(*/.env)",
+      "Bash(*/.env *)",
+      "Bash(*/.env.*)",
+      "Bash(* .envrc)",
+      "Bash(* .envrc *)",
+      "Bash(*/.envrc)"
+    ]
+  }
+}
