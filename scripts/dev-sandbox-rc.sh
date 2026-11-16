@@ -23,6 +23,9 @@ unset __mise_shims
 
 if [ -n "$ZSH_VERSION" ]; then
     __sandbox_set_title() {
+        # No terminal, no title: this runs in non-interactive login shells too,
+        # and an OSC escape on a pipe becomes part of the command's output.
+        [ -t 1 ] || return 0
         printf '\033]0;[SANDBOX] cthrone — %s\007' "${PWD:t}"
     }
     if [[ $- == *i* ]]; then
@@ -36,6 +39,7 @@ if [ -n "$ZSH_VERSION" ]; then
 fi
 
 __sandbox_set_title() {
+    [ -t 1 ] || return 0
     printf '\033]0;[SANDBOX] cthrone — %s\007' "${PWD##*/}"
 }
 

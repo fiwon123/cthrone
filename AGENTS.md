@@ -244,7 +244,7 @@ about the sandbox made from inside it cannot be about the host's Docker.
 | Agent | Reads | Sandbox target | Auto mode |
 |---|---|---|---|
 | opencode | `AGENTS.md`, `opencode.json`, `.opencode/` | `make opencode` | `make opencode-auto` — `--auto`; `opencode.json` deny rules still apply |
-| Claude Code | `CLAUDE.md` (imports this file and the instructions), `.claude/settings.json` | `make claude` | `make claude-auto` — `--permission-mode auto`; `.claude/settings.json` deny rules still apply |
+| Claude Code | `CLAUDE.md` (imports this file and the instructions), `.claude/settings.json` | `make claude` | `make claude-auto` — `--dangerously-skip-permissions`: no prompts, the container is the boundary; `.env` Read/Edit deny rules still apply |
 | Codex | `AGENTS.md` | `make codex` | `make codex-auto` — no approval prompts, **and no file deny list** |
 
 - **Every agent follows the same instruction files**, whichever one you run:
