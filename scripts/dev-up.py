@@ -136,7 +136,7 @@ def compose_path(value: Path | str) -> str:
 # unprivileged container, so the container is its sandbox in both modes.
 AGENTS: dict[str, dict[str, list[str]]] = {
     "opencode": {"plain": ["opencode"], "auto": ["opencode", "--auto"]},
-    "claude": {"plain": ["claude"], "auto": ["claude", "--permission-mode", "auto"]},
+    "claude": {"plain": ["claude"], "auto": ["claude", "--dangerously-skip-permissions"]},
     "codex": {
         "plain": ["codex", "--sandbox", "danger-full-access"],
         "auto": ["codex", "--dangerously-bypass-approvals-and-sandbox"],
