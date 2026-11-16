@@ -70,6 +70,13 @@ services:
       # the whole dependency set and re-compiles the standard library.
       - gomodcache:/go/pkg/mod
       - gocache:/home/devuser/.cache/go-build
+      # The AI agents' own state — the login each one asks for on first run,
+      # plus its sessions. Named volumes outlive the container, so dev-up,
+      # dev-restart and dev-build keep you signed in; only `down --volumes`
+      # signs you out. Nothing comes from the host; no key passes through here.
+      - opencode-data:/home/devuser/.local/share/opencode
+      - claude-config:/home/devuser/.claude
+      - codex-home:/home/devuser/.codex
     tty: true
     stdin_open: true
 
@@ -101,5 +108,8 @@ services:
       - ./nats.conf:/etc/nats/nats-server.conf:ro
 
 volumes:
+  opencode-data:
+  claude-config:
+  codex-home:
   gomodcache:
   gocache:

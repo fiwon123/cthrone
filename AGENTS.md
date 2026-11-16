@@ -239,10 +239,47 @@ The container has **no Docker socket**: the agent inside it cannot manage
 containers, and that is deliberate. `docker` commands fail there, and a claim
 about the sandbox made from inside it cannot be about the host's Docker.
 
-The in-container agent needs a **Linux** opencode binary (the container is
-Linux). On macOS and native Windows, `make dev-opencode` refuses with a clear
-message and the agent stays on the host; use WSL2, where the host binary *is*
-Linux.
+### Agents and terminals
+
+| Agent | Reads | Sandbox target | Auto mode |
+|---|---|---|---|
+| opencode | `AGENTS.md`, `opencode.json`, `.opencode/` | `make opencode` | `make opencode-auto` — `--auto`; `opencode.json` deny rules still apply |
+| Claude Code | `CLAUDE.md` (imports this file and the instructions), `.claude/settings.json` | `make claude` | `make claude-auto` — `--dangerously-skip-permissions`: no prompts, the container is the boundary; `.env` Read/Edit deny rules still apply |
+| Codex | `AGENTS.md` | `make codex` | `make codex-auto` — no approval prompts, **and no file deny list** |
+
+- **Every agent follows the same instruction files**, whichever one you run:
+  `.opencode/instructions/workflow.md`, `testing.md` and `memory.md`, and the
+  skills under `.agents/skills/`. opencode loads them through
+  `opencode.json`, Claude Code through the imports in `CLAUDE.md`; any other
+  agent must read them at the start of a session. `.opencode/` is where they
+  live, not a statement about which agent runs.
+- **Sign in once per project.** Each agent asks for its login on first run —
+  paste an API key or sign in with an account — and writes it to its own state
+  directory, which is a named Docker volume (`docker-compose.yml`). It survives
+  `dev-up`, `dev-restart` and `dev-build`; only `make reset` (`down --volumes`)
+  signs you out. Nothing is mounted from the host and no key passes through a
+  compose variable, so a project's logins are isolated from the host's and from
+  every other project's.
+- **Codex runs without its own sandbox in the container.** Its sandbox
+  (bubblewrap) cannot create a namespace inside an unprivileged container, so
+  `make codex` passes `--sandbox danger-full-access` and the container is the
+  boundary. `make codex-auto` also skips the approval prompts. Codex has no
+  file deny list, so in that mode nothing stops it reading `.env`.
+- **Upgrading an agent is one command**: `make claude-upgrade` (or
+  `opencode-upgrade`, `codex-upgrade`, or `agents-upgrade` for all three) looks
+  up the vendor's latest release, rewrites the pin in the `Dockerfile`
+  (`CLAUDE_CODE_VERSION` and friends), rebuilds, and re-creates a running
+  sandbox. Logins are kept. `AGENT_VERSION=X.Y.Z` pins an exact version instead.
+  Commit the pin change, so the whole project moves together. `make
+  agents-version` shows what the sandbox runs next to the latest releases.
+  Drop an agent the project does not use from `SANDBOX_AGENTS`.
+- **A stale image is refused, not run.** `dev-up` does not rebuild, so the image
+  carries a hash of the files it was built from (`IMAGE_INPUTS`: the Dockerfile
+  and every file it COPYs). After an edit, `dev-up` and the agent targets stop
+  and name `make dev-build`. Add a file to `IMAGE_INPUTS` (and to the launcher's
+  list) when you add a `COPY`.
+- **`make doctor`** checks Docker, the image, the GitHub token, the sandbox and
+  every agent's login in one go, and names the fix for anything that fails.
 
 ### What the agent CAN do
 
@@ -561,7 +598,7 @@ instructions at all. If you add an agent, add its `.md` in the same commit.
 
 ### Skills
 
-- `github-workflow` ships in `.opencode/skills/github-workflow/SKILL.md` — the command cookbook for git, issues, and pull requests. `workflow.md` remains the policy authority; the skill is the quick reference.
+- `github-workflow` ships in `.agents/skills/github-workflow/SKILL.md` — the command cookbook for git, issues, and pull requests. `workflow.md` remains the policy authority; the skill is the quick reference.
 
 ### Session Memory (4-tier)
 
