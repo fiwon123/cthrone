@@ -56,3 +56,6 @@ go.work.sum
 
 # Generated resource for the Windows window build (moved into gui/ while it runs)
 /gui/rsrc_windows_amd64.syso
+
+# Claude Code per-user overrides — personal permission grants, never shared.
+.claude/settings.local.json

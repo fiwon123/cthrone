@@ -20,9 +20,9 @@
     .\scripts\dev-up.ps1 opencode
 
 .NOTES
-    The in-container AI agent needs a Linux opencode binary, which only exists
-    on Linux/WSL2. On native Windows, run `opencode` on the host against the
-    running stack.
+    The AI agents (opencode, claude, codex, and their -auto variants) are
+    installed in the dev image, so they run from native Windows too. Each asks
+    for its login once and keeps it in a Docker volume.
 #>
 [CmdletBinding()]
 param(

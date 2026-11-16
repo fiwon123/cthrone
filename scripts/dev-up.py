@@ -43,6 +43,7 @@ arguments starts the project. This script is for development.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -129,29 +130,18 @@ def compose_path(value: Path | str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def opencode_binary() -> Path:
-    override = os.environ.get("OPENCODE_BIN")
-    return Path(override) if override else host_home() / ".opencode" / "bin" / "opencode"
-
-
-def is_linux_binary(path: Path) -> bool:
-    """True when *path* is an ELF executable.
-
-    The dev container is Linux. A Windows ``.exe``/``.cmd`` or a macOS Mach-O
-    binary cannot execute there, so mounting one would only fail later with
-    ``exec format error``. The ELF magic check is what makes "the agent is
-    available" mean something true on every platform (including WSL2, whose
-    host filesystem carries the Linux binary).
-    """
-    try:
-        with path.open("rb") as handle:
-            return handle.read(4) == b"\x7fELF"
-    except OSError:
-        return False
-
-
-def agent_available() -> bool:
-    return is_linux_binary(opencode_binary())
+# The command line each agent starts with, plain and in auto mode. Mirrors the
+# Makefile's *_CMD variables — see the comment there for what each mode allows.
+# Codex's own sandbox (bubblewrap) cannot create a namespace inside an
+# unprivileged container, so the container is its sandbox in both modes.
+AGENTS: dict[str, dict[str, list[str]]] = {
+    "opencode": {"plain": ["opencode"], "auto": ["opencode", "--auto"]},
+    "claude": {"plain": ["claude"], "auto": ["claude", "--permission-mode", "auto"]},
+    "codex": {
+        "plain": ["codex", "--sandbox", "danger-full-access"],
+        "auto": ["codex", "--dangerously-bypass-approvals-and-sandbox"],
+    },
+}
 
 
 def compose_environment(*, with_github: bool) -> dict[str, str]:
@@ -168,17 +158,13 @@ def compose_environment(*, with_github: bool) -> dict[str, str]:
 
 
 def prepare_agent_mounts() -> None:
-    """Create the read-only mount sources Compose requires.
+    """Create the read-only mount sources the agent overlay requires.
 
     A missing bind-mount source is fatal on Windows and creates root-owned
-    directories on Linux, so these are made before Compose starts. No-op when
-    the agent is unavailable.
+    directories on Linux, so these are made before Compose starts.
     """
-    if not agent_available():
-        return
     home = host_home()
-    for directory in (home / ".config" / "opencode", home / ".config" / "gh"):
-        directory.mkdir(parents=True, exist_ok=True)
+    (home / ".config" / "gh").mkdir(parents=True, exist_ok=True)
     gitconfig = home / ".gitconfig"
     if not gitconfig.exists():
         gitconfig.touch()
@@ -322,19 +308,19 @@ def _ps_field(files: list[str], service: str, field: str) -> str:
     return lines[0].strip() if lines else ""
 
 
-def ensure_sandbox_running(*, agent: bool) -> None:
+def ensure_sandbox_running() -> None:
     """Bring the stack up without gratuitously rebuilding an existing image.
 
     Mirrors the Makefile's intent: build only when the sandbox was never
     initialized; otherwise reconcile and wait for readiness. A running stack is
     left completely untouched so a live `opencode` session is not clobbered.
     """
-    files = AGENT_COMPOSE if agent else BASE_COMPOSE
+    files = AGENT_COMPOSE
     state = _ps_field(files, DEV_SERVICE, "State")
 
     if not state:
         log("dev is not initialized yet - building and starting the stack (this runs once).")
-        run_compose(files, ["up", "-d", "--build", DEV_SERVICE])
+        run_compose(files, ["up", "-d", DEV_SERVICE])
     elif state == "running":
         log("dev is already running - skipping image build.")
     else:
@@ -364,11 +350,65 @@ def wait_for_dev(files: list[str], timeout: int = DEFAULT_WAIT_TIMEOUT) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Is the dev image current? (mirrors the Makefile's check-image)
+# ---------------------------------------------------------------------------
+
+# The Dockerfile and every file it COPYs — the SAME list, in the same order, as
+# IMAGE_INPUTS in the Makefile. `make check` compares the two hashes.
+IMAGE_INPUTS = ["Dockerfile", "scripts/dev-sandbox-rc.sh"]
+
+
+def image_inputs_hash() -> str:
+    """First 16 hex digits of SHA-256 over IMAGE_INPUTS, concatenated in order."""
+    digest = hashlib.sha256()
+    for rel in IMAGE_INPUTS:
+        path = REPO_ROOT / rel
+        if path.exists():
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
+def dev_image_name() -> str:
+    """Compose names a built image `<project>-<service>`; the project is `name:`."""
+    compose = REPO_ROOT / "docker-compose.yml"
+    text = compose.read_text(encoding="utf-8") if compose.exists() else ""
+    # Without `name:`, Compose names the project after the directory.
+    match = re.search(r"^name:\s*(\S+)", text, re.M)
+    return f"{match.group(1) if match else REPO_ROOT.name}-{DEV_SERVICE}"
+
+
+def image_label() -> str:
+    """The image's `dev.image-inputs` label; empty when the image does not exist."""
+    require_docker()
+    result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["docker", "image", "inspect", "--format",
+         '{{ index .Config.Labels "dev.image-inputs" }}', dev_image_name()],
+        capture_output=True, text=True, check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def check_image() -> None:
+    """Build a missing image; refuse a stale one by name (dev-up never rebuilds)."""
+    have = image_label()
+    if not have:
+        log("no dev image yet - building it (this runs once).")
+        if cmd_dev_build() != 0:
+            raise SystemExit(1)
+    elif have != image_inputs_hash():
+        error("the dev image is out of date: it was not built from the current "
+              + " ".join(IMAGE_INPUTS) + ".")
+        error("  (an edited Dockerfile, a bumped agent or toolchain pin, or an image built")
+        error("  outside dev-build) Rebuild it: dev-build - agent logins are kept in volumes.")
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
 
-def preflight(*, require_agent: bool) -> None:
+def preflight() -> None:
     if IS_POSIX and os.getuid() == 0:
         error(
             "refusing to run the dev sandbox as UID 0; repair workspace ownership "
@@ -381,32 +421,15 @@ def preflight(*, require_agent: bool) -> None:
     if not check_gh_token():
         raise SystemExit(1)
 
-    if require_agent and not agent_available():
-        error(f"the in-container AI agent needs a Linux opencode binary at {opencode_binary()}.")
-        if IS_WINDOWS:
-            error("  A Windows opencode install cannot execute inside the Linux container.")
-            error("  Recommended: use WSL2, where the host binary is Linux.")
-        elif sys.platform == "darwin":
-            error("  A macOS opencode binary cannot execute inside the Linux container.")
-        error("  Alternative: run 'opencode' on the host against the running stack.")
-        raise SystemExit(1)
 
     prepare_agent_mounts()
 
 
-def agent_note() -> None:
-    if agent_available():
-        log("sandboxed agent available - merging docker-compose.agent.yml.")
-    else:
-        log(f"in-container agent unavailable (no Linux binary at {opencode_binary()}).")
-        log("  Starting the application without it; run opencode on the host if needed.")
-
-
 def cmd_dev_up() -> int:
-    preflight(require_agent=False)
-    agent_note()
-    files = AGENT_COMPOSE if agent_available() else BASE_COMPOSE
-    result = run_compose(files, ["up", "--build", DEV_SERVICE], with_github=True)
+    preflight()
+    check_image()
+    files = AGENT_COMPOSE
+    result = run_compose(files, ["up", DEV_SERVICE], with_github=True)
     return result.returncode
 
 
@@ -416,14 +439,22 @@ def cmd_dev_down() -> int:
 
 
 def cmd_dev_restart() -> int:
-    preflight(require_agent=False)
-    agent_note()
-    files = AGENT_COMPOSE if agent_available() else BASE_COMPOSE
+    preflight()
+    files = AGENT_COMPOSE
     down = run_compose(BASE_COMPOSE, ["down"])
     if down.returncode != 0:
         return down.returncode
-    result = run_compose(files, ["up", "--build", DEV_SERVICE], with_github=True)
+    result = run_compose(files, ["up", DEV_SERVICE], with_github=True)
     return result.returncode
+
+
+def cmd_dev_build() -> int:
+    """Rebuild the dev image - the only path that does, mirroring `dev-build`."""
+    preflight()
+    files = AGENT_COMPOSE
+    return run_compose(
+        files, ["build", "--build-arg", f"DEV_IMAGE_INPUTS={image_inputs_hash()}", DEV_SERVICE]
+    ).returncode
 
 
 def cmd_dev_log() -> int:
@@ -432,27 +463,31 @@ def cmd_dev_log() -> int:
 
 
 def cmd_dev_exec() -> int:
-    preflight(require_agent=False)
-    ensure_sandbox_running(agent=agent_available())
+    preflight()
+    ensure_sandbox_running()
     return run_compose(
-        AGENT_COMPOSE if agent_available() else BASE_COMPOSE,
+        AGENT_COMPOSE,
         ["exec", DEV_SERVICE, "zsh"],
         with_github=True,
     ).returncode
 
 
-def _opencode_args(extra: list[str]) -> list[str]:
-    # Default matches `make opencode`: auto-approve prompts (trusted sandbox).
-    return extra if extra else ["--auto"]
+def cmd_agent(name: str, mode: str, extra: list[str]) -> int:
+    """Run one agent inside the sandbox, starting the sandbox if needed."""
+    preflight()
+    check_image()
+    ensure_sandbox_running()
 
-
-def cmd_opencode(extra: list[str]) -> int:
-    preflight(require_agent=True)
-    ensure_sandbox_running(agent=True)
-
-    # Shell-quote so values such as `-m provider/model` survive the zsh -lc layer.
-    quoted = " ".join(_shell_quote(part) for part in _opencode_args(extra))
-    remote = f"cd /workspace && opencode {quoted}".strip()
+    argv = [*AGENTS[name][mode], *extra]
+    # Shell-quote so values such as `--model provider/model` survive the zsh -lc layer.
+    quoted = " ".join(_shell_quote(part) for part in argv)
+    binary = AGENTS[name][mode][0]
+    remote = (
+        f"cd /workspace && if ! command -v {binary} >/dev/null; then "
+        f"echo 'ERROR: {binary} is not installed in this image - add it to "
+        f"SANDBOX_AGENTS in the Dockerfile, then run dev-build.' >&2; exit 127; fi; "
+        f"exec {quoted}"
+    )
 
     interactive = sys.stdin.isatty()
     exec_flag = "-it" if interactive else "-T"
@@ -464,11 +499,85 @@ def cmd_opencode(extra: list[str]) -> int:
 
 
 def cmd_shell() -> int:
-    preflight(require_agent=True)
-    ensure_sandbox_running(agent=True)
-    log("Dev sandbox shell - run the AI coding agent with:")
-    log("  cd /workspace && opencode")
+    preflight()
+    check_image()
+    ensure_sandbox_running()
+    log("Dev sandbox shell - run an agent with: opencode | claude | codex")
     return run_compose(AGENT_COMPOSE, ["exec", DEV_SERVICE, "zsh"], with_github=True).returncode
+
+
+def _sandbox_running() -> bool:
+    return _ps_field(AGENT_COMPOSE, DEV_SERVICE, "State") == "running"
+
+
+def cmd_agents_version() -> int:
+    """Each agent's version and login in the sandbox, then the latest releases."""
+    require_docker()
+    if not _sandbox_running():
+        error("the dev sandbox is not running - start it with: dev-up")
+        return 1
+    status = run_compose(
+        AGENT_COMPOSE, ["exec", "-T", DEV_SERVICE, "bash", "/workspace/scripts/agents-status.sh"]
+    ).returncode
+    print()
+    pin = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "agents-pin.py"), "show"], check=False)
+    return status or pin.returncode
+
+
+def cmd_agents_upgrade(args: list[str]) -> int:
+    """Bump the pins (latest, or --version X.Y.Z for one agent), rebuild, re-create."""
+    preflight()
+    bump = subprocess.run(  # noqa: S603 - fixed script, validated arguments
+        [sys.executable, str(REPO_ROOT / "scripts" / "agents-pin.py"), "bump", *args], check=False
+    )
+    if bump.returncode != 0:
+        return bump.returncode
+    built = cmd_dev_build()
+    if built != 0:
+        return built
+    if _sandbox_running():
+        log("re-creating the running sandbox on the new image (logins are kept)...")
+        up = run_compose(AGENT_COMPOSE, ["up", "-d", "--force-recreate", DEV_SERVICE], with_github=True)
+        if up.returncode != 0:
+            return up.returncode
+        cmd_agents_version()
+    log("commit the Dockerfile pin change so the whole project upgrades with you.")
+    return 0
+
+
+def cmd_doctor() -> int:
+    """Docker, the image, the token, the sandbox and each agent's login - one look."""
+    status = 0
+
+    def report(level: str, text: str) -> None:
+        print(f"  {level:<5} {text}")
+
+    docker_ok = bool(shutil.which("docker")) and subprocess.run(
+        ["docker", "info"], capture_output=True, check=False
+    ).returncode == 0
+    if docker_ok:
+        report("ok", "Docker is running")
+    else:
+        report("FAIL", "Docker is not reachable - start Docker Desktop or the docker service")
+        return 1
+    have = image_label()
+    if not have:
+        report("--", "no dev image yet - dev-up builds it")
+    elif have == image_inputs_hash():
+        report("ok", "dev image is current")
+    else:
+        report("FAIL", "dev image is out of date - dev-build")
+        status = 1
+    token, _source = resolve_gh_token()
+    report("ok" if token else "--", "GitHub token available" if token else "no GitHub token - gh auth login")
+    if _sandbox_running():
+        report("ok", "sandbox is running")
+        status |= run_compose(
+            AGENT_COMPOSE, ["exec", "-T", DEV_SERVICE, "bash", "/workspace/scripts/agents-status.sh"]
+        ).returncode
+    else:
+        report("--", "sandbox is not running - dev-up (agent logins are checked while it runs)")
+    return status
 
 
 def _shell_quote(value: str) -> str:
@@ -496,8 +605,14 @@ Commands:
   dev-restart            Stop, then up --build
   dev-log                Tail dev container logs
   dev-exec               Shell into the running dev container
-  opencode [args...]     Run the AI agent inside the dev container
-                         (default args: --auto)
+  opencode | claude | codex [args...]
+                         Run that agent inside the dev container
+  <agent>-auto [args...] The same agent in auto mode
+  agents-version         Each agent's version and login, and the latest releases
+  agents-upgrade [agent...] [--version X.Y.Z]
+                         Move the pins to the latest release and rebuild (logins kept)
+  doctor                 Check Docker, the image, the token, and every login
+  dev-build              Rebuild the dev image (the only command that builds)
   shell                  Interactive shell in the dev container (agent ready)
   help                   Show this message
 
@@ -506,22 +621,28 @@ Environment:
                          or 1000 on Windows where Docker Desktop virtualises it)
   HOST_HOME              Host home path (default: your home directory)
   HOST_PROJECT_DIR       Host repository path (default: this checkout)
-  OPENCODE_BIN           Path to a Linux opencode binary
   GH_TOKEN/GITHUB_TOKEN  GitHub credential forwarded into the sandbox
 
 Demo users do not need this script - run `docker compose up`.
-The in-container AI agent needs a Linux opencode binary (Linux/WSL2); on
-macOS and native Windows, run `opencode` on the host instead.
+The agents are installed in the image and run from every host OS.
 """
 
 COMMANDS = {
     "dev-up": cmd_dev_up,
     "dev-down": cmd_dev_down,
     "dev-restart": cmd_dev_restart,
+    "dev-build": cmd_dev_build,
     "dev-log": cmd_dev_log,
     "dev-exec": cmd_dev_exec,
-    "opencode": cmd_opencode,
     "shell": cmd_shell,
+    "agents-version": cmd_agents_version,
+    "doctor": cmd_doctor,
+}
+
+# `opencode`, `opencode-auto`, `claude`, ... — every agent, in both modes.
+AGENT_COMMANDS = {
+    **{name: (name, "plain") for name in AGENTS},
+    **{f"{name}-auto": (name, "auto") for name in AGENTS},
 }
 
 
@@ -531,14 +652,22 @@ def main(argv: list[str]) -> int:
         return 0
 
     command, *rest = argv
+    if command in AGENT_COMMANDS:
+        name, mode = AGENT_COMMANDS[command]
+        return cmd_agent(name, mode, rest)
+    if command == "agents-upgrade":
+        return cmd_agents_upgrade(rest)
+    if command.endswith("-upgrade") and command[: -len("-upgrade")] in AGENTS:
+        return cmd_agents_upgrade([command[: -len("-upgrade")], *rest])
+    if command == "image-inputs-hash":
+        print(image_inputs_hash())
+        return 0
     if command not in COMMANDS:
         error(f"unknown command '{command}'.")
         print(HELP, end="")
         return 2
 
     handler = COMMANDS[command]
-    if command == "opencode":
-        return handler(rest)
     if rest:
         error(f"'{command}' takes no arguments (got: {' '.join(rest)}).")
         return 2
