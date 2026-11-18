@@ -300,7 +300,10 @@ def run_compose(
 
 def _ps_field(files: list[str], service: str, field: str) -> str:
     result = run_compose(
-        files, ["ps", "--all", "--format", f"{{{{{field}}}}}", service], capture=True
+        # A Go template: `{{.State}}`. Without the dot Compose rejects it
+        # ("function "State" not defined"), every lookup reads as "not running",
+        # and each agent start waits the full timeout first.
+        files, ["ps", "--all", "--format", f"{{{{.{field}}}}}", service], capture=True
     )
     if result.returncode != 0:
         return ""
